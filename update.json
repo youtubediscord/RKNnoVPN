@@ -1,6 +1,6 @@
 {
-  "version": "v1.0.0",
-  "versionCode": 100,
-  "zipUrl": "https://github.com/youtubediscord/RKNnoVPN/releases/latest/download/privstack-v1.0.0-module.zip",
-  "changelog": "https://github.com/youtubediscord/RKNnoVPN/releases/latest"
+  "version": "v1.0.1",
+  "versionCode": 101,
+  "zipUrl": "https://github.com/youtubediscord/RKNnoVPN/releases/download/v1.0.1/privstack-v1.0.1-module.zip",
+  "changelog": "https://github.com/youtubediscord/RKNnoVPN/releases/tag/v1.0.1"
 }
