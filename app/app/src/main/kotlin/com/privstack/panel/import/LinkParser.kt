@@ -10,6 +10,7 @@ import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -407,7 +408,7 @@ object LinkParser {
                                     val host = params["host"]
                                     if (!host.isNullOrEmpty()) {
                                         putJsonArray("Host") {
-                                            host.split(",").forEach { add(it.trim()) }
+                                            host.split(",").forEach { add(JsonPrimitive(it.trim())) }
                                         }
                                     }
                                 }
@@ -434,7 +435,7 @@ object LinkParser {
                 val host = params["host"]
                 if (!host.isNullOrEmpty()) {
                     putJsonArray("host") {
-                        host.split(",").forEach { add(it.trim()) }
+                        host.split(",").forEach { add(JsonPrimitive(it.trim())) }
                     }
                 }
             }
@@ -468,7 +469,7 @@ object LinkParser {
             val alpn = params["alpn"]
             if (!alpn.isNullOrEmpty()) {
                 putJsonArray("alpn") {
-                    alpn.split(",").forEach { add(it.trim()) }
+                    alpn.split(",").forEach { add(JsonPrimitive(it.trim())) }
                 }
             }
 

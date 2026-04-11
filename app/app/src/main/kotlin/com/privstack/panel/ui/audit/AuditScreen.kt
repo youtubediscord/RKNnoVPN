@@ -101,6 +101,7 @@ private fun riskBgColor(risk: RiskLevel): Color = when (risk) {
 //  Root screen: two-tab pager (Audit | Advisor)
 // ───────────────────────────────────────────────────────────────────── //
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun AuditScreen(
     viewModel: AuditViewModel = hiltViewModel(),
