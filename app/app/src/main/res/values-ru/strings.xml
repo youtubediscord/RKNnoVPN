@@ -125,4 +125,21 @@
     <string name="settings_about">О приложении</string>
     <string name="about_version">Версия</string>
     <string name="about_github">GitHub</string>
+
+    <!-- Update -->
+    <string name="settings_update">Обновление</string>
+    <string name="update_current_version">Текущая версия</string>
+    <string name="update_status">Статус</string>
+    <string name="update_status_idle">Нажмите для проверки обновлений</string>
+    <string name="update_status_checking">Проверка…</string>
+    <string name="update_status_up_to_date">Обновлений нет</string>
+    <string name="update_status_available">Доступно обновление: %s</string>
+    <string name="update_status_downloading">Загрузка…</string>
+    <string name="update_status_downloaded">Готово к установке</string>
+    <string name="update_status_installing">Установка…</string>
+    <string name="update_status_installed">Установлено успешно</string>
+    <string name="update_changelog">Список изменений</string>
+    <string name="update_check_button">Проверить обновления</string>
+    <string name="update_download_button">Скачать</string>
+    <string name="update_install_button">Установить</string>
 </resources>

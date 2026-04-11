@@ -4,4 +4,4 @@ version=v1.0.0
 versionCode=100
 author=PrivStack
 description=Transparent proxy via tproxy+iptables with sing-box. No VpnService, no TUN.
-updateJson=
+updateJson=https://raw.githubusercontent.com/youtubediscord/RKNnoVPN/main/update.json

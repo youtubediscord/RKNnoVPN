@@ -126,4 +126,21 @@
     <string name="about_version">Version</string>
     <string name="about_github">GitHub</string>
     <string name="github_url">https://github.com/nickolay168/RKNnoVPN</string>
+
+    <!-- Update -->
+    <string name="settings_update">Update</string>
+    <string name="update_current_version">Current version</string>
+    <string name="update_status">Status</string>
+    <string name="update_status_idle">Tap to check for updates</string>
+    <string name="update_status_checking">Checking…</string>
+    <string name="update_status_up_to_date">Up to date</string>
+    <string name="update_status_available">Update available: %s</string>
+    <string name="update_status_downloading">Downloading…</string>
+    <string name="update_status_downloaded">Ready to install</string>
+    <string name="update_status_installing">Installing…</string>
+    <string name="update_status_installed">Installed successfully</string>
+    <string name="update_changelog">Changelog</string>
+    <string name="update_check_button">Check for updates</string>
+    <string name="update_download_button">Download</string>
+    <string name="update_install_button">Install</string>
 </resources>

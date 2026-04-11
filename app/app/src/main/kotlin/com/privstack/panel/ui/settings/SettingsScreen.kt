@@ -62,6 +62,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     Column(
@@ -198,6 +199,16 @@ fun SettingsScreen(
                 colors = transparentListItemColors(),
             )
         }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // ===== UPDATE =====
+        UpdateSection(
+            state = updateState,
+            onCheckForUpdates = viewModel::checkForUpdates,
+            onDownloadUpdate = viewModel::downloadUpdate,
+            onInstallUpdate = viewModel::installUpdate,
+        )
 
         Spacer(modifier = Modifier.height(20.dp))
 

@@ -18,6 +18,7 @@ import (
 	"github.com/privstack/daemon/internal/health"
 	"github.com/privstack/daemon/internal/ipc"
 	"github.com/privstack/daemon/internal/rescue"
+	"github.com/privstack/daemon/internal/updater"
 	"github.com/privstack/daemon/internal/watcher"
 )
 
@@ -349,6 +350,9 @@ func (d *daemon) registerHandlers() {
 	d.ipcServer.Register("config-import", d.handleConfigImport)
 	d.ipcServer.Register("logs", d.handleLogs)
 	d.ipcServer.Register("version", d.handleVersion)
+	d.ipcServer.Register("update-check", d.handleUpdateCheck)
+	d.ipcServer.Register("update-download", d.handleUpdateDownload)
+	d.ipcServer.Register("update-install", d.handleUpdateInstall)
 }
 
 // --------------------------------------------------------------------------
@@ -634,6 +638,111 @@ func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCEr
 		"version": version,
 		"go":      "1.22+",
 	}, nil
+}
+
+// --------------------------------------------------------------------------
+// Update handlers
+// --------------------------------------------------------------------------
+
+func (d *daemon) handleUpdateCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	info, err := updater.CheckForUpdate("v" + version)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: "update check failed: " + err.Error(),
+		}
+	}
+	return info, nil
+}
+
+func (d *daemon) handleUpdateDownload(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	// First, run a check to get the download URLs.
+	info, err := updater.CheckForUpdate("v" + version)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: "update check failed: " + err.Error(),
+		}
+	}
+
+	if !info.HasUpdate {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "no update available",
+		}
+	}
+
+	destDir := filepath.Join(d.dataDir, "update")
+	downloaded, err := updater.DownloadUpdate(info, destDir, func(downloaded, total int64) {
+		log.Printf("[updater] download progress: %d / %d bytes", downloaded, total)
+	})
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: "download failed: " + err.Error(),
+		}
+	}
+
+	return downloaded, nil
+}
+
+func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	// Parse optional params.
+	var p struct {
+		ModulePath string `json:"module_path"`
+		ApkPath    string `json:"apk_path"`
+	}
+	if params != nil {
+		_ = json.Unmarshal(*params, &p)
+	}
+
+	// Default paths if not specified.
+	updateDir := filepath.Join(d.dataDir, "update")
+	if p.ModulePath == "" {
+		p.ModulePath = filepath.Join(updateDir, "module.zip")
+	}
+	if p.ApkPath == "" {
+		p.ApkPath = filepath.Join(updateDir, "panel.apk")
+	}
+
+	result := map[string]interface{}{
+		"module_installed": false,
+		"apk_installed":    false,
+	}
+
+	// Stop subsystems before module update.
+	d.stopSubsystems()
+	if err := d.coreMgr.Stop(); err != nil {
+		log.Printf("[updater] warning: failed to stop core: %v", err)
+	}
+
+	// Install module (binaries + scripts + module files).
+	if _, err := os.Stat(p.ModulePath); err == nil {
+		moduleDir := "/data/adb/modules/privstack"
+		if err := updater.InstallModuleUpdate(p.ModulePath, d.dataDir, moduleDir); err != nil {
+			return nil, &ipc.RPCError{
+				Code:    ipc.CodeInternalError,
+				Message: "module install failed: " + err.Error(),
+			}
+		}
+		result["module_installed"] = true
+	}
+
+	// Install APK.
+	if _, err := os.Stat(p.ApkPath); err == nil {
+		if err := updater.InstallApkUpdate(p.ApkPath); err != nil {
+			log.Printf("[updater] APK install failed: %v", err)
+			result["apk_error"] = err.Error()
+		} else {
+			result["apk_installed"] = true
+		}
+	}
+
+	// Clean up downloaded files.
+	os.RemoveAll(updateDir)
+
+	result["status"] = "installed"
+	return result, nil
 }
 
 // --------------------------------------------------------------------------

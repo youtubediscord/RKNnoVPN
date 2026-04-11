@@ -135,6 +135,43 @@ class DaemonClient @Inject constructor(
             json.decodeFromJsonElement(ListSerializer(AppInfo.serializer()), it)
         }
 
+    // ---- Updates ----
+    // All network requests go through the daemon because the APK has NO
+    // INTERNET permission.
+
+    /** Check GitHub Releases for a newer version. */
+    suspend fun updateCheck(): DaemonClientResult<UpdateCheckInfo> =
+        call("update-check", timeoutMs = 30_000L) { element ->
+            val obj = element as JsonObject
+            UpdateCheckInfo(
+                currentVersion = obj["current_version"]?.jsonPrimitive?.content ?: "unknown",
+                latestVersion = obj["latest_version"]?.jsonPrimitive?.content ?: "unknown",
+                hasUpdate = obj["has_update"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+                changelog = obj["changelog"]?.jsonPrimitive?.content ?: "",
+            )
+        }
+
+    /** Download the latest module.zip + panel.apk to the daemon's update dir. */
+    suspend fun updateDownload(): DaemonClientResult<UpdateDownloadInfo> =
+        call("update-download", timeoutMs = 600_000L) { element ->
+            val obj = element as JsonObject
+            UpdateDownloadInfo(
+                modulePath = obj["module_path"]?.jsonPrimitive?.content ?: "",
+                apkPath = obj["apk_path"]?.jsonPrimitive?.content ?: "",
+                checksums = obj["checksums"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+            )
+        }
+
+    /** Install the previously downloaded module + APK. */
+    suspend fun updateInstall(): DaemonClientResult<UpdateInstallInfo> =
+        call("update-install", timeoutMs = 120_000L) { element ->
+            val obj = element as JsonObject
+            UpdateInstallInfo(
+                moduleInstalled = obj["module_installed"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+                apkInstalled = obj["apk_installed"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+            )
+        }
+
     // ---- Meta ----
 
     /** Get daemon and core version strings. */
@@ -219,4 +256,22 @@ data class VersionInfo(
     val daemonVersion: String,
     val coreVersion: String,
     val privctlVersion: String
+)
+
+data class UpdateCheckInfo(
+    val currentVersion: String,
+    val latestVersion: String,
+    val hasUpdate: Boolean,
+    val changelog: String,
+)
+
+data class UpdateDownloadInfo(
+    val modulePath: String,
+    val apkPath: String,
+    val checksums: Boolean,
+)
+
+data class UpdateInstallInfo(
+    val moduleInstalled: Boolean,
+    val apkInstalled: Boolean,
 )

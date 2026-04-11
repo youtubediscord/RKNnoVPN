@@ -216,6 +216,25 @@ jobs:
           # Generate checksums
           cd release && sha256sum * > SHA256SUMS.txt && cd ..
 
+      - name: Update update.json for Magisk manager
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION_CODE=$(echo "$VERSION" | sed 's/v//;s/\.//g')
+          cat > update.json <<ENDJSON
+          {
+            "version": "${VERSION}",
+            "versionCode": ${VERSION_CODE},
+            "zipUrl": "https://github.com/youtubediscord/RKNnoVPN/releases/download/${VERSION}/privstack-${VERSION}-module.zip",
+            "changelog": "https://github.com/youtubediscord/RKNnoVPN/releases/tag/${VERSION}"
+          }
+          ENDJSON
+          # Commit and push the updated update.json to main
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add update.json
+          git diff --cached --quiet || git commit -m "chore: update update.json for ${VERSION} [skip ci]"
+          git push origin HEAD:main
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
