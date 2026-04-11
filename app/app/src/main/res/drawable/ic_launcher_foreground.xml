@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Shield icon representing privacy/security -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,24L30,34v15c0,13.8 10.2,26.7 24,30 13.8,-3.3 24,-16.2 24,-30V34L54,24zM54,63.9C43.5,61 36,50.7 36,39.5V37.3l18,-7.5 18,7.5v2.2c0,11.2 -7.5,21.5 -18,24.4z"/>
+    <!-- Checkmark inside shield -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48.5,52.5L43,47l-2.5,2.5 8,8 16,-16 -2.5,-2.5z"/>
+</vector>
