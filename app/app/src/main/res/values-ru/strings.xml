@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PrivStack Panel</string>
+
+    <!-- Navigation -->
+    <string name="nav_dashboard">Главная</string>
+    <string name="nav_nodes">Серверы</string>
+    <string name="nav_apps">Приложения</string>
+    <string name="nav_settings">Настройки</string>
+
+    <!-- Connection states -->
+    <string name="state_disconnected">Отключено</string>
+    <string name="state_connecting">Подключение…</string>
+    <string name="state_connected">Подключено</string>
+    <string name="state_error">Ошибка</string>
+    <string name="state_unknown">Неизвестно</string>
+
+    <!-- Dashboard -->
+    <string name="status_connected">Подключено</string>
+    <string name="status_disconnected">Отключено</string>
+    <string name="action_connect">Подключить</string>
+    <string name="action_disconnect">Отключить</string>
+    <string name="label_uptime">Время работы</string>
+    <string name="label_upload">Отправлено</string>
+    <string name="label_download">Получено</string>
+    <string name="connect">Подключить</string>
+    <string name="disconnect">Отключить</string>
+    <string name="active_node">Активный сервер</string>
+    <string name="no_node_selected">Сервер не выбран</string>
+    <string name="egress_ip">Внешний IP</string>
+    <string name="latency">Задержка</string>
+    <string name="dns_status">DNS</string>
+    <string name="dns_ok">ОК</string>
+    <string name="dns_fail">Ошибка</string>
+    <string name="uptime">Время работы</string>
+    <string name="traffic">Трафик</string>
+    <string name="upload_short">TX</string>
+    <string name="download_short">RX</string>
+    <string name="speed_format">%s/с</string>
+    <string name="bytes_format">%s</string>
+    <string name="ms_format">%d мс</string>
+    <string name="unknown_ip">—</string>
+    <string name="pull_to_refresh">Потяните для обновления</string>
+
+    <!-- Nodes -->
+    <string name="action_add_node">Добавить узел</string>
+    <string name="action_scan_qr">Сканировать QR-код</string>
+    <string name="nodes_empty">Узлы не настроены.\nДобавьте узел через QR-код или буфер обмена.</string>
+    <string name="label_active_node">Активный узел</string>
+    <string name="add_node">Добавить сервер</string>
+    <string name="sort_by_name">Имя</string>
+    <string name="sort_by_latency">Задержка</string>
+    <string name="sort_by_country">Страна</string>
+    <string name="edit">Изменить</string>
+    <string name="copy_link">Копировать ссылку</string>
+    <string name="test_latency">Проверить задержку</string>
+    <string name="delete">Удалить</string>
+    <string name="delete_node_confirm">Удалить сервер \"%s\"?</string>
+    <string name="cancel">Отмена</string>
+    <string name="confirm">Подтвердить</string>
+    <string name="no_nodes">Серверов нет. Нажмите + чтобы добавить.</string>
+    <string name="link_copied">Ссылка скопирована</string>
+
+    <!-- Import sheet -->
+    <string name="import_nodes">Импорт серверов</string>
+    <string name="tab_paste_uri">Вставить URI</string>
+    <string name="tab_scan_qr">Сканировать QR</string>
+    <string name="tab_subscription">Подписка</string>
+    <string name="paste_uri_hint">Вставьте ссылки vless://, trojan://, ss://…</string>
+    <string name="detect_uris">Определить URI</string>
+    <string name="camera_placeholder">Здесь будет превью камеры</string>
+    <string name="subscription_url_hint">https://example.com/sub</string>
+    <string name="fetch">Загрузить</string>
+    <string name="import_selected">Импорт выбранных (%d)</string>
+    <string name="no_nodes_detected">Серверы не найдены</string>
+    <string name="nodes_detected">Найдено серверов: %d</string>
+
+    <!-- App picker -->
+    <string name="filter_system_apps">Системные приложения</string>
+    <string name="apps_empty">Приложения не найдены.\nУстановите демон для маршрутизации по приложениям.</string>
+    <string name="app_picker_title">Прокси для приложений</string>
+    <string name="app_picker_banner">Выбранные приложения работают через прокси. Остальные подключаются напрямую.</string>
+    <string name="template_browsers">Браузеры</string>
+    <string name="template_social">Соцсети</string>
+    <string name="template_streaming">Стриминг</string>
+    <string name="template_all_except_banks">Все кроме банков</string>
+    <string name="search_apps">Поиск приложений…</string>
+    <string name="show_system_apps">Системные приложения</string>
+    <string name="proxied_count">Через прокси: %d</string>
+    <string name="apply">Применить</string>
+    <string name="loading_apps">Загрузка приложений…</string>
+
+    <!-- Settings -->
+    <string name="settings_routing">Маршрутизация</string>
+    <string name="routing_global">Глобально</string>
+    <string name="routing_whitelist">Белый список</string>
+    <string name="routing_direct">Напрямую</string>
+    <string name="settings_dns">DNS</string>
+    <string name="dns_cloudflare">Cloudflare</string>
+    <string name="dns_google">Google</string>
+    <string name="dns_adguard">AdGuard</string>
+    <string name="dns_custom">Свой DoH</string>
+    <string name="dns_custom_hint">https://dns.example.com/dns-query</string>
+    <string name="settings_advanced">Расширенные</string>
+    <string name="fragment_toggle">Fragment</string>
+    <string name="mux_toggle">MUX</string>
+    <string name="log_level">Уровень лога</string>
+    <string name="settings_module">Модуль</string>
+    <string name="module_version">Версия</string>
+    <string name="daemon_status">Статус демона</string>
+    <string name="restart_daemon">Перезапустить</string>
+    <string name="settings_theme">Тема</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_dark">Тёмная</string>
+    <string name="theme_system">Системная</string>
+    <string name="settings_section_appearance">Внешний вид</string>
+    <string name="settings_dynamic_color">Динамические цвета</string>
+    <string name="settings_dynamic_color_desc">Использовать цвета Material You на основе обоев (Android 12+)</string>
+    <string name="settings_dark_mode">Тёмная тема</string>
+    <string name="settings_dark_mode_desc">Переопределить системную тему на тёмную</string>
+    <string name="settings_section_about">О приложении</string>
+    <string name="settings_version">Версия</string>
+    <string name="settings_licenses">Лицензии открытого ПО</string>
+    <string name="settings_licenses_desc">Посмотреть лицензии сторонних библиотек</string>
+    <string name="settings_about">О приложении</string>
+    <string name="about_version">Версия</string>
+    <string name="about_github">GitHub</string>
+</resources>

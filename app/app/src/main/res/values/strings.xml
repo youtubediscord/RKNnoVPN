@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PrivStack Panel</string>
+
+    <!-- Navigation -->
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_nodes">Nodes</string>
+    <string name="nav_apps">Apps</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Connection states -->
+    <string name="state_disconnected">Disconnected</string>
+    <string name="state_connecting">Connecting…</string>
+    <string name="state_connected">Connected</string>
+    <string name="state_error">Error</string>
+    <string name="state_unknown">Unknown</string>
+
+    <!-- Dashboard -->
+    <string name="status_connected">Connected</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="action_connect">Connect</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="label_uptime">Uptime</string>
+    <string name="label_upload">Upload</string>
+    <string name="label_download">Download</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="active_node">Active node</string>
+    <string name="no_node_selected">No node selected</string>
+    <string name="egress_ip">Egress IP</string>
+    <string name="latency">Latency</string>
+    <string name="dns_status">DNS</string>
+    <string name="dns_ok">OK</string>
+    <string name="dns_fail">Fail</string>
+    <string name="uptime">Uptime</string>
+    <string name="traffic">Traffic</string>
+    <string name="upload_short">TX</string>
+    <string name="download_short">RX</string>
+    <string name="speed_format">%s/s</string>
+    <string name="bytes_format">%s</string>
+    <string name="ms_format">%d ms</string>
+    <string name="unknown_ip">—</string>
+    <string name="pull_to_refresh">Pull to refresh</string>
+
+    <!-- Nodes -->
+    <string name="action_add_node">Add node</string>
+    <string name="action_scan_qr">Scan QR code</string>
+    <string name="nodes_empty">No nodes configured.\nAdd a node via QR code or clipboard.</string>
+    <string name="label_active_node">Active node</string>
+    <string name="add_node">Add node</string>
+    <string name="sort_by_name">Name</string>
+    <string name="sort_by_latency">Latency</string>
+    <string name="sort_by_country">Country</string>
+    <string name="edit">Edit</string>
+    <string name="copy_link">Copy link</string>
+    <string name="test_latency">Test latency</string>
+    <string name="delete">Delete</string>
+    <string name="delete_node_confirm">Delete node \"%s\"?</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm">Confirm</string>
+    <string name="no_nodes">No nodes yet. Tap + to add one.</string>
+    <string name="link_copied">Link copied</string>
+
+    <!-- Import sheet -->
+    <string name="import_nodes">Import nodes</string>
+    <string name="tab_paste_uri">Paste URI</string>
+    <string name="tab_scan_qr">Scan QR</string>
+    <string name="tab_subscription">Subscription</string>
+    <string name="paste_uri_hint">Paste vless://, trojan://, ss:// links…</string>
+    <string name="detect_uris">Detect URIs</string>
+    <string name="camera_placeholder">Camera preview will appear here</string>
+    <string name="subscription_url_hint">https://example.com/sub</string>
+    <string name="fetch">Fetch</string>
+    <string name="import_selected">Import selected (%d)</string>
+    <string name="no_nodes_detected">No valid nodes detected</string>
+    <string name="nodes_detected">%d nodes detected</string>
+
+    <!-- App picker -->
+    <string name="filter_system_apps">System apps</string>
+    <string name="apps_empty">No apps found.\nInstall the daemon to enable per-app routing.</string>
+    <string name="app_picker_title">Per-app proxy</string>
+    <string name="app_picker_banner">Selected apps route through proxy. Everything else connects directly.</string>
+    <string name="template_browsers">Browsers</string>
+    <string name="template_social">Social</string>
+    <string name="template_streaming">Streaming</string>
+    <string name="template_all_except_banks">All except banks</string>
+    <string name="search_apps">Search apps…</string>
+    <string name="show_system_apps">Show system apps</string>
+    <string name="proxied_count">%d proxied</string>
+    <string name="apply">Apply</string>
+    <string name="loading_apps">Loading apps…</string>
+
+    <!-- Settings -->
+    <string name="settings_routing">Routing</string>
+    <string name="routing_global">Global</string>
+    <string name="routing_whitelist">Whitelist</string>
+    <string name="routing_direct">Direct</string>
+    <string name="settings_dns">DNS</string>
+    <string name="dns_cloudflare">Cloudflare</string>
+    <string name="dns_google">Google</string>
+    <string name="dns_adguard">AdGuard</string>
+    <string name="dns_custom">Custom DoH</string>
+    <string name="dns_custom_hint">https://dns.example.com/dns-query</string>
+    <string name="settings_advanced">Advanced</string>
+    <string name="fragment_toggle">Fragment</string>
+    <string name="mux_toggle">MUX</string>
+    <string name="log_level">Log level</string>
+    <string name="settings_module">Module</string>
+    <string name="module_version">Version</string>
+    <string name="daemon_status">Daemon status</string>
+    <string name="restart_daemon">Restart</string>
+    <string name="settings_theme">Theme</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_system">System</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_dynamic_color">Dynamic color</string>
+    <string name="settings_dynamic_color_desc">Use Material You wallpaper-based colors (Android 12+)</string>
+    <string name="settings_dark_mode">Dark mode</string>
+    <string name="settings_dark_mode_desc">Override system theme to always use dark mode</string>
+    <string name="settings_section_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_licenses">Open-source licenses</string>
+    <string name="settings_licenses_desc">View third-party library licenses</string>
+    <string name="settings_about">About</string>
+    <string name="about_version">Version</string>
+    <string name="about_github">GitHub</string>
+    <string name="github_url">https://github.com/nickolay168/RKNnoVPN</string>
+</resources>

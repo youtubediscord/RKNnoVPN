@@ -1,0 +1,102 @@
+#!/system/bin/sh
+# ============================================================================
+# routing.sh — Policy routing setup for PrivStack
+# ============================================================================
+# Creates the ip-rule and ip-route entries that make TPROXY work.
+#
+# TPROXY-marked packets need to be routed to the local machine so the proxy
+# core can pick them up.  This script adds:
+#   - ip rule:  fwmark $FWMARK → lookup table $ROUTE_TABLE
+#   - ip route: local 0.0.0.0/0 dev lo  (in that table)
+#   - Same pair for IPv6.
+#   - Enables ip_forward (v4 + v6) so forwarded packets are not dropped.
+#   - Disables rp_filter (reverse-path filtering) which rejects TPROXY
+#     packets because their source address does not match the receiving
+#     interface.
+#
+# Environment (set by privd):
+#   FWMARK         — hex mark, e.g. 0x2023
+#   ROUTE_TABLE    — IPv4 table number, e.g. 2023
+#   ROUTE_TABLE_V6 — IPv6 table number, e.g. 2024
+# ============================================================================
+
+set -eu
+
+TAG="privstack:routing"
+
+FWMARK="${FWMARK:-0x2023}"
+ROUTE_TABLE="${ROUTE_TABLE:-2023}"
+ROUTE_TABLE_V6="${ROUTE_TABLE_V6:-2024}"
+
+log() { /system/bin/log -t "$TAG" -p i "$*"; }
+
+# ── start ───────────────────────────────────────────────────────────────────
+
+start() {
+    log "setting up policy routing (mark=$FWMARK, table=$ROUTE_TABLE/$ROUTE_TABLE_V6)"
+
+    # ── IPv4 ────────────────────────────────────────────────────────────
+    # Add fwmark rule only if it does not already exist (idempotent).
+    if ! ip rule show 2>/dev/null | grep -q "fwmark $FWMARK"; then
+        ip rule add fwmark "$FWMARK" table "$ROUTE_TABLE" pref 100
+    fi
+    # Local catch-all route — TPROXY packets are delivered to lo.
+    ip route add local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" 2>/dev/null || \
+        ip route replace local 0.0.0.0/0 dev lo table "$ROUTE_TABLE"
+
+    # ── IPv6 ────────────────────────────────────────────────────────────
+    if ! ip -6 rule show 2>/dev/null | grep -q "fwmark $FWMARK"; then
+        ip -6 rule add fwmark "$FWMARK" table "$ROUTE_TABLE_V6" pref 100
+    fi
+    ip -6 route add local ::/0 dev lo table "$ROUTE_TABLE_V6" 2>/dev/null || \
+        ip -6 route replace local ::/0 dev lo table "$ROUTE_TABLE_V6"
+
+    # ── IP forwarding ───────────────────────────────────────────────────
+    # Required for tethering and forwarded packets to traverse TPROXY.
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
+
+    # ── Reverse-path filter ─────────────────────────────────────────────
+    # TPROXY packets arrive with a foreign source address on lo, which
+    # rp_filter rightfully considers bogus.  Disable it.
+    echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
+    echo 0 > /proc/sys/net/ipv4/conf/default/rp_filter
+    # Also disable on every existing interface to be safe.
+    for f in /proc/sys/net/ipv4/conf/*/rp_filter; do
+        [ -w "$f" ] && echo 0 > "$f"
+    done
+
+    log "policy routing ready"
+}
+
+# ── stop ────────────────────────────────────────────────────────────────────
+
+stop() {
+    log "tearing down policy routing"
+
+    # ── IPv4 ────────────────────────────────────────────────────────────
+    ip rule  del fwmark "$FWMARK" table "$ROUTE_TABLE"    2>/dev/null || true
+    ip route del local 0.0.0.0/0 dev lo table "$ROUTE_TABLE" 2>/dev/null || true
+    # Flush the entire table to catch any stale entries.
+    ip route flush table "$ROUTE_TABLE" 2>/dev/null || true
+
+    # ── IPv6 ────────────────────────────────────────────────────────────
+    ip -6 rule  del fwmark "$FWMARK" table "$ROUTE_TABLE_V6" 2>/dev/null || true
+    ip -6 route del local ::/0 dev lo table "$ROUTE_TABLE_V6" 2>/dev/null || true
+    ip -6 route flush table "$ROUTE_TABLE_V6" 2>/dev/null || true
+
+    # NOTE: We intentionally do NOT restore ip_forward or rp_filter.
+    # Other subsystems (tethering, hotspot) may depend on forwarding being
+    # enabled, and toggling rp_filter mid-flight can cause brief
+    # connectivity drops.  The kernel defaults are restored on reboot.
+
+    log "policy routing torn down"
+}
+
+# ── main dispatch ───────────────────────────────────────────────────────────
+
+case "${1:-}" in
+    start) start ;;
+    stop)  stop  ;;
+    *)     echo "Usage: $0 {start|stop}" >&2; exit 1 ;;
+esac

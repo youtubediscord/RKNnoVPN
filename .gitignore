@@ -1,0 +1,24 @@
+# Build output
+out/
+module/binaries/
+
+# Android
+app/.gradle/
+app/build/
+app/app/build/
+app/local.properties
+*.apk
+
+# Go
+daemon/privd
+daemon/privctl
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+*.Zone.Identifier

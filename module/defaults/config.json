@@ -1,0 +1,50 @@
+{
+  "proxy": {
+    "mode": "tproxy",
+    "tproxy_port": 10853,
+    "dns_port": 10856,
+    "gid": 23333,
+    "mark": 8227
+  },
+  "transport": {
+    "core": "sing-box",
+    "log_level": "warning",
+    "sniff": true,
+    "sniff_override_destination": true
+  },
+  "node": [],
+  "routing": {
+    "mode": "whitelist",
+    "bypass_lan": true,
+    "bypass_china": false,
+    "custom_direct": [],
+    "custom_proxy": [],
+    "custom_block": []
+  },
+  "apps": {
+    "mode": "whitelist",
+    "list": []
+  },
+  "dns": {
+    "hijack_per_uid": true,
+    "proxy_dns": "https://1.1.1.1/dns-query",
+    "direct_dns": "https://dns.google/dns-query",
+    "block_quic_dns": true
+  },
+  "ipv6": {
+    "mode": "mirror"
+  },
+  "health": {
+    "enabled": true,
+    "interval_sec": 30,
+    "threshold": 3,
+    "check_url": "https://www.gstatic.com/generate_204",
+    "timeout_sec": 5
+  },
+  "rescue": {
+    "enabled": true,
+    "max_attempts": 3,
+    "cooldown_sec": 60
+  },
+  "autostart": true
+}

@@ -1,0 +1,108 @@
+# PrivStack SELinux policy rules
+# Grants required permissions for transparent proxy (tproxy + iptables)
+# Context: privstack daemon runs as root with magisk_file context
+
+# ---------------------------------------------------------------------------
+# 1. Network socket operations — TCP, UDP, raw, unix
+# ---------------------------------------------------------------------------
+
+# TCP sockets (outbound proxy connections)
+allow init self:tcp_socket { create connect read write getattr setattr listen accept bind getopt setopt shutdown ioctl };
+
+# UDP sockets (DNS, QUIC interception)
+allow init self:udp_socket { create connect read write getattr setattr bind getopt setopt shutdown ioctl };
+
+# Raw sockets (ICMP health checks, packet marking)
+allow init self:rawip_socket { create read write getattr setattr bind getopt setopt ioctl };
+
+# Unix domain sockets (daemon <-> controller IPC)
+allow init self:unix_stream_socket { create connect read write getattr setattr listen accept bind getopt setopt shutdown connectto ioctl };
+allow init self:unix_dgram_socket { create connect read write getattr setattr bind getopt setopt sendto ioctl };
+
+# ---------------------------------------------------------------------------
+# 2. Netfilter / iptables operations
+# ---------------------------------------------------------------------------
+
+# iptables and ip6tables use netlink sockets for nfnetlink
+allow init self:netlink_route_socket { create read write bind getattr setattr nlmsg_read nlmsg_write };
+allow init self:netlink_nflog_socket { create read write bind getattr setattr };
+allow init self:netlink_netfilter_socket { create read write bind getattr setattr };
+
+# Packet socket for tproxy
+allow init self:packet_socket { create read write bind getattr setattr ioctl };
+
+# TProxy: ability to set socket options SO_MARK and IP_TRANSPARENT
+allow init self:capability2 { syslog };
+
+# ---------------------------------------------------------------------------
+# 3. Capability grants
+# ---------------------------------------------------------------------------
+
+# net_admin  — iptables rules, ip rule/route, interface config
+# net_raw    — raw sockets, packet sockets, SO_MARK
+# net_bind_service — bind to ports < 1024 (DNS on 53 if needed)
+# setuid/setgid — drop privileges after setup
+# sys_resource — raise ulimit
+# kill — send signals to child processes
+allow init self:capability { net_admin net_raw net_bind_service setuid setgid sys_resource kill dac_override dac_read_search };
+
+# ---------------------------------------------------------------------------
+# 4. /proc/net access — required for connection tracking and routing
+# ---------------------------------------------------------------------------
+
+allow init proc_net:file { read open getattr };
+allow init proc_net:dir { read open search getattr };
+allow init proc:file { read open getattr };
+
+# /proc/sys/net — ip_forward, rp_filter tuning
+allow init proc_net:file { write };
+
+# ---------------------------------------------------------------------------
+# 5. packages_list_file — per-app routing via UID lookup
+# ---------------------------------------------------------------------------
+
+# /data/system/packages.list — maps package names to UIDs
+allow init packages_list_file:file { read open getattr };
+allow init packages_list_file:dir { read open search getattr };
+
+# ---------------------------------------------------------------------------
+# 6. File access for privstack data directory
+# ---------------------------------------------------------------------------
+
+# /data/adb/privstack/** — configs, binaries, logs, runtime
+allow init magisk_file:file { create read write open getattr setattr rename unlink execute execute_no_trans map };
+allow init magisk_file:dir { create read write open getattr setattr search add_name remove_name rmdir };
+allow init magisk_file:lnk_file { create read getattr setattr unlink };
+allow init magisk_file:sock_file { create read write open getattr setattr unlink };
+
+# /data/adb/privstack/run/daemon.sock — daemon control socket
+allow init magisk_file:unix_stream_socket { connectto };
+
+# ---------------------------------------------------------------------------
+# 7. Signal permissions — manage child processes (sing-box, health checker)
+# ---------------------------------------------------------------------------
+
+allow init self:process { signal sigkill sigstop sigchld setpgid setrlimit fork execmem setcurrent };
+
+# Signal to sing-box child process
+allow init init:process { signal sigkill };
+
+# ---------------------------------------------------------------------------
+# 8. Service and property access
+# ---------------------------------------------------------------------------
+
+# Read system properties (net.dns*, sys.boot_completed, etc.)
+allow init default_prop:property_service { set };
+allow init system_prop:file { read open getattr };
+
+# Execute binaries from our module path
+allow init system_file:file { execute execute_no_trans };
+allow init shell_exec:file { execute execute_no_trans };
+
+# ---------------------------------------------------------------------------
+# 9. Netlink and routing
+# ---------------------------------------------------------------------------
+
+# ip rule, ip route — tproxy routing table setup
+allow init self:netlink_route_socket { nlmsg_write };
+allow init self:netlink_xfrm_socket { create read write bind getattr setattr nlmsg_read nlmsg_write };

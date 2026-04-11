@@ -1,0 +1,192 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"strings"
+)
+
+const defaultSocket = "/data/adb/privstack/run/daemon.sock"
+
+var commands = map[string]string{
+	"status":        "Get proxy status",
+	"start":         "Start proxy",
+	"stop":          "Stop proxy",
+	"reload":        "Reload config and restart proxy",
+	"health":        "Get health check status",
+	"config-get":    "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
+	"config-set":    "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
+	"config-list":   "List config sections",
+	"config-import": "Import full config: privctl config-import '{...}'",
+	"logs":          "Get recent log lines: privctl logs '{\"lines\":100}'",
+	"version":       "Get daemon version",
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
+	}
+
+	cmd := os.Args[1]
+
+	if cmd == "help" || cmd == "--help" || cmd == "-h" {
+		printUsage()
+		os.Exit(0)
+	}
+
+	if _, ok := commands[cmd]; !ok {
+		fmt.Fprintf(os.Stderr, "error: unknown command %q\n\n", cmd)
+		printUsage()
+		os.Exit(1)
+	}
+
+	// Build JSON-RPC request.
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  cmd,
+	}
+
+	// If there's a second argument, parse it as JSON params.
+	if len(os.Args) >= 3 {
+		raw := strings.Join(os.Args[2:], " ")
+		var params json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &params); err != nil {
+			fmt.Fprintf(os.Stderr, "error: invalid JSON params: %v\n", err)
+			os.Exit(1)
+		}
+		req["params"] = params
+	}
+
+	// Determine socket path.
+	socketPath := os.Getenv("PRIVSTACK_SOCKET")
+	if socketPath == "" {
+		socketPath = defaultSocket
+	}
+
+	// Connect to daemon.
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: cannot connect to daemon at %s: %v\n", socketPath, err)
+		fmt.Fprintf(os.Stderr, "hint: is privd running?\n")
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	// Send request.
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: marshal request: %v\n", err)
+		os.Exit(1)
+	}
+	reqBytes = append(reqBytes, '\n')
+
+	if _, err := conn.Write(reqBytes); err != nil {
+		fmt.Fprintf(os.Stderr, "error: send request: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Read response.
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	if !scanner.Scan() {
+		err := scanner.Err()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: read response: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "error: daemon closed connection without response\n")
+		}
+		os.Exit(1)
+	}
+
+	// Parse response.
+	var resp struct {
+		JSONRPC string           `json:"jsonrpc"`
+		ID      int              `json:"id"`
+		Result  *json.RawMessage `json:"result,omitempty"`
+		Error   *struct {
+			Code    int              `json:"code"`
+			Message string           `json:"message"`
+			Data    *json.RawMessage `json:"data,omitempty"`
+		} `json:"error,omitempty"`
+	}
+
+	if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+		fmt.Fprintf(os.Stderr, "error: parse response: %v\n", err)
+		fmt.Fprintf(os.Stderr, "raw: %s\n", scanner.Text())
+		os.Exit(1)
+	}
+
+	// Handle error response.
+	if resp.Error != nil {
+		fmt.Fprintf(os.Stderr, "error [%d]: %s\n", resp.Error.Code, resp.Error.Message)
+		if resp.Error.Data != nil {
+			prettyPrint(*resp.Error.Data)
+		}
+		os.Exit(1)
+	}
+
+	// Print result.
+	if resp.Result != nil {
+		prettyPrint(*resp.Result)
+	} else {
+		fmt.Println("ok")
+	}
+}
+
+func prettyPrint(data json.RawMessage) {
+	var obj interface{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		fmt.Println(string(data))
+		return
+	}
+
+	pretty, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		fmt.Println(string(data))
+		return
+	}
+	fmt.Println(string(pretty))
+}
+
+func printUsage() {
+	fmt.Println("privctl - PrivStack daemon control CLI")
+	fmt.Println()
+	fmt.Println("Usage: privctl <command> [json_params]")
+	fmt.Println()
+	fmt.Println("Commands:")
+
+	// Calculate max command name length for alignment.
+	maxLen := 0
+	for cmd := range commands {
+		if len(cmd) > maxLen {
+			maxLen = len(cmd)
+		}
+	}
+
+	order := []string{
+		"status", "start", "stop", "reload", "health",
+		"config-get", "config-set", "config-list", "config-import",
+		"logs", "version",
+	}
+	for _, cmd := range order {
+		desc := commands[cmd]
+		fmt.Printf("  %-*s  %s\n", maxLen, cmd, desc)
+	}
+
+	fmt.Println()
+	fmt.Println("Environment:")
+	fmt.Printf("  PRIVSTACK_SOCKET  daemon socket path (default: %s)\n", defaultSocket)
+	fmt.Println()
+	fmt.Println("Examples:")
+	fmt.Println("  privctl status")
+	fmt.Println("  privctl start")
+	fmt.Println("  privctl config-get '{\"key\":\"proxy\"}'")
+	fmt.Println("  privctl config-set '{\"key\":\"autostart\",\"value\":false}'")
+	fmt.Println("  privctl logs '{\"lines\":100}'")
+}
