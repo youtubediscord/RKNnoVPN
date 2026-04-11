@@ -399,17 +399,50 @@ func (m *CoreManager) killProcess() error {
 }
 
 // scriptEnv returns the environment variables that shell scripts expect.
+// These must match the validate_env() check in iptables.sh.
 func (m *CoreManager) scriptEnv() map[string]string {
 	dnsPort := m.config.Proxy.DNSPort
 	if dnsPort == 0 {
 		dnsPort = 10853
 	}
+	apiPort := m.config.Proxy.APIPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	gid := m.config.Proxy.GID
+	if gid == 0 {
+		gid = 23333
+	}
+	mark := m.config.Proxy.Mark
+	if mark == 0 {
+		mark = 0x2023
+	}
+
+	appMode := MapAppMode(m.config.Apps.Mode)
+
+	// DNS_MODE: "per_uid" when whitelist (only selected apps proxied),
+	// "all" otherwise (all traffic goes through proxy DNS).
+	dnsMode := "all"
+	if appMode == "whitelist" {
+		dnsMode = "per_uid"
+	}
+
+	appUIDs := ResolvePackageUIDs(m.config.Apps.Packages)
+
 	return map[string]string{
 		"PRIVSTACK_DIR": m.dataDir,
-		"CORE_GID":      "23333",
+		"CORE_GID":      strconv.Itoa(gid),
 		"TPROXY_PORT":   strconv.Itoa(m.config.Proxy.TProxyPort),
 		"DNS_PORT":      strconv.Itoa(dnsPort),
-		"FWMARK":        "0x2023",
+		"API_PORT":      strconv.Itoa(apiPort),
+		"FWMARK":        fmt.Sprintf("0x%x", mark),
+		"ROUTE_TABLE":   "2023",
+		"ROUTE_TABLE_V6": "2024",
+		"APP_MODE":      appMode,
+		"APP_UIDS":      appUIDs,
+		"BYPASS_UIDS":   "1073",
+		"DNS_MODE":      dnsMode,
+		"PROXY_MODE":    "tproxy",
 	}
 }
 

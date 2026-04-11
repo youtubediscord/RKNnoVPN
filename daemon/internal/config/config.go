@@ -23,9 +23,12 @@ type Config struct {
 
 // ProxyConfig controls the sing-box proxy listener ports.
 type ProxyConfig struct {
-	TProxyPort int `json:"tproxy_port"`
-	DNSPort    int `json:"dns_port"`
-	APIPort    int `json:"api_port"`
+	Mode       string `json:"mode"`        // "tproxy" (matches config.json proxy.mode)
+	TProxyPort int    `json:"tproxy_port"`
+	DNSPort    int    `json:"dns_port"`
+	GID        int    `json:"gid"`         // core process GID (matches config.json proxy.gid)
+	Mark       int    `json:"mark"`        // fwmark for policy routing (matches config.json proxy.mark)
+	APIPort    int    `json:"api_port"`
 }
 
 // TransportConfig controls the outbound protocol transport layer.
@@ -58,7 +61,9 @@ type NodeConfig struct {
 
 // RoutingConfig controls traffic routing rules.
 type RoutingConfig struct {
+	Mode           string   `json:"mode"`            // "whitelist" etc. (matches config.json routing.mode)
 	BypassLAN      bool     `json:"bypass_lan"`
+	BypassChina    bool     `json:"bypass_china"`    // matches config.json routing.bypass_china
 	BypassRussia   bool     `json:"bypass_russia"`
 	BlockAds       bool     `json:"block_ads"`
 	CustomDirect   []string `json:"custom_direct"`   // domains/IPs to route directly
@@ -70,35 +75,39 @@ type RoutingConfig struct {
 
 // AppsConfig controls per-app routing (Android split tunnel).
 type AppsConfig struct {
-	Mode     string   `json:"mode"`      // "all", "include", "exclude"
-	Packages []string `json:"packages"`  // package names for include/exclude
+	Mode     string   `json:"mode"`   // "all", "whitelist", "blacklist"
+	Packages []string `json:"list"`   // package names for whitelist/blacklist (matches config.json apps.list)
 }
 
 // DNSConfig controls DNS resolution.
 type DNSConfig struct {
-	RemoteDoH   string `json:"remote_doh"`   // DoH URL routed via proxy
-	DirectDoH   string `json:"direct_doh"`   // DoH URL for direct domains
-	BootstrapIP string `json:"bootstrap_ip"` // IP-literal for bootstrapping DoH
-	FakeIP      bool   `json:"fake_ip"`      // use fake-ip strategy
+	HijackPerUID bool   `json:"hijack_per_uid"` // per-UID DNS hijack (matches config.json dns.hijack_per_uid)
+	ProxyDNS     string `json:"proxy_dns"`      // DoH URL routed via proxy (matches config.json dns.proxy_dns)
+	DirectDNS    string `json:"direct_dns"`     // DoH URL for direct domains (matches config.json dns.direct_dns)
+	BootstrapIP  string `json:"bootstrap_ip"`   // IP-literal for bootstrapping DoH
+	BlockQUICDNS bool   `json:"block_quic_dns"` // block QUIC DNS (matches config.json dns.block_quic_dns)
+	FakeIP       bool   `json:"fake_ip"`        // use fake-ip strategy
 }
 
 // IPv6Config controls IPv6 behavior.
 type IPv6Config struct {
-	Enable bool `json:"enable"`
+	Mode string `json:"mode"` // "mirror", "disable", etc. (matches config.json ipv6.mode)
 }
 
 // HealthConfig controls automatic health checking.
 type HealthConfig struct {
+	Enabled     bool   `json:"enabled"`      // matches config.json health.enabled
 	IntervalSec int    `json:"interval_sec"`
-	URL         string `json:"url"`          // URL to probe
+	Threshold   int    `json:"threshold"`    // failure threshold (matches config.json health.threshold)
+	URL         string `json:"check_url"`    // URL to probe (matches config.json health.check_url)
 	TimeoutSec  int    `json:"timeout_sec"`
 }
 
 // RescueConfig controls automatic fallback on persistent failures.
 type RescueConfig struct {
-	Enable        bool `json:"enable"`
-	MaxFailures   int  `json:"max_failures"`   // consecutive failures before rescue
-	CooldownSec   int  `json:"cooldown_sec"`   // wait time before retrying after rescue
+	Enabled       bool `json:"enabled"`         // matches config.json rescue.enabled
+	MaxAttempts   int  `json:"max_attempts"`    // consecutive failures before rescue (matches config.json rescue.max_attempts)
+	CooldownSec   int  `json:"cooldown_sec"`    // wait time before retrying after rescue
 }
 
 // NodeProfile is a resolved node profile ready for sing-box config rendering.
@@ -124,8 +133,11 @@ type NodeProfile struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Proxy: ProxyConfig{
-			TProxyPort: 10808,
-			DNSPort:    10853,
+			Mode:       "tproxy",
+			TProxyPort: 10853,
+			DNSPort:    10856,
+			GID:        23333,
+			Mark:       8227,
 			APIPort:    9090,
 		},
 		Transport: TransportConfig{
@@ -137,31 +149,35 @@ func DefaultConfig() *Config {
 			Port:     443,
 		},
 		Routing: RoutingConfig{
-			BypassLAN:    true,
-			BypassRussia: true,
-			GeoIPPath:    "/data/adb/privstack/data/geoip.db",
-			GeoSitePath:  "/data/adb/privstack/data/geosite.db",
+			Mode:        "whitelist",
+			BypassLAN:   true,
+			GeoIPPath:   "/data/adb/privstack/data/geoip.db",
+			GeoSitePath: "/data/adb/privstack/data/geosite.db",
 		},
 		Apps: AppsConfig{
-			Mode: "all",
+			Mode: "whitelist",
 		},
 		DNS: DNSConfig{
-			RemoteDoH:   "https://1.1.1.1/dns-query",
-			DirectDoH:   "https://77.88.8.8/dns-query",
-			BootstrapIP: "1.1.1.1",
-			FakeIP:      false,
+			HijackPerUID: true,
+			ProxyDNS:     "https://1.1.1.1/dns-query",
+			DirectDNS:    "https://dns.google/dns-query",
+			BootstrapIP:  "1.1.1.1",
+			BlockQUICDNS: true,
+			FakeIP:       false,
 		},
 		IPv6: IPv6Config{
-			Enable: true,
+			Mode: "mirror",
 		},
 		Health: HealthConfig{
+			Enabled:     true,
 			IntervalSec: 30,
-			URL:         "https://cp.cloudflare.com/generate_204",
+			Threshold:   3,
+			URL:         "https://www.gstatic.com/generate_204",
 			TimeoutSec:  5,
 		},
 		Rescue: RescueConfig{
-			Enable:      true,
-			MaxFailures: 3,
+			Enabled:     true,
+			MaxAttempts: 3,
 			CooldownSec: 60,
 		},
 		Autostart: true,
@@ -230,10 +246,10 @@ func (c *Config) Validate() error {
 	}
 
 	validAppMode := map[string]bool{
-		"all": true, "include": true, "exclude": true,
+		"all": true, "whitelist": true, "blacklist": true,
 	}
 	if !validAppMode[c.Apps.Mode] {
-		return fmt.Errorf("apps.mode must be all/include/exclude, got %q", c.Apps.Mode)
+		return fmt.Errorf("apps.mode must be all/whitelist/blacklist, got %q", c.Apps.Mode)
 	}
 
 	if c.Health.IntervalSec < 0 {
@@ -242,8 +258,8 @@ func (c *Config) Validate() error {
 	if c.Health.TimeoutSec < 1 {
 		return fmt.Errorf("health.timeout_sec must be >= 1, got %d", c.Health.TimeoutSec)
 	}
-	if c.Rescue.MaxFailures < 1 {
-		return fmt.Errorf("rescue.max_failures must be >= 1, got %d", c.Rescue.MaxFailures)
+	if c.Rescue.MaxAttempts < 1 {
+		return fmt.Errorf("rescue.max_attempts must be >= 1, got %d", c.Rescue.MaxAttempts)
 	}
 
 	return nil

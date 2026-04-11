@@ -246,12 +246,46 @@ func (r *RescueManager) fullRestart() error {
 // --------------------------------------------------------------------------
 
 func (r *RescueManager) scriptEnv() map[string]string {
+	dnsPort := r.cfg.Proxy.DNSPort
+	if dnsPort == 0 {
+		dnsPort = 10853
+	}
+	apiPort := r.cfg.Proxy.APIPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	gid := r.cfg.Proxy.GID
+	if gid == 0 {
+		gid = 23333
+	}
+	mark := r.cfg.Proxy.Mark
+	if mark == 0 {
+		mark = 0x2023
+	}
+
+	appMode := core.MapAppMode(r.cfg.Apps.Mode)
+
+	dnsMode := "all"
+	if appMode == "whitelist" {
+		dnsMode = "per_uid"
+	}
+
+	appUIDs := core.ResolvePackageUIDs(r.cfg.Apps.Packages)
+
 	return map[string]string{
-		"PRIVSTACK_DIR": r.dataDir,
-		"CORE_GID":      "23333",
-		"TPROXY_PORT":   fmt.Sprintf("%d", r.cfg.Proxy.TProxyPort),
-		"DNS_PORT":      fmt.Sprintf("%d", r.cfg.Proxy.DNSPort),
-		"FWMARK":        "0x2023",
+		"PRIVSTACK_DIR":  r.dataDir,
+		"CORE_GID":       fmt.Sprintf("%d", gid),
+		"TPROXY_PORT":    fmt.Sprintf("%d", r.cfg.Proxy.TProxyPort),
+		"DNS_PORT":       fmt.Sprintf("%d", dnsPort),
+		"API_PORT":       fmt.Sprintf("%d", apiPort),
+		"FWMARK":         fmt.Sprintf("0x%x", mark),
+		"ROUTE_TABLE":    "2023",
+		"ROUTE_TABLE_V6": "2024",
+		"APP_MODE":       appMode,
+		"APP_UIDS":       appUIDs,
+		"BYPASS_UIDS":    "1073",
+		"DNS_MODE":       dnsMode,
+		"PROXY_MODE":     "tproxy",
 	}
 }
 

@@ -42,13 +42,13 @@ func buildDNS(cfg *Config) map[string]interface{} {
 	servers := []map[string]interface{}{
 		{
 			"tag":             "remote-dns",
-			"address":         cfg.DNS.RemoteDoH,
+			"address":         cfg.DNS.ProxyDNS,
 			"address_resolver": "bootstrap-dns",
 			"detour":          "proxy",
 		},
 		{
 			"tag":             "direct-dns",
-			"address":         cfg.DNS.DirectDoH,
+			"address":         cfg.DNS.DirectDNS,
 			"address_resolver": "bootstrap-dns",
 			"detour":          "direct",
 		},

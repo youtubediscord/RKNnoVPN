@@ -107,7 +107,7 @@ func main() {
 		healthInterval = 30 * time.Second
 	}
 
-	healthThreshold := cfg.Rescue.MaxFailures
+	healthThreshold := cfg.Rescue.MaxAttempts
 	if healthThreshold < 1 {
 		healthThreshold = 3
 	}
@@ -118,14 +118,45 @@ func main() {
 	if cooldown <= 0 {
 		cooldown = 60 * time.Second
 	}
-	rescueMgr := rescue.NewRescueManager(coreMgr, cfg, *dataDir, cfg.Rescue.MaxFailures, cooldown, rescueLogger)
+	rescueMgr := rescue.NewRescueManager(coreMgr, cfg, *dataDir, cfg.Rescue.MaxAttempts, cooldown, rescueLogger)
+
+	gid := cfg.Proxy.GID
+	if gid == 0 {
+		gid = 23333
+	}
+	mark := cfg.Proxy.Mark
+	if mark == 0 {
+		mark = 0x2023
+	}
+	dnsPort := cfg.Proxy.DNSPort
+	if dnsPort == 0 {
+		dnsPort = 10853
+	}
+	apiPort := cfg.Proxy.APIPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	appMode := core.MapAppMode(cfg.Apps.Mode)
+	dnsMode := "all"
+	if appMode == "whitelist" {
+		dnsMode = "per_uid"
+	}
+	appUIDs := core.ResolvePackageUIDs(cfg.Apps.Packages)
 
 	scriptEnv := map[string]string{
-		"PRIVSTACK_DIR": *dataDir,
-		"CORE_GID":      "23333",
-		"TPROXY_PORT":   strconv.Itoa(cfg.Proxy.TProxyPort),
-		"DNS_PORT":      strconv.Itoa(cfg.Proxy.DNSPort),
-		"FWMARK":        "0x2023",
+		"PRIVSTACK_DIR":  *dataDir,
+		"CORE_GID":       strconv.Itoa(gid),
+		"TPROXY_PORT":    strconv.Itoa(cfg.Proxy.TProxyPort),
+		"DNS_PORT":       strconv.Itoa(dnsPort),
+		"API_PORT":       strconv.Itoa(apiPort),
+		"FWMARK":         fmt.Sprintf("0x%x", mark),
+		"ROUTE_TABLE":    "2023",
+		"ROUTE_TABLE_V6": "2024",
+		"APP_MODE":       appMode,
+		"APP_UIDS":       appUIDs,
+		"BYPASS_UIDS":    "1073",
+		"DNS_MODE":       dnsMode,
+		"PROXY_MODE":     "tproxy",
 	}
 	netWatcher := watcher.NewNetworkWatcher(*dataDir, scriptEnv, watchLogger)
 
@@ -271,7 +302,7 @@ func (d *daemon) dumpState() {
 	d.mu.Lock()
 	cfgPath := d.cfgPath
 	dataDir := d.dataDir
-	rescueEnabled := d.cfg.Rescue.Enable
+	rescueEnabled := d.cfg.Rescue.Enabled
 	d.mu.Unlock()
 
 	state := map[string]interface{}{
@@ -402,8 +433,8 @@ func (d *daemon) handleHealth(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	healthResult := d.healthMon.RunOnce()
 
 	d.mu.Lock()
-	rescueEnabled := d.cfg.Rescue.Enable
-	maxFailures := d.cfg.Rescue.MaxFailures
+	rescueEnabled := d.cfg.Rescue.Enabled
+	maxFailures := d.cfg.Rescue.MaxAttempts
 	d.mu.Unlock()
 
 	result := map[string]interface{}{
