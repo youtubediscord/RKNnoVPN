@@ -1,5 +1,7 @@
 package com.privstack.panel.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -19,14 +22,19 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.privstack.panel.R
+
+private const val GITHUB_RELEASES_URL =
+    "https://github.com/youtubediscord/RKNnoVPN/releases/latest"
 
 /**
  * Self-contained Compose section for in-app updates.
@@ -43,6 +51,8 @@ fun UpdateSection(
     onDownloadUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
 ) {
+    val context = LocalContext.current
+
     // Section header (matches existing SettingsScreen style)
     ListItem(
         headlineContent = {
@@ -89,10 +99,12 @@ fun UpdateSection(
                             UpdateStatus.DOWNLOADED -> stringResource(R.string.update_status_downloaded)
                             UpdateStatus.INSTALLING -> stringResource(R.string.update_status_installing)
                             UpdateStatus.INSTALLED -> stringResource(R.string.update_status_installed)
+                            UpdateStatus.MODULE_TOO_OLD -> stringResource(R.string.update_module_too_old)
                             UpdateStatus.ERROR -> state.errorMessage
                         },
                         color = when (state.status) {
                             UpdateStatus.ERROR -> MaterialTheme.colorScheme.error
+                            UpdateStatus.MODULE_TOO_OLD -> MaterialTheme.colorScheme.error
                             UpdateStatus.UP_TO_DATE,
                             UpdateStatus.INSTALLED -> MaterialTheme.colorScheme.primary
                             else -> MaterialTheme.colorScheme.onSurface
@@ -165,6 +177,34 @@ fun UpdateSection(
                         UpdateStatus.DOWNLOADED -> {
                             FilledTonalButton(onClick = onInstallUpdate) {
                                 Text(stringResource(R.string.update_install_button))
+                            }
+                        }
+                        UpdateStatus.MODULE_TOO_OLD -> {
+                            // Daemon doesn't support updates -- offer GitHub link.
+                            // ACTION_VIEW opens the default browser; no INTERNET
+                            // permission needed by the APK itself.
+                            Column {
+                                Text(
+                                    text = stringResource(R.string.update_module_too_old_hint),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(bottom = 8.dp),
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        val intent = Intent(
+                                            Intent.ACTION_VIEW,
+                                            Uri.parse(GITHUB_RELEASES_URL),
+                                        )
+                                        context.startActivity(intent)
+                                    },
+                                ) {
+                                    Icon(
+                                        Icons.Filled.OpenInBrowser,
+                                        contentDescription = null,
+                                        modifier = Modifier.padding(end = 4.dp),
+                                    )
+                                    Text(stringResource(R.string.update_open_github))
+                                }
                             }
                         }
                         UpdateStatus.CHECKING,

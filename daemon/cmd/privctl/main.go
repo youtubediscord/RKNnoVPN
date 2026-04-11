@@ -12,17 +12,20 @@ import (
 const defaultSocket = "/data/adb/privstack/run/daemon.sock"
 
 var commands = map[string]string{
-	"status":        "Get proxy status",
-	"start":         "Start proxy",
-	"stop":          "Stop proxy",
-	"reload":        "Reload config and restart proxy",
-	"health":        "Get health check status",
-	"config-get":    "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
-	"config-set":    "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
-	"config-list":   "List config sections",
-	"config-import": "Import full config: privctl config-import '{...}'",
-	"logs":          "Get recent log lines: privctl logs '{\"lines\":100}'",
-	"version":       "Get daemon version",
+	"status":          "Get proxy status",
+	"start":           "Start proxy",
+	"stop":            "Stop proxy",
+	"reload":          "Reload config and restart proxy",
+	"health":          "Get health check status",
+	"config-get":      "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
+	"config-set":      "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
+	"config-list":     "List config sections",
+	"config-import":   "Import full config: privctl config-import '{...}'",
+	"logs":            "Get recent log lines: privctl logs '{\"lines\":100}'",
+	"version":         "Get daemon version",
+	"update-check":    "Check for updates from GitHub Releases",
+	"update-download": "Download latest module + APK",
+	"update-install":  "Install previously downloaded update",
 }
 
 func main() {
@@ -173,6 +176,7 @@ func printUsage() {
 		"status", "start", "stop", "reload", "health",
 		"config-get", "config-set", "config-list", "config-import",
 		"logs", "version",
+		"update-check", "update-download", "update-install",
 	}
 	for _, cmd := range order {
 		desc := commands[cmd]

@@ -142,4 +142,7 @@
     <string name="update_check_button">Проверить обновления</string>
     <string name="update_download_button">Скачать</string>
     <string name="update_install_button">Установить</string>
+    <string name="update_module_too_old">Модуль слишком старый для обновлений из приложения</string>
+    <string name="update_module_too_old_hint">Ваш модуль не поддерживает обновления из приложения. Скачайте последнюю версию модуля из GitHub Releases и установите вручную.</string>
+    <string name="update_open_github">Открыть GitHub Releases</string>
 </resources>

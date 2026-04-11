@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -46,6 +47,8 @@ import com.privstack.panel.R
 @Composable
 fun ImportSheet(
     candidates: List<ImportCandidate>,
+    isLoading: Boolean,
+    errorMessage: String?,
     onDetectUris: (String) -> Unit,
     onToggleCandidate: (Int) -> Unit,
     onImportSelected: () -> Unit,
@@ -123,6 +126,34 @@ fun ImportSheet(
                 )
             }
 
+            // -- Error message --
+            if (errorMessage != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = errorMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            // -- Loading indicator --
+            if (isLoading) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text(
+                        text = "Importing...",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+
             // -- Candidate list (shared across all tabs) --
             if (candidates.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
@@ -172,14 +203,11 @@ fun ImportSheet(
                 val selectedCount = candidates.count { it.selected }
                 Button(
                     onClick = onImportSelected,
-                    enabled = selectedCount > 0,
+                    enabled = selectedCount > 0 && !isLoading,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(stringResource(R.string.import_selected, selectedCount))
                 }
-            } else if (selectedTab == 0) {
-                // Show "no nodes detected" hint after detection attempt
-                // (empty state handled implicitly by not showing the list)
             }
         }
     }

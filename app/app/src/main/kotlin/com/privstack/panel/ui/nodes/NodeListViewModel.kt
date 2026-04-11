@@ -3,6 +3,7 @@ package com.privstack.panel.ui.nodes
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.privstack.panel.`import`.LinkParser
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.Node
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import javax.inject.Inject
 
@@ -140,42 +142,67 @@ class NodeListViewModel @Inject constructor(
     }
 
     fun showImportSheet() {
-        _uiState.update { it.copy(showImportSheet = true, importCandidates = emptyList()) }
+        _uiState.update {
+            it.copy(showImportSheet = true, importCandidates = emptyList(), errorMessage = null)
+        }
     }
 
     fun hideImportSheet() {
-        _uiState.update { it.copy(showImportSheet = false, importCandidates = emptyList()) }
+        _uiState.update {
+            it.copy(showImportSheet = false, importCandidates = emptyList(), errorMessage = null)
+        }
+    }
+
+    fun clearError() {
+        _uiState.update { it.copy(errorMessage = null) }
     }
 
     /**
      * Parse URIs from pasted text and populate import candidates.
+     *
+     * Uses [LinkParser] for full protocol-aware parsing so that the preview
+     * shows correct names, servers, ports, and the outbound JSON is populated.
+     * URIs that LinkParser cannot parse (unsupported protocol, malformed) are
+     * kept as "raw" candidates so the daemon can still attempt to import them.
      */
     fun detectUris(text: String) {
-        val uriPattern = Regex("(vless|vmess|trojan|ss|hysteria2|hy2|tuic)://[^\\s]+")
-        val matches = uriPattern.findAll(text).toList()
-
-        val candidates = matches.mapIndexed { i, match ->
-            val uri = match.value
-            val scheme = uri.substringBefore("://")
-            val protocol = Protocol.fromString(scheme) ?: Protocol.VLESS
-            val name = "Imported-${i + 1}"
-
-            ImportCandidate(
-                node = Node(
-                    id = "import_${System.currentTimeMillis()}_$i",
-                    name = name,
-                    protocol = protocol,
-                    server = extractServerFromUri(uri),
-                    port = extractPortFromUri(uri),
-                    link = uri,
-                    outbound = buildJsonObject {},
-                    group = "Imported",
-                ),
-                selected = true,
-            )
+        val detectedUris = LinkParser.detectUris(text)
+        if (detectedUris.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    importCandidates = emptyList(),
+                    errorMessage = "No valid proxy URIs detected in the pasted text",
+                )
+            }
+            return
         }
 
-        _uiState.update { it.copy(importCandidates = candidates) }
+        val candidates = detectedUris.mapIndexed { i, uri ->
+            val parsed = LinkParser.parse(uri)
+            if (parsed != null) {
+                ImportCandidate(node = parsed, selected = true)
+            } else {
+                // LinkParser could not fully parse (e.g. hysteria2/tuic) but the
+                // URI was detected. Keep it as a raw candidate so the daemon can
+                // try to import the link.
+                val scheme = uri.substringBefore("://")
+                val protocol = Protocol.fromString(scheme) ?: Protocol.VLESS
+                ImportCandidate(
+                    node = Node(
+                        id = "import_${System.currentTimeMillis()}_$i",
+                        name = "${scheme.uppercase()}-${i + 1}",
+                        protocol = protocol,
+                        server = extractServerFromUri(uri),
+                        port = extractPortFromUri(uri),
+                        link = uri,
+                        outbound = buildEmptyOutbound(),
+                    ),
+                    selected = true,
+                )
+            }
+        }
+
+        _uiState.update { it.copy(importCandidates = candidates, errorMessage = null) }
     }
 
     fun toggleImportCandidate(index: Int) {
@@ -198,7 +225,7 @@ class NodeListViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
-            // Build a single multi-line string of share links for the daemon
+            // Build a single multi-line string of share links for the daemon.
             val links = selected.mapNotNull { it.link.ifBlank { null } }.joinToString("\n")
 
             if (links.isNotBlank()) {
@@ -207,17 +234,22 @@ class NodeListViewModel @Inject constructor(
                     val err = profileRepository.error.value
                     _uiState.update {
                         it.copy(
-                            errorMessage = err ?: "Import failed",
+                            errorMessage = err ?: "Import failed -- is the daemon running?",
                             isLoading = false,
                         )
                     }
                 } else {
                     Log.d(TAG, "Imported ${imported.size} nodes via daemon")
+                    // Auto-select the group of the first imported node so the user
+                    // can see the results immediately.
+                    val firstGroup = imported.firstOrNull()?.group
                     _uiState.update {
                         it.copy(
                             showImportSheet = false,
                             importCandidates = emptyList(),
                             isLoading = false,
+                            errorMessage = null,
+                            selectedGroup = firstGroup ?: it.selectedGroup,
                         )
                     }
                 }
@@ -314,6 +346,9 @@ class NodeListViewModel @Inject constructor(
         NodeSortMode.LATENCY -> nodes.sortedBy { it.latencyMs ?: Int.MAX_VALUE }
         NodeSortMode.COUNTRY -> nodes.sortedBy { extractCountryFromName(it.name) }
     }
+
+    /** Placeholder outbound for URIs that LinkParser cannot fully parse. */
+    private fun buildEmptyOutbound(): JsonObject = buildJsonObject {}
 
     private fun extractCountryFromName(name: String): String {
         // Simple heuristic: first word before dash/space

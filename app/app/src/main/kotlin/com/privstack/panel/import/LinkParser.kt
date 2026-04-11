@@ -32,7 +32,10 @@ object LinkParser {
     private val json = Json { ignoreUnknownKeys = true }
 
     // Schemes we recognise in free-text / clipboard detection.
-    private val KNOWN_SCHEMES = listOf("vless://", "vmess://", "trojan://", "ss://", "vpn://")
+    private val KNOWN_SCHEMES = listOf(
+        "vless://", "vmess://", "trojan://", "ss://", "vpn://",
+        "hysteria2://", "hy2://", "tuic://",
+    )
 
     // Subscription URL heuristics.
     private val SUB_URL_REGEX = Regex(

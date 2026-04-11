@@ -635,6 +635,10 @@ func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError
 
 func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	return map[string]string{
+		"daemon":  version,
+		"core":    version,
+		"privctl": version,
+		// Keep legacy keys for backward compatibility.
 		"version": version,
 		"go":      "1.22+",
 	}, nil
@@ -716,6 +720,8 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		log.Printf("[updater] warning: failed to stop core: %v", err)
 	}
 
+	moduleUpdated := false
+
 	// Install module (binaries + scripts + module files).
 	if _, err := os.Stat(p.ModulePath); err == nil {
 		moduleDir := "/data/adb/modules/privstack"
@@ -726,6 +732,7 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 			}
 		}
 		result["module_installed"] = true
+		moduleUpdated = true
 	}
 
 	// Install APK.
@@ -742,6 +749,15 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 	os.RemoveAll(updateDir)
 
 	result["status"] = "installed"
+
+	// If we installed a new module (which includes a new privd binary),
+	// the new daemon is already forked and listening. Schedule this old
+	// daemon to exit after the IPC response has been written back to the
+	// client, so we don't cut the connection mid-reply.
+	if moduleUpdated {
+		go updater.ScheduleSelfExit(updater.SelfExitDelay)
+	}
+
 	return result, nil
 }
 

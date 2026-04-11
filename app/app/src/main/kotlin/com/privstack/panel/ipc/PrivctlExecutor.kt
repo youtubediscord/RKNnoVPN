@@ -136,6 +136,19 @@ class PrivctlExecutor @Inject constructor() {
             return PrivctlResult.DaemonNotFound(privctlPath)
         }
 
+        // Old privctl binary that doesn't know the requested command.
+        // It prints "error: unknown command ..." to stderr and exits 1.
+        // Detect this before trying to parse stdout (which may contain
+        // the usage text and fail JSON parsing).
+        if (exitCode != 0 &&
+            stderr.contains("unknown command", ignoreCase = true)
+        ) {
+            return PrivctlResult.Error(
+                code = -32601, // MethodNotFound (JSON-RPC standard)
+                message = "method not found: $method (privctl does not support this command)"
+            )
+        }
+
         // No output at all
         if (stdout.isBlank()) {
             return if (exitCode == 0) {

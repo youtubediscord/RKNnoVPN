@@ -143,4 +143,7 @@
     <string name="update_check_button">Check for updates</string>
     <string name="update_download_button">Download</string>
     <string name="update_install_button">Install</string>
+    <string name="update_module_too_old">Module too old for in-app updates</string>
+    <string name="update_module_too_old_hint">Your installed module does not support in-app updates. Please download the latest module from GitHub Releases and flash it manually.</string>
+    <string name="update_open_github">Open GitHub Releases</string>
 </resources>

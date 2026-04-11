@@ -11,8 +11,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -115,7 +117,12 @@ class DaemonClient @Inject constructor(
             put("level", level)
         }
         return call("logs", params) { element ->
-            element.jsonArray.map { it.jsonPrimitive.content }
+            val arr = when {
+                element is JsonObject && element.containsKey("lines") ->
+                    element["lines"]!!.jsonArray
+                else -> element.jsonArray
+            }
+            arr.map { it.jsonPrimitive.content }
         }
     }
 
@@ -146,8 +153,10 @@ class DaemonClient @Inject constructor(
             UpdateCheckInfo(
                 currentVersion = obj["current_version"]?.jsonPrimitive?.content ?: "unknown",
                 latestVersion = obj["latest_version"]?.jsonPrimitive?.content ?: "unknown",
-                hasUpdate = obj["has_update"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+                hasUpdate = obj["has_update"]?.jsonPrimitive?.booleanOrNull ?: false,
                 changelog = obj["changelog"]?.jsonPrimitive?.content ?: "",
+                moduleSize = obj["module_size"]?.jsonPrimitive?.longOrNull ?: 0L,
+                apkSize = obj["apk_size"]?.jsonPrimitive?.longOrNull ?: 0L,
             )
         }
 
@@ -158,7 +167,7 @@ class DaemonClient @Inject constructor(
             UpdateDownloadInfo(
                 modulePath = obj["module_path"]?.jsonPrimitive?.content ?: "",
                 apkPath = obj["apk_path"]?.jsonPrimitive?.content ?: "",
-                checksums = obj["checksums"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+                checksums = obj["checksums"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
         }
 
@@ -167,8 +176,8 @@ class DaemonClient @Inject constructor(
         call("update-install", timeoutMs = 120_000L) { element ->
             val obj = element as JsonObject
             UpdateInstallInfo(
-                moduleInstalled = obj["module_installed"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
-                apkInstalled = obj["apk_installed"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+                moduleInstalled = obj["module_installed"]?.jsonPrimitive?.booleanOrNull ?: false,
+                apkInstalled = obj["apk_installed"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
         }
 
@@ -263,6 +272,8 @@ data class UpdateCheckInfo(
     val latestVersion: String,
     val hasUpdate: Boolean,
     val changelog: String,
+    val moduleSize: Long = 0L,
+    val apkSize: Long = 0L,
 )
 
 data class UpdateDownloadInfo(

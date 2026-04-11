@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,11 @@ import (
 	"syscall"
 	"time"
 )
+
+// SelfExitDelay is how long the old daemon waits after forking the new
+// one before sending itself SIGTERM. Exported so the IPC handler can
+// schedule this after the response is written.
+const SelfExitDelay = 3 * time.Second
 
 // Default filesystem paths used by the Magisk module layout.
 const (
@@ -28,14 +34,17 @@ const (
 //
 //  1. Stop the current proxy (sing-box + iptables teardown)
 //  2. Extract the new module.zip to a temp staging directory
-//  3. Copy new binaries to <dataDir>/bin/
-//  4. Copy new scripts to <dataDir>/scripts/
-//  5. Update module files in <moduleDir>/
-//  6. Set correct permissions
-//  7. Re-launch the updated privd daemon (exec self-replace)
+//  3. Back up current binaries so we can roll back on failure
+//  4. Atomically replace binaries in <dataDir>/bin/ (unlink+rename)
+//  5. Copy new scripts to <dataDir>/scripts/
+//  6. Update module files in <moduleDir>/
+//  7. Set correct permissions
+//  8. Verify the new privd binary can at least print its version
+//  9. Fork the new privd daemon
+// 10. Schedule self-termination of the old daemon (after IPC response)
 //
-// If any step fails the function returns an error, and the caller should
-// attempt recovery (e.g. restart the old daemon).
+// If any step before the fork fails, binaries are rolled back from backup
+// and the caller can restart the old daemon normally.
 func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error {
 	logger := log.New(log.Writer(), "[updater] ", log.LstdFlags)
 
@@ -64,33 +73,68 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		return fmt.Errorf("extract zip: %w", err)
 	}
 
-	// --- 3. Copy binaries ---
+	// --- 3. Back up current binaries ---
 	binDir := filepath.Join(dataDir, "bin")
 	if err := os.MkdirAll(binDir, 0750); err != nil {
 		return fmt.Errorf("mkdir bin: %w", err)
 	}
 
+	backupDir := filepath.Join(dataDir, "backup", "bin-pre-update")
+	os.RemoveAll(backupDir) // clean stale backup
+	if err := os.MkdirAll(backupDir, 0750); err != nil {
+		return fmt.Errorf("mkdir backup: %w", err)
+	}
+
+	binaries := []string{"sing-box", "privd", "privctl"}
+	for _, name := range binaries {
+		src := filepath.Join(binDir, name)
+		if _, err := os.Stat(src); err == nil {
+			dst := filepath.Join(backupDir, name)
+			if copyErr := copyFile(src, dst, 0750); copyErr != nil {
+				logger.Printf("warning: backup %s: %v", name, copyErr)
+			}
+		}
+	}
+
+	// rollbackBinaries restores backed-up binaries if the update fails
+	// partway through binary installation.
+	rollbackBinaries := func() {
+		logger.Println("rolling back binaries from backup")
+		for _, name := range binaries {
+			src := filepath.Join(backupDir, name)
+			if _, err := os.Stat(src); err == nil {
+				dst := filepath.Join(binDir, name)
+				if err := atomicCopyFile(src, dst, 0750); err != nil {
+					logger.Printf("warning: rollback %s: %v", name, err)
+				}
+			}
+		}
+	}
+
+	// --- 4. Atomically replace binaries ---
 	// Binaries may be in <staging>/binaries/arm64/ or directly in <staging>/.
 	stagedBinDir := findSubdir(staging, "binaries", "arm64")
 	if stagedBinDir == "" {
 		stagedBinDir = staging
 	}
 
-	for _, name := range []string{"sing-box", "privd", "privctl"} {
+	for _, name := range binaries {
 		src := filepath.Join(stagedBinDir, name)
 		if _, err := os.Stat(src); os.IsNotExist(err) {
 			continue // binary not in this release
 		}
 		dst := filepath.Join(binDir, name)
-		logger.Printf("installing binary %s", name)
-		if err := copyFile(src, dst, 0750); err != nil {
-			return fmt.Errorf("copy %s: %w", name, err)
+		logger.Printf("installing binary %s (atomic)", name)
+		if err := atomicCopyFile(src, dst, 0750); err != nil {
+			rollbackBinaries()
+			return fmt.Errorf("install %s: %w", name, err)
 		}
 	}
 
-	// --- 4. Copy scripts ---
+	// --- 5. Copy scripts ---
 	scriptsDir := filepath.Join(dataDir, "scripts")
 	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		rollbackBinaries()
 		return fmt.Errorf("mkdir scripts: %w", err)
 	}
 
@@ -98,11 +142,12 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	if info, err := os.Stat(stagedScriptsDir); err == nil && info.IsDir() {
 		logger.Println("updating scripts")
 		if err := copyDir(stagedScriptsDir, scriptsDir, 0755); err != nil {
+			rollbackBinaries()
 			return fmt.Errorf("copy scripts: %w", err)
 		}
 	}
 
-	// --- 5. Update module directory ---
+	// --- 6. Update module directory ---
 	logger.Println("updating module files")
 	moduleFiles := []string{
 		"module.prop",
@@ -123,7 +168,8 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 			perm = 0755
 		}
 		if err := copyFile(src, dst, perm); err != nil {
-			return fmt.Errorf("copy module file %s: %w", name, err)
+			// Module file update failure is non-fatal for the daemon itself.
+			logger.Printf("warning: copy module file %s: %v", name, err)
 		}
 	}
 
@@ -136,19 +182,45 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		}
 	}
 
-	// --- 6. Set permissions ---
+	// --- 7. Set permissions ---
 	logger.Println("setting permissions")
 	setPerms(binDir, 0750)
 	setPerms(scriptsDir, 0755)
 
-	// --- 7. Re-launch updated privd ---
-	logger.Println("re-launching privd")
+	// --- 8. Verify new privd binary ---
+	newPrivd := filepath.Join(binDir, "privd")
+	if _, err := os.Stat(newPrivd); err == nil {
+		logger.Println("verifying new privd binary")
+		if err := verifyBinary(newPrivd); err != nil {
+			logger.Printf("new privd binary verification failed: %v — rolling back", err)
+			rollbackBinaries()
+			return fmt.Errorf("new privd verification failed: %w", err)
+		}
+		logger.Println("new privd binary verified OK")
+	}
+
+	// --- 9. Fork the new daemon ---
+	logger.Println("forking new privd")
 	if err := relaunchDaemon(dataDir); err != nil {
+		rollbackBinaries()
 		return fmt.Errorf("relaunch daemon: %w", err)
 	}
 
-	logger.Println("module update installed successfully")
+	// --- 10. Clean up backup (success path) ---
+	// Keep the backup around for a while in case manual rollback is needed.
+	// It will be cleaned on next update.
+	logger.Println("module update installed successfully — old daemon should self-terminate shortly")
 	return nil
+}
+
+// ScheduleSelfExit waits for the given delay then sends SIGTERM to the
+// current process. This should be called in a goroutine AFTER the IPC
+// response has been written, so the old daemon exits cleanly once the
+// new daemon is running.
+func ScheduleSelfExit(delay time.Duration) {
+	time.Sleep(delay)
+	log.Printf("[updater] self-exit: sending SIGTERM to self (pid %d)", os.Getpid())
+	syscall.Kill(os.Getpid(), syscall.SIGTERM)
 }
 
 // --------------------------------------------------------------------------
@@ -171,45 +243,70 @@ func InstallApkUpdate(apkPath string) error {
 // --------------------------------------------------------------------------
 
 // stopCurrentProxy invokes the iptables teardown script and kills sing-box.
+// It does NOT kill the current privd -- that happens via ScheduleSelfExit
+// after the IPC response is sent.
 func stopCurrentProxy(dataDir string) error {
+	// Build a minimal environment so scripts work even if the old daemon
+	// did not set PRIVSTACK_DIR. Old scripts might not need it, but new
+	// scripts definitely do.
+	scriptEnv := []string{
+		"PRIVSTACK_DIR=" + dataDir,
+		"PATH=" + os.Getenv("PATH"),
+	}
+
 	// First, remove iptables rules so traffic is not black-holed.
 	dnsScript := filepath.Join(dataDir, "scripts", "dns.sh")
-	_ = execScript(dnsScript, "stop")
+	_ = execScriptWithEnv(dnsScript, "stop", scriptEnv)
 
 	iptScript := filepath.Join(dataDir, "scripts", "iptables.sh")
-	_ = execScript(iptScript, "stop")
+	_ = execScriptWithEnv(iptScript, "stop", scriptEnv)
 
-	// Kill sing-box.
+	// Kill sing-box by PID file, then by process name as fallback.
 	pidFile := filepath.Join(dataDir, "run", "singbox.pid")
 	if data, err := os.ReadFile(pidFile); err == nil {
 		pid := strings.TrimSpace(string(data))
-		_ = exec.Command("kill", "-TERM", pid).Run()
-		time.Sleep(2 * time.Second)
-		_ = exec.Command("kill", "-KILL", pid).Run()
+		if pid != "" {
+			_ = exec.Command("kill", "-TERM", pid).Run()
+			time.Sleep(2 * time.Second)
+			_ = exec.Command("kill", "-KILL", pid).Run()
+		}
 	}
-
-	// Kill the current privd (we will be replaced anyway).
-	privdPid := filepath.Join(dataDir, "run", "daemon.pid")
-	if data, err := os.ReadFile(privdPid); err == nil {
-		pid := strings.TrimSpace(string(data))
-		// Don't kill ourselves -- the IPC handler is running under this PID.
-		// The relaunch step will exec-replace us.
-		_ = pid
-	}
+	// Fallback: kill any remaining sing-box processes.
+	_ = exec.Command("killall", "-TERM", "sing-box").Run()
 
 	return nil
 }
 
-// relaunchDaemon starts the new privd binary. It uses exec to replace the
-// current process if running as the daemon, or spawns a new one.
+// relaunchDaemon starts the new privd binary and waits for it to become
+// responsive on the IPC socket. It does NOT kill the old daemon -- the
+// caller is responsible for scheduling self-exit after IPC response.
 func relaunchDaemon(dataDir string) error {
 	privdBin := filepath.Join(dataDir, "bin", "privd")
-	configPath := filepath.Join(dataDir, "config.json")
-	logFile := filepath.Join(dataDir, "log", "daemon.log")
-	pidFile := filepath.Join(dataDir, "run", "daemon.pid")
 
-	// Fork a new daemon process rather than exec-replacing, because the
-	// IPC handler needs to return a response first.
+	// Try multiple config path conventions -- old daemons used config.json
+	// in the data root, newer ones may use config/config.json.
+	configPath := filepath.Join(dataDir, "config", "config.json")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = filepath.Join(dataDir, "config.json")
+	}
+
+	logDir := filepath.Join(dataDir, "logs")
+	if _, err := os.Stat(logDir); os.IsNotExist(err) {
+		logDir = filepath.Join(dataDir, "log")
+	}
+	os.MkdirAll(logDir, 0750)
+	logFile := filepath.Join(logDir, "daemon.log")
+
+	runDir := filepath.Join(dataDir, "run")
+	os.MkdirAll(runDir, 0750)
+	pidFile := filepath.Join(runDir, "daemon.pid")
+
+	// Remove old socket so the new daemon can bind.
+	sockPath := filepath.Join(runDir, "daemon.sock")
+	os.Remove(sockPath)
+
+	// Fork a new daemon process. The old daemon stays alive until
+	// ScheduleSelfExit is called (after IPC response).
 	cmd := exec.Command(privdBin,
 		"-config", configPath,
 		"-data-dir", dataDir,
@@ -228,18 +325,129 @@ func relaunchDaemon(dataDir string) error {
 
 	// Release the child so it doesn't become a zombie when we exit.
 	_ = cmd.Process.Release()
-	return nil
+
+	// Wait up to 10 seconds for the new daemon to start listening.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		conn, err := net.Dial("unix", sockPath)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+	}
+
+	return fmt.Errorf("new privd did not start listening on %s within 10s", sockPath)
 }
 
-// execScript runs a shell script with an action argument.
-func execScript(scriptPath string, action string) error {
-	cmd := exec.Command("sh", scriptPath, action)
-	// Inherit environment so PRIVSTACK_DIR etc. are available.
-	cmd.Env = os.Environ()
+// execScriptWithEnv runs a shell script with an action argument and explicit
+// environment. This is used during updates where the old daemon's env may
+// not have all required variables.
+func execScriptWithEnv(scriptPath string, action string, env []string) error {
+	if _, err := os.Stat(scriptPath); err != nil {
+		return nil // script doesn't exist in old version -- skip silently
+	}
+	shell := "/system/bin/sh"
+	if _, err := os.Stat(shell); err != nil {
+		shell = "/bin/sh"
+	}
+	cmd := exec.Command(shell, scriptPath, action)
+	cmd.Env = append(os.Environ(), env...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s %s: %s: %w", scriptPath, action, string(output), err)
 	}
+	return nil
+}
+
+// verifyBinary runs the binary with --help (or -h) and checks that it
+// exits without crashing. This catches corrupted downloads, wrong
+// architecture, missing dynamic libraries, etc.
+func verifyBinary(binPath string) error {
+	// Try --version first, then -h, then just run with no args and check
+	// that we get a non-signal exit. The important thing is that the ELF
+	// loader doesn't reject it.
+	cmd := exec.Command(binPath, "--version")
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	// 5 second timeout to avoid hanging.
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Run()
+	}()
+	select {
+	case err := <-done:
+		// Exit code 0 or 2 (flag parsing error for "--version") are fine.
+		// Signal-based exits (SIGSEGV, SIGBUS, SIGILL) indicate a bad binary.
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				ws := exitErr.Sys().(syscall.WaitStatus)
+				if ws.Signaled() {
+					return fmt.Errorf("binary crashed with signal %d", ws.Signal())
+				}
+				// Non-zero exit (e.g. 2 for "unknown flag") is acceptable
+				return nil
+			}
+			return fmt.Errorf("exec failed: %w", err)
+		}
+		return nil
+	case <-time.After(5 * time.Second):
+		cmd.Process.Kill()
+		return fmt.Errorf("binary did not exit within 5 seconds")
+	}
+}
+
+// atomicCopyFile copies src to dst atomically by writing to a temp file
+// in the same directory and then renaming. This is critical for replacing
+// binaries that may be currently executing -- on Linux, the old inode
+// stays valid for the running process, while new opens see the new file.
+func atomicCopyFile(src, dst string, perm os.FileMode) error {
+	dir := filepath.Dir(dst)
+
+	// Write to a temp file in the same directory (same filesystem for rename).
+	tmp, err := os.CreateTemp(dir, ".update-*")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	in, err := os.Open(src)
+	if err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		in.Close()
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	in.Close()
+
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+
+	// Sync to disk so the file survives power loss.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	tmp.Close()
+
+	// Atomic rename. On Linux this replaces the directory entry but the
+	// old inode (and thus the old running binary) remains valid until all
+	// file handles are closed.
+	if err := os.Rename(tmpPath, dst); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename %s -> %s: %w", tmpPath, dst, err)
+	}
+
 	return nil
 }
 

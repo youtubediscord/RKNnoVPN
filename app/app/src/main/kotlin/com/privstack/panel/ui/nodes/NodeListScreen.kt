@@ -146,6 +146,8 @@ fun NodeListScreen(
     if (state.showImportSheet) {
         ImportSheet(
             candidates = state.importCandidates,
+            isLoading = state.isLoading,
+            errorMessage = state.errorMessage,
             onDetectUris = viewModel::detectUris,
             onToggleCandidate = viewModel::toggleImportCandidate,
             onImportSelected = viewModel::importSelected,
