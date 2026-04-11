@@ -161,22 +161,21 @@ jobs:
           sed -i "s/versionName = \".*\"/versionName = \"${VER_NAME}\"/" app/app/build.gradle.kts
           sed -i "s/versionCode = [0-9]*/versionCode = ${VER_CODE}/" app/app/build.gradle.kts
 
-      - name: Build Release APK
+      - name: Build and sign APK
         working-directory: app
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
-
-      - name: Sign APK (debug key for CI)
         run: |
-          # For production: use a proper keystore via secrets
-          # For CI builds: use debug signing
-          APK=$(find app/app/build/outputs/apk/release -name "*.apk" | head -1)
+          # Build debug APK (auto-signed with debug keystore)
+          # For production releases: use assembleRelease with a proper keystore
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
           if [ -z "$APK" ]; then
-            echo "No release APK found, trying debug build"
-            cd app && ./gradlew assembleDebug --no-daemon
-            APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+            echo "ERROR: No APK found!"
+            find . -name "*.apk" -ls
+            exit 1
           fi
-          cp "$APK" privstack-panel.apk
-          sha256sum privstack-panel.apk
+          echo "APK found: $APK"
+          cp "$APK" ../privstack-panel.apk
+          sha256sum ../privstack-panel.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
