@@ -1,4 +1,4 @@
-# PrivStack
+# RKNnoVPN
 
 **Transparent proxy for rooted Android — invisible to VPN detection.**
 
@@ -60,8 +60,8 @@ App traffic → iptables TPROXY → sing-box → proxy server
 - Amnezia `vpn://` format
 - Subscription URLs (base64-encoded URI lists)
 - QR codes
-- Clash YAML (Meta)
-- v2rayNG JSON backup
+- Clash YAML (planned)
+- v2rayNG JSON backup (planned)
 
 ## Detection Resistance
 
