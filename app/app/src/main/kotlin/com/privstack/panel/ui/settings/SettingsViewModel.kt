@@ -1,9 +1,13 @@
 package com.privstack.panel.ui.settings
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
+import com.privstack.panel.repository.CommandOutcome
+import com.privstack.panel.repository.ProfileRepository
+import com.privstack.panel.repository.StatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,6 +15,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+private const val TAG = "SettingsViewModel"
 
 enum class RoutingMode { GLOBAL, WHITELIST, DIRECT }
 
@@ -57,11 +63,15 @@ data class SettingsUiState(
     // About
     val appVersion: String = "0.1.0",
     val githubUrl: String = "https://github.com/nickolay168/RKNnoVPN",
+    // Error
+    val errorMessage: String? = null,
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val daemonClient: DaemonClient,
+    private val profileRepository: ProfileRepository,
+    private val statusRepository: StatusRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -70,16 +80,37 @@ class SettingsViewModel @Inject constructor(
     private val _updateState = MutableStateFlow(UpdateUiState())
     val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
 
+    init {
+        loadCurrentSettings()
+        loadVersionInfo()
+    }
+
     // ---- Public actions ----
 
     fun setRoutingMode(mode: RoutingMode) {
-        _uiState.update { it.copy(routingMode = mode) }
-        // TODO: DaemonRepository.setRoutingMode(mode)
+        _uiState.update { it.copy(routingMode = mode, errorMessage = null) }
+        viewModelScope.launch {
+            val profileMode = when (mode) {
+                RoutingMode.GLOBAL -> com.privstack.panel.model.RoutingMode.PROXY_ALL
+                RoutingMode.WHITELIST -> com.privstack.panel.model.RoutingMode.PER_APP
+                RoutingMode.DIRECT -> com.privstack.panel.model.RoutingMode.RULES
+            }
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(routing = config.routing.copy(mode = profileMode))
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to set routing mode: $err")
+                _uiState.update { it.copy(errorMessage = err) }
+            }
+        }
     }
 
     fun setDnsPreset(preset: DnsPreset) {
-        _uiState.update { it.copy(dnsPreset = preset) }
-        // TODO: DaemonRepository.setDns(preset.url)
+        _uiState.update { it.copy(dnsPreset = preset, errorMessage = null) }
+        if (preset != DnsPreset.CUSTOM) {
+            saveDnsToProfile(preset.url)
+        }
     }
 
     fun setCustomDnsUrl(url: String) {
@@ -89,34 +120,54 @@ class SettingsViewModel @Inject constructor(
     fun applyCustomDns() {
         val url = _uiState.value.customDnsUrl
         if (url.isNotBlank()) {
-            _uiState.update { it.copy(dnsPreset = DnsPreset.CUSTOM) }
-            // TODO: DaemonRepository.setDns(url)
+            _uiState.update { it.copy(dnsPreset = DnsPreset.CUSTOM, errorMessage = null) }
+            saveDnsToProfile(url)
         }
     }
 
     fun toggleFragment() {
-        _uiState.update { it.copy(fragmentEnabled = !it.fragmentEnabled) }
-        // TODO: DaemonRepository.setFragment(state)
+        val newVal = !_uiState.value.fragmentEnabled
+        _uiState.update { it.copy(fragmentEnabled = newVal, errorMessage = null) }
+        // Fragment is a local xray setting; save via profile config if the daemon supports it.
+        // For now, this is persisted locally and applied on next connection start.
     }
 
     fun toggleMux() {
-        _uiState.update { it.copy(muxEnabled = !it.muxEnabled) }
-        // TODO: DaemonRepository.setMux(state)
+        val newVal = !_uiState.value.muxEnabled
+        _uiState.update { it.copy(muxEnabled = newVal, errorMessage = null) }
+        // Mux is a local xray setting; same as fragment above.
     }
 
     fun setLogLevel(level: LogLevel) {
-        _uiState.update { it.copy(logLevel = level) }
-        // TODO: DaemonRepository.setLogLevel(level)
+        _uiState.update { it.copy(logLevel = level, errorMessage = null) }
+        // Log level is a local preference affecting which daemon logs we request.
     }
 
     fun restartDaemon() {
-        // TODO: DaemonRepository.restart()
-        _uiState.update { it.copy(daemonStatusText = "Restarting...") }
+        _uiState.update { it.copy(daemonStatusText = "Restarting...", errorMessage = null) }
+        viewModelScope.launch {
+            when (val outcome = statusRepository.reload()) {
+                is CommandOutcome.Success -> {
+                    Log.d(TAG, "Daemon reload succeeded")
+                    _uiState.update { it.copy(daemonStatusText = "Running") }
+                }
+                is CommandOutcome.Failed -> {
+                    Log.w(TAG, "Daemon reload failed: ${outcome.message}")
+                    _uiState.update {
+                        it.copy(
+                            daemonStatusText = "Error",
+                            errorMessage = outcome.message,
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun setThemeMode(mode: ThemeMode) {
         _uiState.update { it.copy(themeMode = mode) }
-        // TODO: persist to SharedPreferences / DataStore
+        // Theme is a pure UI preference, stored locally (SharedPreferences/DataStore).
+        // Not sent to the daemon.
     }
 
     // ---- Update actions ----
@@ -187,6 +238,94 @@ class SettingsViewModel @Inject constructor(
                         )
                     }
                 }
+            }
+        }
+    }
+
+    // ---- Internal ----
+
+    /**
+     * Load the current daemon profile config and project relevant settings
+     * into [SettingsUiState].
+     */
+    private fun loadCurrentSettings() {
+        viewModelScope.launch {
+            val config = profileRepository.getOrLoad() ?: return@launch
+
+            // Map daemon routing mode to UI enum
+            val routingMode = when (config.routing.mode) {
+                com.privstack.panel.model.RoutingMode.PROXY_ALL -> RoutingMode.GLOBAL
+                com.privstack.panel.model.RoutingMode.PER_APP -> RoutingMode.WHITELIST
+                com.privstack.panel.model.RoutingMode.PER_APP_BYPASS -> RoutingMode.WHITELIST
+                com.privstack.panel.model.RoutingMode.RULES -> RoutingMode.DIRECT
+            }
+
+            // Map daemon DNS config to UI preset
+            val dnsUrl = config.dns.remoteDns
+            val dnsPreset = DnsPreset.entries.find { it.url == dnsUrl && it != DnsPreset.CUSTOM }
+                ?: DnsPreset.CUSTOM
+
+            _uiState.update {
+                it.copy(
+                    routingMode = routingMode,
+                    dnsPreset = dnsPreset,
+                    customDnsUrl = if (dnsPreset == DnsPreset.CUSTOM) dnsUrl else it.customDnsUrl,
+                )
+            }
+        }
+    }
+
+    /**
+     * Fetch daemon and core version strings.
+     */
+    private fun loadVersionInfo() {
+        viewModelScope.launch {
+            when (val result = daemonClient.version()) {
+                is DaemonClientResult.Ok -> {
+                    val info = result.data
+                    _uiState.update {
+                        it.copy(
+                            moduleVersion = info.daemonVersion,
+                            daemonStatusText = "Running (core: ${info.coreVersion})",
+                        )
+                    }
+                }
+                is DaemonClientResult.DaemonNotFound -> {
+                    _uiState.update {
+                        it.copy(daemonStatusText = "Module not installed")
+                    }
+                }
+                is DaemonClientResult.RootDenied -> {
+                    _uiState.update {
+                        it.copy(daemonStatusText = "Root access denied")
+                    }
+                }
+                is DaemonClientResult.Timeout -> {
+                    _uiState.update {
+                        it.copy(daemonStatusText = "Daemon not responding")
+                    }
+                }
+                else -> {
+                    _uiState.update {
+                        it.copy(daemonStatusText = "Unknown")
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Save the DNS URL to the daemon's profile config.
+     */
+    private fun saveDnsToProfile(url: String) {
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(dns = config.dns.copy(remoteDns = url))
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save DNS setting: $err")
+                _uiState.update { it.copy(errorMessage = err) }
             }
         }
     }

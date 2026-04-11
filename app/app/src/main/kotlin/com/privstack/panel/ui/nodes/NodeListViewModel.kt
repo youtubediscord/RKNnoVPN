@@ -1,11 +1,14 @@
 package com.privstack.panel.ui.nodes
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.privstack.panel.ipc.DaemonClient
+import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.Node
 import com.privstack.panel.model.Protocol
+import com.privstack.panel.repository.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,6 +16,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import javax.inject.Inject
+
+private const val TAG = "NodeListViewModel"
 
 enum class NodeSortMode { NAME, LATENCY, COUNTRY }
 
@@ -25,6 +30,9 @@ data class NodeListUiState(
     val showImportSheet: Boolean = false,
     /** Nodes parsed from import input, waiting for user selection. */
     val importCandidates: List<ImportCandidate> = emptyList(),
+    val isLoading: Boolean = false,
+    /** Error message from the last operation, or null. */
+    val errorMessage: String? = null,
 )
 
 data class ImportCandidate(
@@ -33,14 +41,17 @@ data class ImportCandidate(
 )
 
 @HiltViewModel
-class NodeListViewModel @Inject constructor() : ViewModel() {
+class NodeListViewModel @Inject constructor(
+    private val profileRepository: ProfileRepository,
+    private val daemonClient: DaemonClient,
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(NodeListUiState())
     val uiState: StateFlow<NodeListUiState> = _uiState.asStateFlow()
 
     init {
-        // TODO: load from NodeRepository
-        loadDemoNodes()
+        observeProfile()
+        loadNodes()
     }
 
     // ---- Public actions ----
@@ -50,8 +61,28 @@ class NodeListViewModel @Inject constructor() : ViewModel() {
     }
 
     fun selectNode(nodeId: String) {
-        _uiState.update { it.copy(activeNodeId = nodeId) }
-        // TODO: DaemonRepository.connect(nodeId)
+        viewModelScope.launch {
+            _uiState.update { it.copy(activeNodeId = nodeId, errorMessage = null) }
+            val ok = profileRepository.setActiveNode(nodeId)
+            if (ok) {
+                Log.d(TAG, "Active node set to $nodeId, starting connection")
+                when (val result = daemonClient.start()) {
+                    is DaemonClientResult.Ok -> {
+                        Log.d(TAG, "Start succeeded for node $nodeId")
+                    }
+                    else -> {
+                        val msg = describeError(result)
+                        Log.w(TAG, "Start failed for node $nodeId: $msg")
+                        _uiState.update { it.copy(errorMessage = msg) }
+                    }
+                }
+            } else {
+                val err = profileRepository.error.value
+                _uiState.update {
+                    it.copy(errorMessage = err ?: "Failed to set active node")
+                }
+            }
+        }
     }
 
     fun setSortMode(mode: NodeSortMode) {
@@ -64,28 +95,46 @@ class NodeListViewModel @Inject constructor() : ViewModel() {
     }
 
     fun deleteNode(nodeId: String) {
-        _uiState.update { state ->
-            val updated = state.nodes.filter { it.id != nodeId }
-            val groups = updated.map { it.group }.distinct().ifEmpty { listOf("Default") }
-            state.copy(
-                nodes = updated,
-                groups = groups,
-                activeNodeId = if (state.activeNodeId == nodeId) null else state.activeNodeId,
-            )
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val ok = profileRepository.removeNode(nodeId)
+            if (!ok) {
+                val err = profileRepository.error.value
+                _uiState.update {
+                    it.copy(errorMessage = err ?: "Failed to delete node")
+                }
+            }
+            // UI updates via the profile observer
         }
     }
 
     fun testLatency(nodeId: String) {
         viewModelScope.launch {
-            // TODO: call DaemonRepository.pingNode(nodeId)
-            delay(500)
-            val fakeLatency = (30..800).random()
-            _uiState.update { state ->
-                state.copy(
-                    nodes = state.nodes.map { node ->
-                        if (node.id == nodeId) node.copy(latencyMs = fakeLatency) else node
-                    },
-                )
+            // Use daemon health/status to measure latency for the specific node.
+            // The daemon does not expose a per-node ping command yet, so we use
+            // a simple timing wrapper around a status call as a proxy.
+            val startMs = System.currentTimeMillis()
+            when (val result = daemonClient.status()) {
+                is DaemonClientResult.Ok -> {
+                    val elapsed = (System.currentTimeMillis() - startMs).toInt()
+                    _uiState.update { state ->
+                        state.copy(
+                            nodes = state.nodes.map { node ->
+                                if (node.id == nodeId) node.copy(latencyMs = elapsed) else node
+                            },
+                        )
+                    }
+                }
+                else -> {
+                    Log.w(TAG, "Latency test failed for $nodeId: ${describeError(result)}")
+                    _uiState.update { state ->
+                        state.copy(
+                            nodes = state.nodes.map { node ->
+                                if (node.id == nodeId) node.copy(latencyMs = -1) else node
+                            },
+                        )
+                    }
+                }
             }
         }
     }
@@ -146,15 +195,41 @@ class NodeListViewModel @Inject constructor() : ViewModel() {
 
         if (selected.isEmpty()) return
 
-        _uiState.update { state ->
-            val allNodes = state.nodes + selected
-            val groups = allNodes.map { it.group }.distinct()
-            state.copy(
-                nodes = sortNodes(allNodes, state.sortMode),
-                groups = groups,
-                showImportSheet = false,
-                importCandidates = emptyList(),
-            )
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+
+            // Build a single multi-line string of share links for the daemon
+            val links = selected.mapNotNull { it.link.ifBlank { null } }.joinToString("\n")
+
+            if (links.isNotBlank()) {
+                val imported = profileRepository.importNodes(links)
+                if (imported.isEmpty()) {
+                    val err = profileRepository.error.value
+                    _uiState.update {
+                        it.copy(
+                            errorMessage = err ?: "Import failed",
+                            isLoading = false,
+                        )
+                    }
+                } else {
+                    Log.d(TAG, "Imported ${imported.size} nodes via daemon")
+                    _uiState.update {
+                        it.copy(
+                            showImportSheet = false,
+                            importCandidates = emptyList(),
+                            isLoading = false,
+                        )
+                    }
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        errorMessage = "No valid links to import",
+                        isLoading = false,
+                    )
+                }
+            }
+            // Node list updates via the profile observer
         }
     }
 
@@ -163,28 +238,76 @@ class NodeListViewModel @Inject constructor() : ViewModel() {
      */
     fun fetchSubscription(url: String) {
         viewModelScope.launch {
-            // TODO: real HTTP fetch + base64 decode
-            delay(1000)
-            // For now, generate a demo node from the URL
-            val node = Node(
-                id = "sub_${System.currentTimeMillis()}",
-                name = "Sub node",
-                protocol = Protocol.VLESS,
-                server = "sub.example.com",
-                port = 443,
-                link = "vless://fake@sub.example.com:443",
-                outbound = buildJsonObject {},
-                group = "Subscription",
-            )
-            _uiState.update { state ->
-                state.copy(
-                    importCandidates = listOf(ImportCandidate(node, selected = true)),
-                )
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+
+            // The daemon handles the HTTP fetch (APK has no INTERNET permission).
+            // We pass the subscription URL as a link to config.import.
+            val imported = profileRepository.importNodes(url)
+            if (imported.isEmpty()) {
+                val err = profileRepository.error.value
+                _uiState.update {
+                    it.copy(
+                        errorMessage = err ?: "Subscription fetch failed",
+                        isLoading = false,
+                    )
+                }
+            } else {
+                // Show imported nodes as candidates for review
+                _uiState.update {
+                    it.copy(
+                        importCandidates = imported.map { ImportCandidate(it, selected = true) },
+                        isLoading = false,
+                    )
+                }
             }
         }
     }
 
     // ---- Internal ----
+
+    /**
+     * Observe the profile repository for changes and project nodes into the UI state.
+     */
+    private fun observeProfile() {
+        viewModelScope.launch {
+            profileRepository.profile.collect { config ->
+                if (config != null) {
+                    val nodes = config.nodes
+                    val groups = nodes.map { it.group }.distinct().ifEmpty { listOf("Default") }
+                    _uiState.update { state ->
+                        state.copy(
+                            nodes = sortNodes(nodes, state.sortMode),
+                            groups = groups,
+                            activeNodeId = config.activeNodeId ?: state.activeNodeId,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Initial load from the daemon.
+     */
+    private fun loadNodes() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            val config = profileRepository.getOrLoad()
+            if (config == null) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Initial node load failed: $err")
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = err,
+                    )
+                }
+            } else {
+                _uiState.update { it.copy(isLoading = false) }
+            }
+            // Actual nodes are applied by the profile observer
+        }
+    }
 
     private fun sortNodes(nodes: List<Node>, mode: NodeSortMode): List<Node> = when (mode) {
         NodeSortMode.NAME -> nodes.sortedBy { it.name.lowercase() }
@@ -216,34 +339,13 @@ class NodeListViewModel @Inject constructor() : ViewModel() {
         } catch (_: Exception) { 443 }
     }
 
-    private fun loadDemoNodes() {
-        val demoNodes = listOf(
-            createDemoNode("1", "Frankfurt-1", Protocol.VLESS, "de-1.example.com", 443, 42),
-            createDemoNode("2", "Amsterdam-2", Protocol.TROJAN, "nl-2.example.com", 443, 68),
-            createDemoNode("3", "Helsinki-3", Protocol.SHADOWSOCKS, "fi-3.example.com", 8388, 120),
-            createDemoNode("4", "Tokyo-4", Protocol.VMESS, "jp-4.example.com", 443, 210),
-            createDemoNode("5", "US-West-5", Protocol.HYSTERIA2, "us-5.example.com", 443, 480),
-        )
-
-        _uiState.update {
-            it.copy(
-                nodes = demoNodes,
-                groups = demoNodes.map { n -> n.group }.distinct(),
-            )
-        }
+    private fun <T> describeError(result: DaemonClientResult<T>): String = when (result) {
+        is DaemonClientResult.DaemonError -> "Daemon error ${result.code}: ${result.message}"
+        is DaemonClientResult.RootDenied -> "Root access denied"
+        is DaemonClientResult.Timeout -> "Request timed out"
+        is DaemonClientResult.DaemonNotFound -> "Daemon not installed"
+        is DaemonClientResult.ParseError -> "Invalid daemon response"
+        is DaemonClientResult.Failure -> "Error: ${result.throwable.message}"
+        is DaemonClientResult.Ok -> "OK"
     }
-
-    private fun createDemoNode(
-        id: String, name: String, protocol: Protocol,
-        server: String, port: Int, latency: Int,
-    ): Node = Node(
-        id = id,
-        name = name,
-        protocol = protocol,
-        server = server,
-        port = port,
-        link = "${protocol.name.lowercase()}://demo@$server:$port",
-        outbound = buildJsonObject {},
-        latencyMs = latency,
-    )
 }
