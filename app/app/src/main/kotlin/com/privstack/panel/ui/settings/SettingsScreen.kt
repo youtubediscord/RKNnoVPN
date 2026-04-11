@@ -71,6 +71,21 @@ fun SettingsScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
+        if (state.errorMessage != null) {
+            SettingsCard {
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            text = state.errorMessage ?: "",
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    },
+                    colors = transparentListItemColors(),
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         // ===== ROUTING =====
         SectionHeader(
             title = stringResource(R.string.settings_routing),
@@ -301,6 +316,7 @@ private fun RoutingModeSelector(
     val options = listOf(
         RoutingMode.GLOBAL to stringResource(R.string.routing_global),
         RoutingMode.WHITELIST to stringResource(R.string.routing_whitelist),
+        RoutingMode.BYPASS to stringResource(R.string.routing_bypass),
         RoutingMode.DIRECT to stringResource(R.string.routing_direct),
     )
 

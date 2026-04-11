@@ -81,12 +81,16 @@ object LinkParser {
                     // Extend to end of non-whitespace run.
                     val end = trimmed.indexOfAny(charArrayOf(' ', '\t', '\r', '\n'), idx)
                         .takeIf { it != -1 } ?: trimmed.length
-                    results += trimmed.substring(idx, end)
+                    val candidate = trimmed.substring(idx, end)
+                        .trimEnd('.', ',', ';', ':', ')', ']', '}', '"', '\'')
+                    if (candidate.length > scheme.length) {
+                        results += candidate
+                    }
                     start = end
                 }
             }
         }
-        return results
+        return results.distinct()
     }
 
     /**
@@ -152,7 +156,7 @@ object LinkParser {
      * net, type, host, path, tls, sni, alpn, fp.
      */
     private fun parseVmess(uri: String): Node? {
-        val payload = uri.removePrefix("vmess://").removePrefix("VMESS://")
+        val payload = removeSchemePrefix(uri, "vmess")
         val decoded = tryBase64Decode(payload) ?: return null
         val obj = try {
             json.parseToJsonElement(decoded).jsonObject
@@ -164,6 +168,7 @@ object LinkParser {
         fun intOrZero(key: String): Int = str(key).toIntOrNull() ?: 0
 
         val host = str("add")
+        if (host.isBlank()) return null
         val port = intOrZero("port").takeIf { it > 0 } ?: return null
         val userId = str("id").ifEmpty { return null }
         val name = str("ps").ifEmpty { "$host:$port" }
@@ -175,9 +180,23 @@ object LinkParser {
         if (str("sni").isNotEmpty()) params["sni"] = str("sni")
         if (str("fp").isNotEmpty()) params["fp"] = str("fp")
         if (str("alpn").isNotEmpty()) params["alpn"] = str("alpn")
+        if (str("allowInsecure").isNotEmpty()) params["allowInsecure"] = str("allowInsecure")
         if (str("host").isNotEmpty()) params["host"] = str("host")
         if (str("path").isNotEmpty()) params["path"] = str("path")
+        if (str("authority").isNotEmpty()) params["authority"] = str("authority")
+        if (str("mode").isNotEmpty()) params["mode"] = str("mode")
         if (str("type").isNotEmpty() && str("type") != "none") params["headerType"] = str("type")
+        when (params["type"]) {
+            "grpc" -> {
+                if (str("path").isNotEmpty()) params["serviceName"] = str("path")
+                if (str("host").isNotEmpty() && params["authority"].isNullOrEmpty()) {
+                    params["authority"] = str("host")
+                }
+            }
+            "quic" -> {
+                if (str("host").isNotEmpty()) params["quicSecurity"] = str("host")
+            }
+        }
 
         val outbound = buildJsonObject {
             put("protocol", "vmess")
@@ -253,7 +272,7 @@ object LinkParser {
      * Legacy:  ss://base64(method:password@host:port)#name
      */
     private fun parseShadowsocks(uri: String): Node? {
-        val body = uri.removePrefix("ss://").removePrefix("SS://")
+        val body = removeSchemePrefix(uri, "ss")
 
         // Extract fragment (name).
         val fragmentIdx = body.lastIndexOf('#')
@@ -264,7 +283,7 @@ object LinkParser {
         val atIdx = noFragment.lastIndexOf('@')
         if (atIdx != -1) {
             val userInfoEncoded = noFragment.substring(0, atIdx)
-            val hostPort = noFragment.substring(atIdx + 1)
+            val hostPort = noFragment.substring(atIdx + 1).substringBefore('?')
             val decoded = tryBase64Decode(userInfoEncoded)
             if (decoded != null) {
                 val colonIdx = decoded.indexOf(':')
@@ -513,7 +532,7 @@ object LinkParser {
      */
     private fun parseStandardUri(raw: String, scheme: String): ParsedUri? {
         // Strip scheme.
-        val afterScheme = raw.removePrefix("$scheme://").removePrefix("${scheme.uppercase()}://")
+        val afterScheme = removeSchemePrefix(raw, scheme)
 
         // Fragment.
         val fragmentIdx = afterScheme.lastIndexOf('#')
@@ -545,6 +564,7 @@ object LinkParser {
             val closeBracket = trimmed.indexOf(']')
             if (closeBracket == -1) return null
             val host = trimmed.substring(1, closeBracket)
+            if (host.isBlank()) return null
             val rest = trimmed.substring(closeBracket + 1)
             val port = if (rest.startsWith(":")) rest.substring(1).toIntOrNull() else null
             if (port == null || port !in 1..65535) return null
@@ -553,6 +573,7 @@ object LinkParser {
             val lastColon = trimmed.lastIndexOf(':')
             if (lastColon == -1) return null
             val host = trimmed.substring(0, lastColon)
+            if (host.isBlank()) return null
             val port = trimmed.substring(lastColon + 1).toIntOrNull()
             if (port == null || port !in 1..65535) return null
             host to port
@@ -632,5 +653,13 @@ object LinkParser {
     } catch (_: Exception) {
         s
     }
-}
 
+    private fun removeSchemePrefix(raw: String, scheme: String): String {
+        val prefixLength = scheme.length + 3 // ://
+        return if (raw.length >= prefixLength && raw.substring(0, prefixLength).equals("$scheme://", ignoreCase = true)) {
+            raw.substring(prefixLength)
+        } else {
+            raw
+        }
+    }
+}

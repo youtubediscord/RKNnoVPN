@@ -57,6 +57,14 @@ fun DashboardScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 16.dp),
     ) {
+            if (state.errorMessage != null) {
+                StatusMessageCard(
+                    text = state.errorMessage ?: "",
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // -- Connection indicator --
@@ -129,6 +137,26 @@ fun DashboardScreen(
             TrafficCountersRow(state)
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun StatusMessageCard(
+    text: String,
+    color: androidx.compose.ui.graphics.Color,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = color.copy(alpha = 0.12f),
+        ),
+    ) {
+        Text(
+            text = text,
+            color = color,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(12.dp),
+        )
     }
 }
 

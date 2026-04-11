@@ -71,6 +71,7 @@
     <string name="camera_placeholder">Здесь будет превью камеры</string>
     <string name="subscription_url_hint">https://example.com/sub</string>
     <string name="fetch">Загрузить</string>
+    <string name="importing">Импорт…</string>
     <string name="import_selected">Импорт выбранных (%d)</string>
     <string name="no_nodes_detected">Серверы не найдены</string>
     <string name="nodes_detected">Найдено серверов: %d</string>
@@ -80,6 +81,8 @@
     <string name="apps_empty">Приложения не найдены.\nУстановите демон для маршрутизации по приложениям.</string>
     <string name="app_picker_title">Прокси для приложений</string>
     <string name="app_picker_banner">Выбранные приложения работают через прокси. Остальные подключаются напрямую.</string>
+    <string name="app_picker_banner_bypass">Выбранные приложения подключаются напрямую. Остальные идут через прокси.</string>
+    <string name="app_picker_banner_disabled">Выбор приложений не используется в текущем режиме маршрутизации. Переключите Маршрутизацию на Белый список или Исключения в настройках.</string>
     <string name="template_browsers">Браузеры</string>
     <string name="template_social">Соцсети</string>
     <string name="template_streaming">Стриминг</string>
@@ -87,13 +90,16 @@
     <string name="search_apps">Поиск приложений…</string>
     <string name="show_system_apps">Системные приложения</string>
     <string name="proxied_count">Через прокси: %d</string>
+    <string name="bypassed_count">Напрямую: %d</string>
     <string name="apply">Применить</string>
     <string name="loading_apps">Загрузка приложений…</string>
+    <string name="app_picker_mode_disabled">Выбор приложений недоступен в текущем режиме маршрутизации.</string>
 
     <!-- Settings -->
     <string name="settings_routing">Маршрутизация</string>
     <string name="routing_global">Глобально</string>
     <string name="routing_whitelist">Белый список</string>
+    <string name="routing_bypass">Исключения</string>
     <string name="routing_direct">Напрямую</string>
     <string name="settings_dns">DNS</string>
     <string name="dns_cloudflare">Cloudflare</string>

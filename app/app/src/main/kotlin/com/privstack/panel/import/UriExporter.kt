@@ -59,8 +59,14 @@ object UriExporter {
 
         val query = encodeQuery(params)
         val name = urlEncode(node.name)
-
-        return "vless://$uuid@$host:$port?$query#$name"
+        return buildStandardUri(
+            scheme = "vless",
+            userInfo = uuid,
+            host = host,
+            port = port,
+            query = query,
+            name = name,
+        )
     }
 
     /**
@@ -150,6 +156,17 @@ object UriExporter {
             put("fp", tlsSettings?.str("fingerprint") ?: "")
             val alpn = tlsSettings?.arr("alpn")
             put("alpn", alpn?.joinToString(",") { it.jsonPrimitive.content } ?: "")
+            if (tlsSettings?.str("allowInsecure") == "true") {
+                put("allowInsecure", "1")
+            }
+
+            if (network == "grpc") {
+                val transport = getTransportSettings(stream, network)
+                val mode = transport?.str("mode")
+                if (!mode.isNullOrEmpty()) put("mode", mode)
+                val authority = transport?.str("authority")
+                if (!authority.isNullOrEmpty()) put("authority", authority)
+            }
         }
 
         val jsonStr = Json.encodeToString(JsonObject.serializer(), vmessObj)
@@ -178,8 +195,14 @@ object UriExporter {
 
         val query = encodeQuery(params)
         val name = urlEncode(node.name)
-
-        return "trojan://$password@$host:$port?$query#$name"
+        return buildStandardUri(
+            scheme = "trojan",
+            userInfo = password,
+            host = host,
+            port = port,
+            query = query,
+            name = name,
+        )
     }
 
     /**
@@ -371,6 +394,19 @@ object UriExporter {
         return params.entries.joinToString("&") { (k, v) ->
             "${urlEncode(k)}=${urlEncode(v)}"
         }
+    }
+
+    private fun buildStandardUri(
+        scheme: String,
+        userInfo: String,
+        host: String,
+        port: String,
+        query: String,
+        name: String,
+    ): String {
+        val base = "$scheme://$userInfo@$host:$port"
+        val withQuery = if (query.isNotEmpty()) "$base?$query" else base
+        return if (name.isNotEmpty()) "$withQuery#$name" else withQuery
     }
 
     // ---------- JsonObject navigation extensions ----------

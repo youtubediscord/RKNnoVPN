@@ -9,16 +9,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.privstack.panel.repository.ProfileRepository
+import com.privstack.panel.repository.StatusRepository
 import com.privstack.panel.ui.navigation.BottomNavBar
 import com.privstack.panel.ui.navigation.NavGraph
 import com.privstack.panel.ui.navigation.TopLevelRoute
 import com.privstack.panel.ui.theme.PrivStackTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject lateinit var profileRepository: ProfileRepository
+    @Inject lateinit var statusRepository: StatusRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,5 +61,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        statusRepository.startPolling()
+        lifecycleScope.launch {
+            profileRepository.refresh()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        statusRepository.stopPolling()
     }
 }

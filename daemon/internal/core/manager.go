@@ -166,7 +166,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	// 4. Wait for tproxy port.
 	tproxyPort := m.config.Proxy.TProxyPort
 	if tproxyPort == 0 {
-		tproxyPort = 10808
+		tproxyPort = 10853
 	}
 	if err := WaitForPort("127.0.0.1", tproxyPort, 30*time.Second); err != nil {
 		m.logger.Printf("port %d did not open in time, killing pid %d", tproxyPort, m.pid)
@@ -325,7 +325,7 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	// 4. Wait for port.
 	tproxyPort := m.config.Proxy.TProxyPort
 	if tproxyPort == 0 {
-		tproxyPort = 10808
+		tproxyPort = 10853
 	}
 	if err := WaitForPort("127.0.0.1", tproxyPort, 30*time.Second); err != nil {
 		_ = m.process.Signal(syscall.SIGKILL)
@@ -401,9 +401,13 @@ func (m *CoreManager) killProcess() error {
 // scriptEnv returns the environment variables that shell scripts expect.
 // These must match the validate_env() check in iptables.sh.
 func (m *CoreManager) scriptEnv() map[string]string {
+	tproxyPort := m.config.Proxy.TProxyPort
+	if tproxyPort == 0 {
+		tproxyPort = 10853
+	}
 	dnsPort := m.config.Proxy.DNSPort
 	if dnsPort == 0 {
-		dnsPort = 10853
+		dnsPort = 10856
 	}
 	apiPort := m.config.Proxy.APIPort
 	if apiPort == 0 {
@@ -432,7 +436,7 @@ func (m *CoreManager) scriptEnv() map[string]string {
 	return map[string]string{
 		"PRIVSTACK_DIR": m.dataDir,
 		"CORE_GID":      strconv.Itoa(gid),
-		"TPROXY_PORT":   strconv.Itoa(m.config.Proxy.TProxyPort),
+		"TPROXY_PORT":   strconv.Itoa(tproxyPort),
 		"DNS_PORT":      strconv.Itoa(dnsPort),
 		"API_PORT":      strconv.Itoa(apiPort),
 		"FWMARK":        fmt.Sprintf("0x%x", mark),

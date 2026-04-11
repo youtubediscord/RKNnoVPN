@@ -203,7 +203,15 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	logger.Println("forking new privd")
 	if err := relaunchDaemon(dataDir); err != nil {
 		rollbackBinaries()
-		return fmt.Errorf("relaunch daemon: %w", err)
+		// Removing the old socket path is required before relaunch, but if the
+		// new daemon never comes up the still-running old daemon becomes
+		// unreachable. After rollback, try to bring the previous daemon version
+		// back so the device is not left without a control socket.
+		if recoverErr := relaunchDaemon(dataDir); recoverErr != nil {
+			return fmt.Errorf("relaunch daemon: %w; recovery relaunch failed: %v", err, recoverErr)
+		}
+		go ScheduleSelfExit(SelfExitDelay)
+		return fmt.Errorf("relaunch daemon: %w; previous daemon restored", err)
 	}
 
 	// --- 10. Clean up backup (success path) ---
@@ -295,11 +303,11 @@ func relaunchDaemon(dataDir string) error {
 		logDir = filepath.Join(dataDir, "log")
 	}
 	os.MkdirAll(logDir, 0750)
-	logFile := filepath.Join(logDir, "daemon.log")
+	logFile := filepath.Join(logDir, "privd.log")
 
 	runDir := filepath.Join(dataDir, "run")
 	os.MkdirAll(runDir, 0750)
-	pidFile := filepath.Join(runDir, "daemon.pid")
+	pidFile := filepath.Join(runDir, "privd.pid")
 
 	// Remove old socket so the new daemon can bind.
 	sockPath := filepath.Join(runDir, "daemon.sock")

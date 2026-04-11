@@ -3,8 +3,10 @@ package com.privstack.panel.ui.settings
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.privstack.panel.BuildConfig
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
+import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.repository.CommandOutcome
 import com.privstack.panel.repository.ProfileRepository
 import com.privstack.panel.repository.StatusRepository
@@ -12,6 +14,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -33,7 +37,7 @@ private fun isMethodNotFound(result: DaemonClientResult.DaemonError): Boolean =
     result.message.contains("unknown command", ignoreCase = true) ||
     result.message.contains("method not found", ignoreCase = true)
 
-enum class RoutingMode { GLOBAL, WHITELIST, DIRECT }
+enum class RoutingMode { GLOBAL, WHITELIST, BYPASS, DIRECT }
 
 enum class DnsPreset(val label: String, val url: String) {
     CLOUDFLARE("Cloudflare", "https://1.1.1.1/dns-query"),
@@ -53,7 +57,7 @@ enum class UpdateStatus {
 }
 
 data class UpdateUiState(
-    val currentVersion: String = "0.1.0",
+    val currentVersion: String = "unknown",
     val latestVersion: String = "",
     val status: UpdateStatus = UpdateStatus.IDLE,
     val changelog: String = "",
@@ -77,8 +81,8 @@ data class SettingsUiState(
     // Theme
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     // About
-    val appVersion: String = "0.1.0",
-    val githubUrl: String = "https://github.com/nickolay168/RKNnoVPN",
+    val appVersion: String = BuildConfig.VERSION_NAME,
+    val githubUrl: String = "https://github.com/youtubediscord/RKNnoVPN",
     // Error
     val errorMessage: String? = null,
 )
@@ -97,18 +101,20 @@ class SettingsViewModel @Inject constructor(
     val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
 
     init {
-        loadCurrentSettings()
+        observeProfile()
         loadVersionInfo()
     }
 
     // ---- Public actions ----
 
     fun setRoutingMode(mode: RoutingMode) {
+        val previousMode = _uiState.value.routingMode
         _uiState.update { it.copy(routingMode = mode, errorMessage = null) }
         viewModelScope.launch {
             val profileMode = when (mode) {
                 RoutingMode.GLOBAL -> com.privstack.panel.model.RoutingMode.PROXY_ALL
                 RoutingMode.WHITELIST -> com.privstack.panel.model.RoutingMode.PER_APP
+                RoutingMode.BYPASS -> com.privstack.panel.model.RoutingMode.PER_APP_BYPASS
                 RoutingMode.DIRECT -> com.privstack.panel.model.RoutingMode.RULES
             }
             val ok = profileRepository.updateConfig { config ->
@@ -117,15 +123,17 @@ class SettingsViewModel @Inject constructor(
             if (!ok) {
                 val err = profileRepository.error.value
                 Log.w(TAG, "Failed to set routing mode: $err")
-                _uiState.update { it.copy(errorMessage = err) }
+                profileRepository.refresh()
+                _uiState.update { it.copy(routingMode = previousMode, errorMessage = err) }
             }
         }
     }
 
     fun setDnsPreset(preset: DnsPreset) {
+        val previousPreset = _uiState.value.dnsPreset
         _uiState.update { it.copy(dnsPreset = preset, errorMessage = null) }
         if (preset != DnsPreset.CUSTOM) {
-            saveDnsToProfile(preset.url)
+            saveDnsToProfile(preset.url, previousPreset)
         }
     }
 
@@ -136,8 +144,9 @@ class SettingsViewModel @Inject constructor(
     fun applyCustomDns() {
         val url = _uiState.value.customDnsUrl
         if (url.isNotBlank()) {
+            val previousPreset = _uiState.value.dnsPreset
             _uiState.update { it.copy(dnsPreset = DnsPreset.CUSTOM, errorMessage = null) }
-            saveDnsToProfile(url)
+            saveDnsToProfile(url, previousPreset)
         }
     }
 
@@ -240,10 +249,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = daemonClient.updateDownload()) {
                 is DaemonClientResult.Ok -> {
+                    val hasArtifacts = result.data.modulePath.isNotBlank() || result.data.apkPath.isNotBlank()
                     _updateState.update {
                         it.copy(
-                            status = UpdateStatus.DOWNLOADED,
-                            downloadProgress = 1f,
+                            status = if (hasArtifacts) UpdateStatus.DOWNLOADED else UpdateStatus.ERROR,
+                            downloadProgress = if (hasArtifacts) 1f else 0f,
+                            errorMessage = if (hasArtifacts) "" else "Update download finished without any artifacts",
                         )
                     }
                 }
@@ -279,7 +290,17 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = daemonClient.updateInstall()) {
                 is DaemonClientResult.Ok -> {
-                    _updateState.update { it.copy(status = UpdateStatus.INSTALLED) }
+                    val installedSomething = result.data.moduleInstalled || result.data.apkInstalled
+                    _updateState.update {
+                        it.copy(
+                            status = if (installedSomething) UpdateStatus.INSTALLED else UpdateStatus.ERROR,
+                            errorMessage = if (installedSomething) {
+                                ""
+                            } else {
+                                result.data.apkError ?: "Update install completed without installing module or APK"
+                            },
+                        )
+                    }
                 }
                 is DaemonClientResult.DaemonError -> {
                     if (isMethodNotFound(result)) {
@@ -314,30 +335,35 @@ class SettingsViewModel @Inject constructor(
      * Load the current daemon profile config and project relevant settings
      * into [SettingsUiState].
      */
-    private fun loadCurrentSettings() {
+    private fun observeProfile() {
         viewModelScope.launch {
-            val config = profileRepository.getOrLoad() ?: return@launch
+            profileRepository.profile
+                .filterNotNull()
+                .collect(::applyProfileConfig)
+        }
+        viewModelScope.launch {
+            profileRepository.getOrLoad()
+        }
+    }
 
-            // Map daemon routing mode to UI enum
-            val routingMode = when (config.routing.mode) {
-                com.privstack.panel.model.RoutingMode.PROXY_ALL -> RoutingMode.GLOBAL
-                com.privstack.panel.model.RoutingMode.PER_APP -> RoutingMode.WHITELIST
-                com.privstack.panel.model.RoutingMode.PER_APP_BYPASS -> RoutingMode.WHITELIST
-                com.privstack.panel.model.RoutingMode.RULES -> RoutingMode.DIRECT
-            }
+    private fun applyProfileConfig(config: ProfileConfig) {
+        val routingMode = when (config.routing.mode) {
+            com.privstack.panel.model.RoutingMode.PROXY_ALL -> RoutingMode.GLOBAL
+            com.privstack.panel.model.RoutingMode.PER_APP -> RoutingMode.WHITELIST
+            com.privstack.panel.model.RoutingMode.PER_APP_BYPASS -> RoutingMode.BYPASS
+            com.privstack.panel.model.RoutingMode.RULES -> RoutingMode.DIRECT
+        }
 
-            // Map daemon DNS config to UI preset
-            val dnsUrl = config.dns.remoteDns
-            val dnsPreset = DnsPreset.entries.find { it.url == dnsUrl && it != DnsPreset.CUSTOM }
-                ?: DnsPreset.CUSTOM
+        val dnsUrl = config.dns.remoteDns
+        val dnsPreset = DnsPreset.entries.find { it.url == dnsUrl && it != DnsPreset.CUSTOM }
+            ?: DnsPreset.CUSTOM
 
-            _uiState.update {
-                it.copy(
-                    routingMode = routingMode,
-                    dnsPreset = dnsPreset,
-                    customDnsUrl = if (dnsPreset == DnsPreset.CUSTOM) dnsUrl else it.customDnsUrl,
-                )
-            }
+        _uiState.update {
+            it.copy(
+                routingMode = routingMode,
+                dnsPreset = dnsPreset,
+                customDnsUrl = if (dnsPreset == DnsPreset.CUSTOM) dnsUrl else it.customDnsUrl,
+            )
         }
     }
 
@@ -354,6 +380,9 @@ class SettingsViewModel @Inject constructor(
                             moduleVersion = info.daemonVersion,
                             daemonStatusText = "Running (core: ${info.coreVersion})",
                         )
+                    }
+                    _updateState.update {
+                        it.copy(currentVersion = info.daemonVersion)
                     }
                 }
                 is DaemonClientResult.DaemonNotFound -> {
@@ -383,7 +412,7 @@ class SettingsViewModel @Inject constructor(
     /**
      * Save the DNS URL to the daemon's profile config.
      */
-    private fun saveDnsToProfile(url: String) {
+    private fun saveDnsToProfile(url: String, previousPreset: DnsPreset) {
         viewModelScope.launch {
             val ok = profileRepository.updateConfig { config ->
                 config.copy(dns = config.dns.copy(remoteDns = url))
@@ -391,7 +420,8 @@ class SettingsViewModel @Inject constructor(
             if (!ok) {
                 val err = profileRepository.error.value
                 Log.w(TAG, "Failed to save DNS setting: $err")
-                _uiState.update { it.copy(errorMessage = err) }
+                profileRepository.refresh()
+                _uiState.update { it.copy(dnsPreset = previousPreset, errorMessage = err) }
             }
         }
     }

@@ -1,6 +1,8 @@
 package com.privstack.panel.repository
 
 import android.util.Log
+import com.privstack.panel.`import`.LinkParser
+import com.privstack.panel.`import`.SubscriptionHandler
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.Node
@@ -24,7 +26,7 @@ import javax.inject.Singleton
  * - On explicit [refresh] (typically called from Activity.onResume)
  * - After every mutating operation (add/remove/update node, change routing, etc.)
  *
- * All writes go through the daemon (`config.set`) and then re-read to keep
+ * All writes go through the daemon (`config-set`) and then re-read to keep
  * the cache consistent. If a write fails the cache is NOT updated, so the UI
  * always reflects the actual daemon state.
  */
@@ -70,6 +72,7 @@ class ProfileRepository @Inject constructor(
                 else -> {
                     val msg = describeFailure(result)
                     Log.w(TAG, "refresh failed: $msg")
+                    _profile.value = null
                     _error.value = msg
                     null
                 }
@@ -112,26 +115,25 @@ class ProfileRepository @Inject constructor(
         config.copy(activeNodeId = nodeId)
     }
 
-    /** Import nodes from share-link text. Returns imported nodes or empty on failure. */
-    suspend fun importNodes(links: String): List<Node> = withContext(Dispatchers.IO) {
-        _loading.value = true
-        _error.value = null
-        try {
-            when (val result = client.configImport(links)) {
-                is DaemonClientResult.Ok -> {
-                    // Re-read full config to sync cache
-                    refresh()
-                    result.data
+    /** Import nodes from share links or refresh a subscription URL. */
+    suspend fun importNodes(input: String): List<Node> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            _loading.value = true
+            _error.value = null
+            try {
+                val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                    _error.value = "No profile loaded"
+                    return@withLock emptyList()
                 }
-                else -> {
-                    val msg = describeFailure(result)
-                    Log.w(TAG, "importNodes failed: $msg")
-                    _error.value = msg
-                    emptyList()
+
+                if (LinkParser.isSubscriptionUrl(input.trim())) {
+                    importSubscriptionUnlocked(current, input.trim())
+                } else {
+                    importDirectLinksUnlocked(current, input)
                 }
+            } finally {
+                _loading.value = false
             }
-        } finally {
-            _loading.value = false
         }
     }
 
@@ -145,8 +147,7 @@ class ProfileRepository @Inject constructor(
             when (val result = client.configSet(config)) {
                 is DaemonClientResult.Ok -> {
                     // Re-read to confirm daemon accepted the config
-                    refreshUnlocked()
-                    true
+                    refreshUnlockedWithStatus("setProfile")
                 }
                 else -> {
                     val msg = describeFailure(result)
@@ -176,15 +177,14 @@ class ProfileRepository @Inject constructor(
         _loading.value = true
         _error.value = null
         try {
-            val current = _profile.value ?: run {
+            val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                 _error.value = "No profile loaded"
                 return@withLock false
             }
             val updated = transform(current)
             when (val result = client.configSet(updated)) {
                 is DaemonClientResult.Ok -> {
-                    refreshUnlocked()
-                    true
+                    refreshUnlockedWithStatus(tag)
                 }
                 else -> {
                     val msg = describeFailure(result)
@@ -205,10 +205,140 @@ class ProfileRepository @Inject constructor(
                 _profile.value = result.data
             }
             else -> {
+                _profile.value = null
                 Log.w(TAG, "refreshUnlocked failed: ${describeFailure(result)}")
             }
         }
     }
+
+    private suspend fun refreshUnlockedWithStatus(tag: String): Boolean {
+        return when (val result = client.configGet()) {
+            is DaemonClientResult.Ok -> {
+                _profile.value = result.data
+                true
+            }
+            else -> {
+                val msg = describeFailure(result)
+                _profile.value = null
+                _error.value = msg
+                Log.w(TAG, "$tag post-write refresh failed: $msg")
+                false
+            }
+        }
+    }
+
+    private suspend fun refreshUnlockedOrNull(): ProfileConfig? {
+        return when (val result = client.configGet()) {
+            is DaemonClientResult.Ok -> {
+                _profile.value = result.data
+                result.data
+            }
+            else -> {
+                val msg = describeFailure(result)
+                _profile.value = null
+                Log.w(TAG, "refreshUnlockedOrNull failed: $msg")
+                _error.value = msg
+                null
+            }
+        }
+    }
+
+    private suspend fun importDirectLinksUnlocked(
+        current: ProfileConfig,
+        rawInput: String
+    ): List<Node> {
+        val detectedUris = LinkParser.detectUris(rawInput)
+        if (detectedUris.isEmpty()) {
+            _error.value = "No valid proxy links detected"
+            return emptyList()
+        }
+
+        val parsedNodes = detectedUris.mapNotNull(LinkParser::parse)
+        if (parsedNodes.isEmpty()) {
+            _error.value = "No supported proxy links could be parsed"
+            return emptyList()
+        }
+
+        val merged = mergeNodes(current, parsedNodes)
+        return if (persistProfileUnlocked(merged.updatedConfig)) {
+            merged.importedNodes
+        } else {
+            emptyList()
+        }
+    }
+
+    private suspend fun importSubscriptionUnlocked(
+        current: ProfileConfig,
+        url: String
+    ): List<Node> {
+        val fetched = when (val result = client.subscriptionFetch(url)) {
+            is DaemonClientResult.Ok -> result.data
+            else -> {
+                val msg = describeFailure(result)
+                Log.w(TAG, "subscriptionFetch failed: $msg")
+                _error.value = msg
+                return emptyList()
+            }
+        }
+
+        val parsed = SubscriptionHandler.parseResponse(fetched.body, fetched.headers)
+        if (parsed.nodes.isEmpty()) {
+            _error.value = if (parsed.parseFailures > 0) {
+                "Subscription did not contain any supported proxy links"
+            } else {
+                "Subscription was empty"
+            }
+            return emptyList()
+        }
+
+        val merged = mergeNodes(current, parsed.nodes, dropRemoved = true)
+        return if (persistProfileUnlocked(merged.updatedConfig)) {
+            parsed.nodes
+        } else {
+            emptyList()
+        }
+    }
+
+    private suspend fun persistProfileUnlocked(config: ProfileConfig): Boolean {
+        return when (val result = client.configSet(config)) {
+            is DaemonClientResult.Ok -> {
+                refreshUnlockedWithStatus("persistProfileUnlocked")
+            }
+            else -> {
+                val msg = describeFailure(result)
+                Log.w(TAG, "persistProfileUnlocked failed: $msg")
+                _error.value = msg
+                false
+            }
+        }
+    }
+
+    private fun mergeNodes(
+        current: ProfileConfig,
+        incoming: List<Node>,
+        dropRemoved: Boolean = false,
+    ): MergeResult {
+        val preview = SubscriptionHandler.previewMerge(current.nodes, incoming)
+        val mergedNodes = SubscriptionHandler.applyMerge(preview, dropRemoved = dropRemoved)
+        val nextActiveId = current.activeNodeId
+            ?.takeIf { activeId -> mergedNodes.any { it.id == activeId } }
+            ?: preview.added.firstOrNull()?.id
+            ?: preview.updated.firstOrNull()?.id
+            ?: mergedNodes.firstOrNull()?.id
+
+        return MergeResult(
+            importedNodes = incoming,
+            updatedConfig = current.copy(
+                nodes = mergedNodes,
+                activeNodeId = nextActiveId,
+            )
+        )
+    }
+
+    private data class MergeResult(
+        val importedNodes: List<Node>,
+        val updatedConfig: ProfileConfig,
+    )
 
     private fun <T> describeFailure(result: DaemonClientResult<T>): String = when (result) {
         is DaemonClientResult.DaemonError -> "Daemon error ${result.code}: ${result.message}"

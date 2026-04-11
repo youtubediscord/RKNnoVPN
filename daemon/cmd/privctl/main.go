@@ -17,10 +17,15 @@ var commands = map[string]string{
 	"stop":            "Stop proxy",
 	"reload":          "Reload config and restart proxy",
 	"health":          "Get health check status",
+	"audit":           "Run privacy/security audit",
+	"app.list":        "List installed apps known to the daemon",
+	"app.resolveUid":  "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
 	"config-get":      "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
 	"config-set":      "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
+	"config-set-many": "Set multiple config values atomically: privctl config-set-many '{\"values\":{...},\"reload\":true}'",
 	"config-list":     "List config sections",
 	"config-import":   "Import full config: privctl config-import '{...}'",
+	"subscription-fetch": "Fetch subscription URL via daemon network access",
 	"logs":            "Get recent log lines: privctl logs '{\"lines\":100}'",
 	"version":         "Get daemon version",
 	"update-check":    "Check for updates from GitHub Releases",
@@ -173,8 +178,9 @@ func printUsage() {
 	}
 
 	order := []string{
-		"status", "start", "stop", "reload", "health",
-		"config-get", "config-set", "config-list", "config-import",
+		"status", "start", "stop", "reload", "health", "audit",
+		"app.list", "app.resolveUid",
+		"config-get", "config-set", "config-set-many", "config-list", "config-import", "subscription-fetch",
 		"logs", "version",
 		"update-check", "update-download", "update-install",
 	}
@@ -190,6 +196,8 @@ func printUsage() {
 	fmt.Println("Examples:")
 	fmt.Println("  privctl status")
 	fmt.Println("  privctl start")
+	fmt.Println("  privctl audit")
+	fmt.Println("  privctl app.resolveUid '{\"uid\":10123}'")
 	fmt.Println("  privctl config-get '{\"key\":\"proxy\"}'")
 	fmt.Println("  privctl config-set '{\"key\":\"autostart\",\"value\":false}'")
 	fmt.Println("  privctl logs '{\"lines\":100}'")

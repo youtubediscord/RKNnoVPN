@@ -126,6 +126,7 @@ func (r *RescueManager) Attempt() error {
 
 	if err != nil {
 		r.logger.Printf("strategy %s failed: %v", strategy, err)
+		r.core.SetState(core.StateDegraded)
 		return fmt.Errorf("rescue: %s: %w", strategy, err)
 	}
 
@@ -173,6 +174,19 @@ func (r *RescueManager) Reset() {
 	r.attempts = 0
 	r.lastAttempt = time.Time{}
 	r.logger.Println("attempt counter reset")
+}
+
+// SetConfig updates rescue parameters after a daemon config reload/apply.
+func (r *RescueManager) SetConfig(cfg *config.Config) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cfg = cfg
+	if cfg.Rescue.MaxAttempts >= 1 {
+		r.maxAttempts = cfg.Rescue.MaxAttempts
+	}
+	if cfg.Rescue.CooldownSec > 0 {
+		r.cooldown = time.Duration(cfg.Rescue.CooldownSec) * time.Second
+	}
 }
 
 // Attempts returns the current attempt count.
@@ -246,9 +260,13 @@ func (r *RescueManager) fullRestart() error {
 // --------------------------------------------------------------------------
 
 func (r *RescueManager) scriptEnv() map[string]string {
+	tproxyPort := r.cfg.Proxy.TProxyPort
+	if tproxyPort == 0 {
+		tproxyPort = 10853
+	}
 	dnsPort := r.cfg.Proxy.DNSPort
 	if dnsPort == 0 {
-		dnsPort = 10853
+		dnsPort = 10856
 	}
 	apiPort := r.cfg.Proxy.APIPort
 	if apiPort == 0 {
@@ -275,7 +293,7 @@ func (r *RescueManager) scriptEnv() map[string]string {
 	return map[string]string{
 		"PRIVSTACK_DIR":  r.dataDir,
 		"CORE_GID":       fmt.Sprintf("%d", gid),
-		"TPROXY_PORT":    fmt.Sprintf("%d", r.cfg.Proxy.TProxyPort),
+		"TPROXY_PORT":    fmt.Sprintf("%d", tproxyPort),
 		"DNS_PORT":       fmt.Sprintf("%d", dnsPort),
 		"API_PORT":       fmt.Sprintf("%d", apiPort),
 		"FWMARK":         fmt.Sprintf("0x%x", mark),

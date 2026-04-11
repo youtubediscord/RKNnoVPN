@@ -55,6 +55,13 @@ func NewNetworkWatcher(dataDir string, env map[string]string, logger *log.Logger
 	}
 }
 
+// SetEnv updates the environment that will be used for future handler runs.
+func (w *NetworkWatcher) SetEnv(env map[string]string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.env = env
+}
+
 // Start launches the inotifyd subprocess and a goroutine that reads its
 // output. Each line of inotifyd output triggers handleNetworkChange.
 func (w *NetworkWatcher) Start() error {

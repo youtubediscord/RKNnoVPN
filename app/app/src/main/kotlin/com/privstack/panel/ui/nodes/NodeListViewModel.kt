@@ -64,24 +64,51 @@ class NodeListViewModel @Inject constructor(
 
     fun selectNode(nodeId: String) {
         viewModelScope.launch {
+            val previousNodeId = _uiState.value.activeNodeId
             _uiState.update { it.copy(activeNodeId = nodeId, errorMessage = null) }
             val ok = profileRepository.setActiveNode(nodeId)
             if (ok) {
-                Log.d(TAG, "Active node set to $nodeId, starting connection")
+                Log.d(TAG, "Active node set to $nodeId, applying connection state")
                 when (val result = daemonClient.start()) {
                     is DaemonClientResult.Ok -> {
                         Log.d(TAG, "Start succeeded for node $nodeId")
                     }
+                    is DaemonClientResult.DaemonError -> {
+                        // If the core is already running, a reload hot-swaps the
+                        // active node without forcing the user to disconnect first.
+                        if (result.code == -32002 ||
+                            result.message.contains("already", ignoreCase = true)
+                        ) {
+                            when (val reload = daemonClient.reload()) {
+                                is DaemonClientResult.Ok -> {
+                                    Log.d(TAG, "Reload succeeded for node $nodeId")
+                                }
+                                else -> {
+                                    val msg = describeError(reload)
+                                    Log.w(TAG, "Reload failed for node $nodeId: $msg")
+                                    profileRepository.refresh()
+                                    _uiState.update { it.copy(activeNodeId = previousNodeId, errorMessage = msg) }
+                                }
+                            }
+                        } else {
+                            val msg = describeError(result)
+                            Log.w(TAG, "Start failed for node $nodeId: $msg")
+                            profileRepository.refresh()
+                            _uiState.update { it.copy(activeNodeId = previousNodeId, errorMessage = msg) }
+                        }
+                    }
                     else -> {
                         val msg = describeError(result)
                         Log.w(TAG, "Start failed for node $nodeId: $msg")
-                        _uiState.update { it.copy(errorMessage = msg) }
+                        profileRepository.refresh()
+                        _uiState.update { it.copy(activeNodeId = previousNodeId, errorMessage = msg) }
                     }
                 }
             } else {
                 val err = profileRepository.error.value
+                profileRepository.refresh()
                 _uiState.update {
-                    it.copy(errorMessage = err ?: "Failed to set active node")
+                    it.copy(activeNodeId = previousNodeId, errorMessage = err ?: "Failed to set active node")
                 }
             }
         }
@@ -272,8 +299,8 @@ class NodeListViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
-            // The daemon handles the HTTP fetch (APK has no INTERNET permission).
-            // We pass the subscription URL as a link to config.import.
+            // The repository asks the daemon to fetch the URL, then merges the
+            // parsed nodes into the stored profile locally.
             val imported = profileRepository.importNodes(url)
             if (imported.isEmpty()) {
                 val err = profileRepository.error.value
@@ -284,11 +311,14 @@ class NodeListViewModel @Inject constructor(
                     )
                 }
             } else {
-                // Show imported nodes as candidates for review
+                val firstGroup = imported.firstOrNull()?.group
                 _uiState.update {
                     it.copy(
-                        importCandidates = imported.map { ImportCandidate(it, selected = true) },
+                        showImportSheet = false,
+                        importCandidates = emptyList(),
                         isLoading = false,
+                        errorMessage = null,
+                        selectedGroup = firstGroup ?: it.selectedGroup,
                     )
                 }
             }
@@ -307,10 +337,12 @@ class NodeListViewModel @Inject constructor(
                     val nodes = config.nodes
                     val groups = nodes.map { it.group }.distinct().ifEmpty { listOf("Default") }
                     _uiState.update { state ->
+                        val selectedGroup = state.selectedGroup.takeIf { it in groups } ?: groups.first()
                         state.copy(
                             nodes = sortNodes(nodes, state.sortMode),
                             groups = groups,
-                            activeNodeId = config.activeNodeId ?: state.activeNodeId,
+                            selectedGroup = selectedGroup,
+                            activeNodeId = config.activeNodeId,
                         )
                     }
                 }

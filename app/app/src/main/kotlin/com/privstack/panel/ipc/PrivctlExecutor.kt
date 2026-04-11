@@ -17,6 +17,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.concurrent.thread
 import kotlin.coroutines.resume
 
 /**
@@ -48,15 +49,12 @@ class PrivctlExecutor @Inject constructor() {
 
         /** Exit code returned by `su` when the user denies the superuser prompt. */
         private const val SU_DENIED_EXIT_CODE = 13
-
-        /** Common error code the daemon sends when it is not running. */
-        private const val DAEMON_NOT_RUNNING_CODE = -32001
     }
 
     /**
      * Execute a single privctl JSON-RPC method.
      *
-     * @param method  The method name (e.g. "status", "config.get").
+     * @param method  The method name (e.g. "status", "config-get").
      * @param params  Optional parameter object.
      * @param timeoutMs  Maximum wall-clock time for the command.
      * @return A [PrivctlResult] that is never null.
@@ -85,7 +83,7 @@ class PrivctlExecutor @Inject constructor() {
     ): PrivctlResult = suspendCancellableCoroutine { cont ->
         var process: Process? = null
         try {
-            val paramsJson = if (params.isEmpty()) "" else " '${params}'"
+            val paramsJson = if (params.isEmpty()) "" else " ${shellQuote(params.toString())}"
             val command = arrayOf(
                 "su", "-c", "$privctlPath $method$paramsJson"
             )
@@ -98,12 +96,20 @@ class PrivctlExecutor @Inject constructor() {
                 process.destroy()
             }
 
-            val stdout = BufferedReader(InputStreamReader(process.inputStream))
-                .use { it.readText().trim() }
-            val stderr = BufferedReader(InputStreamReader(process.errorStream))
-                .use { it.readText().trim() }
+            var stdout = ""
+            var stderr = ""
+            val stdoutReader = thread(start = true, name = "privctl-stdout") {
+                stdout = BufferedReader(InputStreamReader(process.inputStream))
+                    .use { it.readText().trim() }
+            }
+            val stderrReader = thread(start = true, name = "privctl-stderr") {
+                stderr = BufferedReader(InputStreamReader(process.errorStream))
+                    .use { it.readText().trim() }
+            }
 
             val exitCode = process.waitFor()
+            stdoutReader.join()
+            stderrReader.join()
 
             Log.d(TAG, "<<< exit=$exitCode stdout=${stdout.take(200)}")
 
@@ -208,6 +214,17 @@ class PrivctlExecutor @Inject constructor() {
 
         // Fallback: treat the entire object as the result
         return PrivctlResult.Success(jsonElement)
+    }
+
+    /**
+     * Quote an argument for safe passage through `su -c <command-string>`.
+     *
+     * We only get one shell-parsed command string here, so JSON params must be
+     * wrapped safely even when they contain apostrophes, spaces, or shell chars.
+     */
+    private fun shellQuote(value: String): String {
+        if (value.isEmpty()) return "''"
+        return "'" + value.replace("'", "'\"'\"'") + "'"
     }
 }
 

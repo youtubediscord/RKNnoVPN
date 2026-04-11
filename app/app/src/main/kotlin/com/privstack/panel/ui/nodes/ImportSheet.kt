@@ -148,7 +148,7 @@ fun ImportSheet(
                     CircularProgressIndicator(modifier = Modifier.size(24.dp))
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(
-                        text = "Importing...",
+                        text = stringResource(R.string.importing),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }

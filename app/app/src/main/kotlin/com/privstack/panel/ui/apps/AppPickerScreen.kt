@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.privstack.panel.R
+import com.privstack.panel.model.RoutingMode
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -59,7 +60,19 @@ fun AppPickerScreen(
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = viewModel::applySelection) {
+            FloatingActionButton(
+                onClick = viewModel::applySelection,
+                containerColor = if (state.supportsPerAppSelection) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                contentColor = if (state.supportsPerAppSelection) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            ) {
                 Icon(Icons.Filled.Check, contentDescription = stringResource(R.string.apply))
             }
         },
@@ -90,9 +103,35 @@ fun AppPickerScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = stringResource(R.string.app_picker_banner),
+                        text = stringResource(
+                            if (!state.supportsPerAppSelection) {
+                                R.string.app_picker_banner_disabled
+                            } else if (state.routingMode == RoutingMode.PER_APP_BYPASS) {
+                                R.string.app_picker_banner_bypass
+                            } else {
+                                R.string.app_picker_banner
+                            }
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+
+            if (state.errorMessage != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                    ),
+                ) {
+                    Text(
+                        text = state.errorMessage ?: "",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp),
                     )
                 }
             }
@@ -105,18 +144,22 @@ fun AppPickerScreen(
                 TemplateChip(
                     label = stringResource(R.string.template_browsers),
                     onClick = { viewModel.applyTemplate(AppTemplate.BROWSERS) },
+                    enabled = state.supportsPerAppSelection,
                 )
                 TemplateChip(
                     label = stringResource(R.string.template_social),
                     onClick = { viewModel.applyTemplate(AppTemplate.SOCIAL) },
+                    enabled = state.supportsPerAppSelection,
                 )
                 TemplateChip(
                     label = stringResource(R.string.template_streaming),
                     onClick = { viewModel.applyTemplate(AppTemplate.STREAMING) },
+                    enabled = state.supportsPerAppSelection,
                 )
                 TemplateChip(
                     label = stringResource(R.string.template_all_except_banks),
                     onClick = { viewModel.applyTemplate(AppTemplate.ALL_EXCEPT_BANKS) },
+                    enabled = state.supportsPerAppSelection,
                 )
             }
 
@@ -154,7 +197,14 @@ fun AppPickerScreen(
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 ) {
                     Text(
-                        text = stringResource(R.string.proxied_count, state.proxiedCount),
+                        text = stringResource(
+                            if (state.routingMode == RoutingMode.PER_APP_BYPASS) {
+                                R.string.bypassed_count
+                            } else {
+                                R.string.proxied_count
+                            },
+                            state.proxiedCount
+                        ),
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
@@ -200,6 +250,7 @@ fun AppPickerScreen(
                     ) { app ->
                         AppRow(
                             app = app,
+                            enabled = state.supportsPerAppSelection,
                             onToggle = { viewModel.toggleApp(app.packageName) },
                         )
                     }
@@ -213,9 +264,11 @@ fun AppPickerScreen(
 private fun TemplateChip(
     label: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     FilterChip(
         selected = false,
+        enabled = enabled,
         onClick = onClick,
         label = { Text(label) },
     )
@@ -224,6 +277,7 @@ private fun TemplateChip(
 @Composable
 private fun AppRow(
     app: AppInfo,
+    enabled: Boolean,
     onToggle: () -> Unit,
 ) {
     Row(
@@ -261,6 +315,7 @@ private fun AppRow(
 
         Checkbox(
             checked = app.isProxied,
+            enabled = enabled,
             onCheckedChange = { onToggle() },
         )
     }

@@ -4,8 +4,11 @@
 package health
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net"
+	neturl "net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -36,6 +39,12 @@ type HealthMonitor struct {
 	interval   time.Duration
 	threshold  int // consecutive failures before degraded
 	tproxyPort int // port to probe
+	dnsPort    int // local DNS listener port to probe
+	routeMark  int // fwmark that must exist in routing policy
+	dnsHost    string
+	dnsTimeout time.Duration
+	onDegraded func()
+	onRestored func()
 
 	failures   int
 	lastResult *HealthResult
@@ -54,6 +63,10 @@ func NewHealthMonitor(
 	interval time.Duration,
 	threshold int,
 	tproxyPort int,
+	dnsPort int,
+	routeMark int,
+	checkURL string,
+	timeout time.Duration,
 	logger *log.Logger,
 ) *HealthMonitor {
 	if logger == nil {
@@ -67,8 +80,58 @@ func NewHealthMonitor(
 		interval:   interval,
 		threshold:  threshold,
 		tproxyPort: tproxyPort,
+		dnsPort:    dnsPort,
+		routeMark:  routeMark,
+		dnsHost:    dnsProbeHost(checkURL),
+		dnsTimeout: normalizedDNSTimeout(timeout),
 		logger:     logger,
 	}
+}
+
+// SetOnDegraded installs a callback that fires when the monitor crosses the
+// failure threshold and marks the core degraded.
+func (h *HealthMonitor) SetOnDegraded(fn func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onDegraded = fn
+}
+
+// SetOnRestored installs a callback that fires when health returns to normal.
+func (h *HealthMonitor) SetOnRestored(fn func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onRestored = fn
+}
+
+// SetConfig updates runtime health-check parameters after config reload/apply.
+func (h *HealthMonitor) SetConfig(
+	interval time.Duration,
+	threshold int,
+	tproxyPort int,
+	dnsPort int,
+	routeMark int,
+	checkURL string,
+	timeout time.Duration,
+) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if interval > 0 {
+		h.interval = interval
+	}
+	if threshold >= 1 {
+		h.threshold = threshold
+	}
+	if tproxyPort > 0 {
+		h.tproxyPort = tproxyPort
+	}
+	if dnsPort > 0 {
+		h.dnsPort = dnsPort
+	}
+	if routeMark != 0 {
+		h.routeMark = routeMark
+	}
+	h.dnsHost = dnsProbeHost(checkURL)
+	h.dnsTimeout = normalizedDNSTimeout(timeout)
 }
 
 // Start launches the background check loop. It is safe to call
@@ -198,6 +261,12 @@ func (h *HealthMonitor) tick() {
 		if state == core.StateDegraded {
 			h.manager.SetState(core.StateRunning)
 		}
+		h.mu.Lock()
+		callback := h.onRestored
+		h.mu.Unlock()
+		if callback != nil {
+			go callback()
+		}
 		return
 	}
 
@@ -210,6 +279,12 @@ func (h *HealthMonitor) tick() {
 	if failures >= h.threshold && state != core.StateDegraded {
 		h.manager.SetState(core.StateDegraded)
 		h.logger.Printf("threshold reached — state set to degraded")
+		h.mu.Lock()
+		callback := h.onDegraded
+		h.mu.Unlock()
+		if callback != nil {
+			go callback()
+		}
 	}
 }
 
@@ -254,31 +329,76 @@ func (h *HealthMonitor) checkIptablesIntact() CheckResult {
 	return CheckResult{Pass: true, Detail: "iptables chain intact"}
 }
 
-// checkRoutingIntact verifies that the ip rule for fwmark 0x2023 is present.
+// checkRoutingIntact verifies that the configured fwmark rule is present for
+// both IPv4 and IPv6 policy routing.
 func (h *HealthMonitor) checkRoutingIntact() CheckResult {
+	mark := h.routeMark
+	if mark == 0 {
+		mark = 0x2023
+	}
+	markHex := fmt.Sprintf("0x%x", mark)
+	markDec := strconv.Itoa(mark)
+
 	out, err := core.ExecCommand("ip", "rule", "show")
 	if err != nil {
 		return CheckResult{Pass: false, Detail: fmt.Sprintf("ip rule show: %v", err)}
 	}
-	if strings.Contains(out, "0x2023") || strings.Contains(out, strconv.Itoa(0x2023)) {
-		return CheckResult{Pass: true, Detail: "fwmark rule present"}
+
+	out6, err := core.ExecCommand("ip", "-6", "rule", "show")
+	if err != nil {
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("ip -6 rule show: %v", err)}
 	}
-	return CheckResult{Pass: false, Detail: "fwmark 0x2023 rule missing"}
+
+	hasV4 := strings.Contains(out, markHex) || strings.Contains(out, markDec)
+	hasV6 := strings.Contains(out6, markHex) || strings.Contains(out6, markDec)
+	if hasV4 && hasV6 {
+		return CheckResult{Pass: true, Detail: fmt.Sprintf("fwmark rule %s present for IPv4 and IPv6", markHex)}
+	}
+	if hasV4 {
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("fwmark rule %s missing for IPv6", markHex)}
+	}
+	if hasV6 {
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("fwmark rule %s missing for IPv4", markHex)}
+	}
+	return CheckResult{Pass: false, Detail: fmt.Sprintf("fwmark %s rule missing", markHex)}
 }
 
 // checkDNS attempts a trivial DNS lookup via the system resolver.
 // This is best-effort: a failure here alone does not necessarily mean the
 // proxy is broken (the upstream DNS might be temporarily unreachable).
 func (h *HealthMonitor) checkDNS() CheckResult {
-	// We use a well-known domain that should always resolve.
-	out, err := core.ExecCommand("nslookup", "dns.google", "127.0.0.1")
+	port := h.dnsPort
+	if port <= 0 {
+		port = 10856
+	}
+
+	timeout := h.dnsTimeout
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: timeout}
+			return dialer.DialContext(ctx, "udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		},
+	}
+
+	host := h.dnsHost
+	if host == "" {
+		host = "dns.google"
+	}
+	addrs, err := resolver.LookupHost(ctx, host)
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("nslookup: %v", err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s via 127.0.0.1:%d failed: %v", host, port, err)}
 	}
-	if strings.Contains(out, "Address") && !strings.Contains(out, "NXDOMAIN") {
-		return CheckResult{Pass: true, Detail: "DNS resolution OK"}
+	if len(addrs) == 0 {
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s via 127.0.0.1:%d returned no answers", host, port)}
 	}
-	return CheckResult{Pass: false, Detail: "DNS resolution empty or NXDOMAIN"}
+	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS resolution OK for %s via 127.0.0.1:%d", host, port)}
 }
 
 // --------------------------------------------------------------------------
@@ -297,4 +417,22 @@ func summarize(r *HealthResult) string {
 		return "all OK"
 	}
 	return strings.Join(parts, "; ")
+}
+
+func dnsProbeHost(checkURL string) string {
+	if checkURL == "" {
+		return "dns.google"
+	}
+	parsed, err := neturl.Parse(checkURL)
+	if err != nil || parsed.Hostname() == "" {
+		return "dns.google"
+	}
+	return parsed.Hostname()
+}
+
+func normalizedDNSTimeout(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return 3 * time.Second
+	}
+	return timeout
 }

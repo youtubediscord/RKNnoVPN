@@ -1,6 +1,7 @@
 package com.privstack.panel.model
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 
 /**
  * Snapshot of the daemon's runtime state, returned by `privctl status`.
@@ -8,8 +9,12 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class DaemonStatus(
     val state: ConnectionState,
+    @SerialName("active_node_id")
     val activeNodeId: String? = null,
+    @SerialName("active_node_name")
     val activeNodeName: String? = null,
+    @SerialName("active_node_protocol")
+    val activeNodeProtocol: String? = null,
     val uptime: Long = 0L,
     val traffic: TrafficStats = TrafficStats(),
     val health: HealthResult = HealthResult()

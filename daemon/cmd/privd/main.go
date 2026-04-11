@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -40,7 +43,7 @@ type daemon struct {
 }
 
 func main() {
-	cfgPath := flag.String("config", "/data/adb/privstack/config.json", "path to config.json")
+	cfgPath := flag.String("config", "/data/adb/privstack/config/config.json", "path to config.json")
 	dataDir := flag.String("data-dir", "/data/adb/privstack", "path to data directory")
 	logFile := flag.String("log-file", "", "path to log file (default: stderr)")
 	pidFile := flag.String("pid-file", "", "path to PID file")
@@ -73,7 +76,7 @@ func main() {
 
 	// ---- Data directories --------------------------------------------------
 
-	for _, sub := range []string{"run", "data", "log", "config/rendered", "backup"} {
+	for _, sub := range []string{"run", "data", "log", "logs", "config/rendered", "backup"} {
 		if err := os.MkdirAll(filepath.Join(*dataDir, sub), 0750); err != nil {
 			log.Fatalf("mkdir %s: %v", sub, err)
 		}
@@ -100,7 +103,7 @@ func main() {
 
 	tproxyPort := cfg.Proxy.TProxyPort
 	if tproxyPort == 0 {
-		tproxyPort = 10808
+		tproxyPort = 10853
 	}
 
 	healthInterval := time.Duration(cfg.Health.IntervalSec) * time.Second
@@ -108,12 +111,10 @@ func main() {
 		healthInterval = 30 * time.Second
 	}
 
-	healthThreshold := cfg.Rescue.MaxAttempts
+	healthThreshold := cfg.Health.Threshold
 	if healthThreshold < 1 {
 		healthThreshold = 3
 	}
-
-	healthMon := health.NewHealthMonitor(coreMgr, healthInterval, healthThreshold, tproxyPort, healthLogger)
 
 	cooldown := time.Duration(cfg.Rescue.CooldownSec) * time.Second
 	if cooldown <= 0 {
@@ -131,34 +132,14 @@ func main() {
 	}
 	dnsPort := cfg.Proxy.DNSPort
 	if dnsPort == 0 {
-		dnsPort = 10853
+		dnsPort = 10856
 	}
-	apiPort := cfg.Proxy.APIPort
-	if apiPort == 0 {
-		apiPort = 9090
+	healthTimeout := time.Duration(cfg.Health.TimeoutSec) * time.Second
+	if healthTimeout <= 0 {
+		healthTimeout = 5 * time.Second
 	}
-	appMode := core.MapAppMode(cfg.Apps.Mode)
-	dnsMode := "all"
-	if appMode == "whitelist" {
-		dnsMode = "per_uid"
-	}
-	appUIDs := core.ResolvePackageUIDs(cfg.Apps.Packages)
-
-	scriptEnv := map[string]string{
-		"PRIVSTACK_DIR":  *dataDir,
-		"CORE_GID":       strconv.Itoa(gid),
-		"TPROXY_PORT":    strconv.Itoa(cfg.Proxy.TProxyPort),
-		"DNS_PORT":       strconv.Itoa(dnsPort),
-		"API_PORT":       strconv.Itoa(apiPort),
-		"FWMARK":         fmt.Sprintf("0x%x", mark),
-		"ROUTE_TABLE":    "2023",
-		"ROUTE_TABLE_V6": "2024",
-		"APP_MODE":       appMode,
-		"APP_UIDS":       appUIDs,
-		"BYPASS_UIDS":    "1073",
-		"DNS_MODE":       dnsMode,
-		"PROXY_MODE":     "tproxy",
-	}
+	healthMon := health.NewHealthMonitor(coreMgr, healthInterval, healthThreshold, tproxyPort, dnsPort, mark, cfg.Health.URL, healthTimeout, healthLogger)
+	scriptEnv := buildScriptEnv(cfg, *dataDir)
 	netWatcher := watcher.NewNetworkWatcher(*dataDir, scriptEnv, watchLogger)
 
 	socketPath := filepath.Join(*dataDir, "run", "daemon.sock")
@@ -173,6 +154,26 @@ func main() {
 		netWatcher: netWatcher,
 		ipcServer:  ipc.NewServer(socketPath),
 	}
+
+	d.healthMon.SetOnDegraded(func() {
+		if err := d.rescueMgr.Attempt(); err != nil {
+			log.Printf("rescue attempt failed: %v", err)
+			d.mu.Lock()
+			maxAttempts := d.cfg.Rescue.MaxAttempts
+			d.mu.Unlock()
+			if maxAttempts < 1 {
+				maxAttempts = 1
+			}
+			if d.rescueMgr.Attempts() >= maxAttempts {
+				if rollbackErr := d.rescueMgr.Rollback(); rollbackErr != nil {
+					log.Printf("rescue rollback failed: %v", rollbackErr)
+				}
+			}
+		}
+	})
+	d.healthMon.SetOnRestored(func() {
+		d.rescueMgr.Reset()
+	})
 
 	// ---- IPC server --------------------------------------------------------
 
@@ -231,7 +232,7 @@ func (d *daemon) startSubsystems() {
 	d.mu.Unlock()
 
 	// Health monitor.
-	if cfg.Health.IntervalSec > 0 {
+	if cfg.Health.Enabled && cfg.Health.IntervalSec > 0 {
 		d.healthMon.Start()
 	}
 
@@ -267,30 +268,12 @@ func (d *daemon) reloadConfig() {
 		return
 	}
 
-	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
-		d.coreMgr.GetState() == core.StateDegraded
-
-	if wasRunning {
-		d.stopSubsystems()
+	if err := d.applyConfig(newCfg, true); err != nil {
+		log.Printf("reload config apply failed: %v", err)
+		return
 	}
 
-	// Push new config to subsystems.
-	d.mu.Lock()
-	d.cfg = newCfg
-	d.mu.Unlock()
-
-	d.coreMgr.SetConfig(newCfg)
 	log.Printf("config reloaded")
-
-	if wasRunning {
-		// Hot-swap the proxy with the new config profile.
-		profile := newCfg.ResolveProfile()
-		if err := d.coreMgr.HotSwap(profile); err != nil {
-			log.Printf("hot-swap after reload failed: %v", err)
-		}
-		d.rescueMgr.Reset()
-		d.startSubsystems()
-	}
 }
 
 // --------------------------------------------------------------------------
@@ -344,10 +327,15 @@ func (d *daemon) registerHandlers() {
 	d.ipcServer.Register("stop", d.handleStop)
 	d.ipcServer.Register("reload", d.handleReload)
 	d.ipcServer.Register("health", d.handleHealth)
+	d.ipcServer.Register("audit", d.handleAudit)
+	d.ipcServer.Register("app.list", d.handleAppList)
+	d.ipcServer.Register("app.resolveUid", d.handleResolveUID)
 	d.ipcServer.Register("config-get", d.handleConfigGet)
 	d.ipcServer.Register("config-set", d.handleConfigSet)
+	d.ipcServer.Register("config-set-many", d.handleConfigSetMany)
 	d.ipcServer.Register("config-list", d.handleConfigList)
 	d.ipcServer.Register("config-import", d.handleConfigImport)
+	d.ipcServer.Register("subscription-fetch", d.handleSubscriptionFetch)
 	d.ipcServer.Register("logs", d.handleLogs)
 	d.ipcServer.Register("version", d.handleVersion)
 	d.ipcServer.Register("update-check", d.handleUpdateCheck)
@@ -361,17 +349,7 @@ func (d *daemon) registerHandlers() {
 
 func (d *daemon) handleStatus(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	status := d.coreMgr.Status()
-
-	result := map[string]interface{}{
-		"state":          status.State,
-		"pid":            status.PID,
-		"uptime":         status.Uptime,
-		"active_profile": status.ActiveProfile,
-		"started_at":     status.StartedAt,
-		"health_fails":   d.healthMon.Failures(),
-		"rescue_attempts": d.rescueMgr.Attempts(),
-	}
-	return result, nil
+	return d.buildStatusPayload(status, d.healthMon.LastResult()), nil
 }
 
 func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -435,23 +413,239 @@ func (d *daemon) handleReload(params *json.RawMessage) (interface{}, *ipc.RPCErr
 func (d *daemon) handleHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	// Run a one-shot health check via the real HealthMonitor.
 	healthResult := d.healthMon.RunOnce()
+	status := d.coreMgr.Status()
+	return d.buildStatusPayload(status, healthResult), nil
+}
+
+func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	healthResult := d.healthMon.RunOnce()
 
 	d.mu.Lock()
-	rescueEnabled := d.cfg.Rescue.Enabled
-	maxFailures := d.cfg.Rescue.MaxAttempts
+	cfg := d.cfg
 	d.mu.Unlock()
 
-	result := map[string]interface{}{
-		"state":           d.coreMgr.GetState().String(),
-		"overall":         healthResult.Overall,
-		"checks":          healthResult.Checks,
-		"timestamp":       healthResult.Timestamp,
-		"health_fails":    d.healthMon.Failures(),
-		"rescue_enabled":  rescueEnabled,
-		"max_failures":    maxFailures,
-		"rescue_attempts": d.rescueMgr.Attempts(),
+	findings := make([]map[string]interface{}, 0)
+	appendFinding := func(
+		code string,
+		title string,
+		description string,
+		severity string,
+		category string,
+		recommendation string,
+		affected string,
+	) {
+		finding := map[string]interface{}{
+			"code":           code,
+			"title":          title,
+			"description":    description,
+			"severity":       severity,
+			"category":       category,
+			"recommendation": recommendation,
+		}
+		if affected != "" {
+			finding["affectedResource"] = affected
+		}
+		findings = append(findings, finding)
 	}
-	return result, nil
+
+	if cfg.Node.Address == "" {
+		appendFinding(
+			"NODE_NOT_CONFIGURED",
+			"No active node configured",
+			"The daemon has no upstream node address, so connections cannot be established.",
+			"CRITICAL",
+			"CONFIG",
+			"Import or select a valid node before connecting.",
+			"node.address",
+		)
+	}
+
+	if cfg.DNS.ProxyDNS == "" {
+		appendFinding(
+			"PROXY_DNS_EMPTY",
+			"Proxy DNS is empty",
+			"The proxy DNS endpoint is not configured, which can cause lookup failures or leaks.",
+			"HIGH",
+			"DNS",
+			"Set a valid DoH endpoint for proxy DNS.",
+			"dns.proxy_dns",
+		)
+	}
+
+	if cfg.DNS.DirectDNS == "" {
+		appendFinding(
+			"DIRECT_DNS_EMPTY",
+			"Direct DNS is empty",
+			"The direct DNS endpoint is not configured for bypassed traffic.",
+			"MEDIUM",
+			"DNS",
+			"Set a valid DoH endpoint for direct DNS.",
+			"dns.direct_dns",
+		)
+	}
+
+	transportSecurity := ""
+	if cfg.Transport.Protocol == "reality" || cfg.Node.RealityPublicKey != "" {
+		transportSecurity = "reality"
+	} else if cfg.Transport.TLSServer != "" {
+		transportSecurity = "tls"
+	}
+	if (cfg.Node.Protocol == "vless" || cfg.Node.Protocol == "vmess") && transportSecurity == "" {
+		appendFinding(
+			"TRANSPORT_NOT_ENCRYPTED",
+			"Transport security is not enabled",
+			"VLESS/VMess is configured without TLS or REALITY, which weakens transport privacy.",
+			"MEDIUM",
+			"ENCRYPTION",
+			"Enable TLS or REALITY for the active node.",
+			"transport",
+		)
+	}
+
+	if cfg.Apps.Mode == "all" {
+		appendFinding(
+			"PER_APP_ROUTING_DISABLED",
+			"Per-app routing is disabled",
+			"All applications are routed the same way, which may increase exposure for sensitive apps.",
+			"INFO",
+			"ROUTING",
+			"Use whitelist or blacklist mode if you need per-app isolation.",
+			"apps.mode",
+		)
+	}
+
+	for name, check := range healthResult.Checks {
+		if check.Pass {
+			continue
+		}
+
+		category := "SYSTEM"
+		severity := "HIGH"
+		switch name {
+		case "dns":
+			category = "DNS"
+			severity = "HIGH"
+		case "iptables", "routing":
+			category = "ROUTING"
+			severity = "HIGH"
+		case "tproxy_port", "singbox_alive":
+			category = "SYSTEM"
+			severity = "CRITICAL"
+		}
+
+		appendFinding(
+			"HEALTH_"+strings.ToUpper(strings.ReplaceAll(name, "-", "_")),
+			fmt.Sprintf("Health check failed: %s", name),
+			check.Detail,
+			severity,
+			category,
+			"Resolve the underlying daemon health issue and run the audit again.",
+			name,
+		)
+	}
+
+	summary := map[string]int{
+		"critical": 0,
+		"high":     0,
+		"medium":   0,
+		"low":      0,
+		"info":     0,
+	}
+	score := 100
+	for _, finding := range findings {
+		switch finding["severity"] {
+		case "CRITICAL":
+			summary["critical"]++
+			score -= 35
+		case "HIGH":
+			summary["high"]++
+			score -= 20
+		case "MEDIUM":
+			summary["medium"]++
+			score -= 10
+		case "LOW":
+			summary["low"]++
+			score -= 5
+		default:
+			summary["info"]++
+			score -= 1
+		}
+	}
+	if score < 0 {
+		score = 0
+	}
+
+	report := map[string]interface{}{
+		"auditId":   fmt.Sprintf("audit-%d", time.Now().UnixMilli()),
+		"timestamp": time.Now().UnixMilli(),
+		"score":     score,
+		"findings":  findings,
+		"summary":   summary,
+	}
+	return report, nil
+}
+
+func (d *daemon) handleAppList(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	apps, err := loadInstalledApps()
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: "load apps failed: " + err.Error(),
+		}
+	}
+	return apps, nil
+}
+
+func (d *daemon) handleResolveUID(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	if params == nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "params required: {\"uid\": 12345}",
+		}
+	}
+
+	var p struct {
+		UID int `json:"uid"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "invalid params: " + err.Error(),
+		}
+	}
+	if p.UID <= 0 {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "uid must be > 0",
+		}
+	}
+
+	apps, err := loadInstalledApps()
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: "load apps failed: " + err.Error(),
+		}
+	}
+
+	var fallback *daemonAppInfo
+	for _, app := range apps {
+		if app.UID == p.UID {
+			return app, nil
+		}
+		if fallback == nil && app.UID%100000 == p.UID%100000 {
+			appCopy := app
+			fallback = &appCopy
+		}
+	}
+	if fallback != nil {
+		return *fallback, nil
+	}
+
+	return nil, &ipc.RPCError{
+		Code:    ipc.CodeInvalidParams,
+		Message: fmt.Sprintf("no package found for uid %d", p.UID),
+	}
 }
 
 func (d *daemon) handleConfigGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -513,42 +707,79 @@ func (d *daemon) handleConfigSet(params *json.RawMessage) (interface{}, *ipc.RPC
 	}
 
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	data, _ := json.Marshal(d.cfg)
+	d.mu.Unlock()
 	var full map[string]json.RawMessage
 	json.Unmarshal(data, &full)
 
 	full[p.Key] = p.Value
 
-	patched, err := json.Marshal(full)
-	if err != nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+	newCfg, rpcErr := d.buildPatchedConfig(full)
+	if rpcErr != nil {
+		return nil, rpcErr
 	}
 
-	newCfg := config.DefaultConfig()
-	if err := json.Unmarshal(patched, newCfg); err != nil {
+	if err := d.applyConfig(newCfg, false); err != nil {
 		return nil, &ipc.RPCError{
-			Code:    ipc.CodeConfigError,
-			Message: "invalid value: " + err.Error(),
+			Code:    ipc.CodeInternalError,
+			Message: err.Error(),
 		}
 	}
-
-	if err := newCfg.Validate(); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeConfigError,
-			Message: "validation failed: " + err.Error(),
-		}
-	}
-
-	d.cfg = newCfg
-	d.coreMgr.SetConfig(newCfg)
-
-	if err := d.cfg.Save(d.cfgPath); err != nil {
-		log.Printf("warning: failed to persist config: %v", err)
-	}
-
 	return map[string]string{"status": "ok"}, nil
+}
+
+func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	if params == nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "params required: {\"values\": {...}, \"reload\": true|false}",
+		}
+	}
+
+	var p struct {
+		Values map[string]json.RawMessage `json:"values"`
+		Reload bool                       `json:"reload"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "invalid params: " + err.Error(),
+		}
+	}
+	if len(p.Values) == 0 {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "values must not be empty",
+		}
+	}
+
+	d.mu.Lock()
+	data, _ := json.Marshal(d.cfg)
+	d.mu.Unlock()
+	var full map[string]json.RawMessage
+	json.Unmarshal(data, &full)
+
+	for key, value := range p.Values {
+		full[key] = value
+	}
+
+	newCfg, rpcErr := d.buildPatchedConfig(full)
+	if rpcErr != nil {
+		return nil, rpcErr
+	}
+
+	if err := d.applyConfig(newCfg, p.Reload); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: err.Error(),
+		}
+	}
+
+	return map[string]interface{}{
+		"status":  "ok",
+		"reload":  p.Reload,
+		"updated": len(p.Values),
+	}, nil
 }
 
 func (d *daemon) handleConfigList(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -592,17 +823,396 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		}
 	}
 
+	if err := d.applyConfig(newCfg, true); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: err.Error(),
+		}
+	}
+
+	return map[string]string{"status": "imported"}, nil
+}
+
+func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Config, *ipc.RPCError) {
+	patched, err := json.Marshal(full)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+	}
+
+	newCfg := config.DefaultConfig()
+	if err := json.Unmarshal(patched, newCfg); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeConfigError,
+			Message: "invalid value: " + err.Error(),
+		}
+	}
+
+	if err := newCfg.Validate(); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeConfigError,
+			Message: "validation failed: " + err.Error(),
+		}
+	}
+
+	return newCfg, nil
+}
+
+func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
+	d.mu.Lock()
+	oldCfg := d.cfg
+	d.mu.Unlock()
+
+	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
+		d.coreMgr.GetState() == core.StateDegraded
+
+	if err := newCfg.Save(d.cfgPath); err != nil {
+		return fmt.Errorf("persist config: %w", err)
+	}
+
 	d.mu.Lock()
 	d.cfg = newCfg
 	d.mu.Unlock()
 
 	d.coreMgr.SetConfig(newCfg)
+	d.rescueMgr.SetConfig(newCfg)
+	healthInterval := time.Duration(newCfg.Health.IntervalSec) * time.Second
+	if healthInterval <= 0 {
+		healthInterval = 30 * time.Second
+	}
+	healthTimeout := time.Duration(newCfg.Health.TimeoutSec) * time.Second
+	if healthTimeout <= 0 {
+		healthTimeout = 5 * time.Second
+	}
+	healthThreshold := newCfg.Health.Threshold
+	if healthThreshold < 1 {
+		healthThreshold = 3
+	}
+	tproxyPort := newCfg.Proxy.TProxyPort
+	if tproxyPort == 0 {
+		tproxyPort = 10853
+	}
+	dnsPort := newCfg.Proxy.DNSPort
+	if dnsPort == 0 {
+		dnsPort = 10856
+	}
+	routeMark := newCfg.Proxy.Mark
+	if routeMark == 0 {
+		routeMark = 0x2023
+	}
+	d.healthMon.SetConfig(healthInterval, healthThreshold, tproxyPort, dnsPort, routeMark, newCfg.Health.URL, healthTimeout)
+	d.netWatcher.SetEnv(buildScriptEnv(newCfg, d.dataDir))
 
-	if err := newCfg.Save(d.cfgPath); err != nil {
-		log.Printf("warning: failed to persist imported config: %v", err)
+	if reload && wasRunning {
+		d.stopSubsystems()
+		profile := newCfg.ResolveProfile()
+		if err := d.coreMgr.HotSwap(profile); err != nil {
+			rollbackErr := d.rollbackConfig(oldCfg, wasRunning)
+			if rollbackErr != nil {
+				return fmt.Errorf("apply config hot-swap failed: %w; rollback failed: %v", err, rollbackErr)
+			}
+			return fmt.Errorf("apply config hot-swap failed: %w", err)
+		}
+		d.rescueMgr.Reset()
+		d.startSubsystems()
 	}
 
-	return map[string]string{"status": "imported"}, nil
+	return nil
+}
+
+func (d *daemon) rollbackConfig(oldCfg *config.Config, wasRunning bool) error {
+	if oldCfg == nil {
+		return fmt.Errorf("previous config is nil")
+	}
+
+	d.mu.Lock()
+	d.cfg = oldCfg
+	d.mu.Unlock()
+	d.coreMgr.SetConfig(oldCfg)
+	d.rescueMgr.SetConfig(oldCfg)
+	oldHealthInterval := time.Duration(oldCfg.Health.IntervalSec) * time.Second
+	if oldHealthInterval <= 0 {
+		oldHealthInterval = 30 * time.Second
+	}
+	oldHealthTimeout := time.Duration(oldCfg.Health.TimeoutSec) * time.Second
+	if oldHealthTimeout <= 0 {
+		oldHealthTimeout = 5 * time.Second
+	}
+	oldHealthThreshold := oldCfg.Health.Threshold
+	if oldHealthThreshold < 1 {
+		oldHealthThreshold = 3
+	}
+	oldTProxyPort := oldCfg.Proxy.TProxyPort
+	if oldTProxyPort == 0 {
+		oldTProxyPort = 10853
+	}
+	oldDNSPort := oldCfg.Proxy.DNSPort
+	if oldDNSPort == 0 {
+		oldDNSPort = 10856
+	}
+	oldRouteMark := oldCfg.Proxy.Mark
+	if oldRouteMark == 0 {
+		oldRouteMark = 0x2023
+	}
+	d.healthMon.SetConfig(oldHealthInterval, oldHealthThreshold, oldTProxyPort, oldDNSPort, oldRouteMark, oldCfg.Health.URL, oldHealthTimeout)
+	d.netWatcher.SetEnv(buildScriptEnv(oldCfg, d.dataDir))
+
+	if wasRunning {
+		profile := oldCfg.ResolveProfile()
+		if err := d.coreMgr.HotSwap(profile); err != nil {
+			return fmt.Errorf("restore old runtime: %w", err)
+		}
+		d.rescueMgr.Reset()
+		d.startSubsystems()
+	}
+
+	if err := oldCfg.Save(d.cfgPath); err != nil {
+		return fmt.Errorf("restore old config file: %w", err)
+	}
+
+	return nil
+}
+
+func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
+	gid := cfg.Proxy.GID
+	if gid == 0 {
+		gid = 23333
+	}
+	mark := cfg.Proxy.Mark
+	if mark == 0 {
+		mark = 0x2023
+	}
+	tproxyPort := cfg.Proxy.TProxyPort
+	if tproxyPort == 0 {
+		tproxyPort = 10853
+	}
+	dnsPort := cfg.Proxy.DNSPort
+	if dnsPort == 0 {
+		dnsPort = 10856
+	}
+	apiPort := cfg.Proxy.APIPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	appMode := core.MapAppMode(cfg.Apps.Mode)
+	dnsMode := "all"
+	if appMode == "whitelist" || appMode == "blacklist" {
+		dnsMode = "per_uid"
+	}
+	appUIDs := core.ResolvePackageUIDs(cfg.Apps.Packages)
+
+	return map[string]string{
+		"PRIVSTACK_DIR":  dataDir,
+		"CORE_GID":       strconv.Itoa(gid),
+		"TPROXY_PORT":    strconv.Itoa(tproxyPort),
+		"DNS_PORT":       strconv.Itoa(dnsPort),
+		"API_PORT":       strconv.Itoa(apiPort),
+		"FWMARK":         fmt.Sprintf("0x%x", mark),
+		"ROUTE_TABLE":    "2023",
+		"ROUTE_TABLE_V6": "2024",
+		"APP_MODE":       appMode,
+		"APP_UIDS":       appUIDs,
+		"BYPASS_UIDS":    "1073",
+		"DNS_MODE":       dnsMode,
+		"PROXY_MODE":     "tproxy",
+	}
+}
+
+func (d *daemon) handleSubscriptionFetch(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	if params == nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "params required: {\"url\": \"https://...\"}",
+		}
+	}
+
+	var p struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "invalid params: " + err.Error(),
+		}
+	}
+	if p.URL == "" {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "url is required",
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, p.URL, nil)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "invalid URL: " + err.Error(),
+		}
+	}
+	req.Header.Set("User-Agent", "RKNnoVPN-subscription-fetch/1.0")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: "subscription fetch failed: " + err.Error(),
+		}
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: "subscription read failed: " + err.Error(),
+		}
+	}
+
+	headers := make(map[string]string, len(resp.Header))
+	for key, values := range resp.Header {
+		if len(values) > 0 {
+			headers[key] = values[0]
+		}
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInternalError,
+			Message: fmt.Sprintf("subscription fetch returned HTTP %d", resp.StatusCode),
+			Data: map[string]interface{}{
+				"status":  resp.StatusCode,
+				"headers": headers,
+			},
+		}
+	}
+
+	return map[string]interface{}{
+		"status":  resp.StatusCode,
+		"body":    string(body),
+		"headers": headers,
+	}, nil
+}
+
+type daemonAppInfo struct {
+	PackageName string  `json:"packageName"`
+	AppName     string  `json:"appName"`
+	UID         int     `json:"uid"`
+	IsSystemApp bool    `json:"isSystemApp"`
+	Category    string  `json:"category"`
+	ApkPath     *string `json:"apkPath,omitempty"`
+	VersionName *string `json:"versionName,omitempty"`
+	Enabled     bool    `json:"enabled"`
+}
+
+func loadInstalledApps() ([]daemonAppInfo, error) {
+	data, err := os.ReadFile("/data/system/packages.list")
+	if err != nil {
+		return nil, fmt.Errorf("read packages.list: %w", err)
+	}
+
+	apps := make([]daemonAppInfo, 0)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		uid, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+
+		dataDir := ""
+		if len(fields) >= 4 {
+			dataDir = fields[3]
+		}
+
+		appName := prettyPackageLabel(fields[0])
+
+		isSystem := strings.HasPrefix(dataDir, "/system/") ||
+			strings.HasPrefix(dataDir, "/vendor/") ||
+			strings.HasPrefix(dataDir, "/product/") ||
+			strings.HasPrefix(dataDir, "/system_ext/")
+
+		category := classifyDaemonApp(fields[0], isSystem)
+
+		apps = append(apps, daemonAppInfo{
+			PackageName: fields[0],
+			AppName:     appName,
+			UID:         uid,
+			IsSystemApp: isSystem,
+			Category:    category,
+			Enabled:     true,
+		})
+	}
+
+	return apps, nil
+}
+
+func prettyPackageLabel(packageName string) string {
+	last := packageName
+	if idx := strings.LastIndex(packageName, "."); idx != -1 && idx+1 < len(packageName) {
+		last = packageName[idx+1:]
+	}
+	last = strings.ReplaceAll(last, "_", " ")
+	last = strings.ReplaceAll(last, "-", " ")
+	if last == "" {
+		return packageName
+	}
+	return strings.ToUpper(last[:1]) + last[1:]
+}
+
+func classifyDaemonApp(packageName string, isSystem bool) string {
+	if isSystem {
+		return "SYSTEM"
+	}
+
+	lower := strings.ToLower(packageName)
+	switch {
+	case strings.Contains(lower, "telegram"),
+		strings.Contains(lower, "whatsapp"),
+		strings.Contains(lower, "discord"),
+		strings.Contains(lower, "signal"),
+		strings.Contains(lower, "messenger"):
+		return "MESSAGING"
+	case strings.Contains(lower, "youtube"),
+		strings.Contains(lower, "netflix"),
+		strings.Contains(lower, "twitch"),
+		strings.Contains(lower, "video"):
+		return "VIDEO"
+	case strings.Contains(lower, "spotify"),
+		strings.Contains(lower, "music"),
+		strings.Contains(lower, "audio"):
+		return "AUDIO"
+	case strings.Contains(lower, "chrome"),
+		strings.Contains(lower, "firefox"),
+		strings.Contains(lower, "browser"),
+		strings.Contains(lower, "opera"),
+		strings.Contains(lower, "brave"):
+		return "BROWSER"
+	case strings.Contains(lower, "game"):
+		return "GAME"
+	case strings.Contains(lower, "bank"),
+		strings.Contains(lower, "wallet"),
+		strings.Contains(lower, "finance"),
+		strings.Contains(lower, "sber"),
+		strings.Contains(lower, "tinkoff"):
+		return "PRODUCTIVITY"
+	case strings.Contains(lower, "social"),
+		strings.Contains(lower, "twitter"),
+		strings.Contains(lower, "instagram"),
+		strings.Contains(lower, "reddit"),
+		strings.Contains(lower, "facebook"),
+		strings.Contains(lower, "vk"):
+		return "SOCIAL"
+	default:
+		return "OTHER"
+	}
 }
 
 func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -616,8 +1226,25 @@ func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError
 		}
 	}
 
-	logPath := filepath.Join(d.dataDir, "log", "daemon.log")
-	data, err := os.ReadFile(logPath)
+	logPaths := []string{
+		filepath.Join(d.dataDir, "logs", "privd.log"),
+		filepath.Join(d.dataDir, "logs", "daemon.log"),
+		filepath.Join(d.dataDir, "log", "daemon.log"),
+	}
+
+	var (
+		data []byte
+		err  error
+	)
+	for _, logPath := range logPaths {
+		data, err = os.ReadFile(logPath)
+		if err == nil {
+			break
+		}
+		if !os.IsNotExist(err) {
+			return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+		}
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]interface{}{"lines": []string{}}, nil
@@ -714,18 +1341,42 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		"apk_installed":    false,
 	}
 
-	// Stop subsystems before module update.
-	d.stopSubsystems()
-	if err := d.coreMgr.Stop(); err != nil {
-		log.Printf("[updater] warning: failed to stop core: %v", err)
+	moduleExists := false
+	if _, err := os.Stat(p.ModulePath); err == nil {
+		moduleExists = true
+	}
+	apkExists := false
+	if _, err := os.Stat(p.ApkPath); err == nil {
+		apkExists = true
+	}
+	if !moduleExists && !apkExists {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "no downloaded update files found",
+		}
+	}
+
+	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
+		d.coreMgr.GetState() == core.StateDegraded
+
+	if moduleExists {
+		// Stop subsystems before module update only when we are replacing the
+		// daemon/module itself. APK-only installs should not disrupt traffic.
+		d.stopSubsystems()
+		if err := d.coreMgr.Stop(); err != nil {
+			log.Printf("[updater] warning: failed to stop core: %v", err)
+		}
 	}
 
 	moduleUpdated := false
 
 	// Install module (binaries + scripts + module files).
-	if _, err := os.Stat(p.ModulePath); err == nil {
+	if moduleExists {
 		moduleDir := "/data/adb/modules/privstack"
 		if err := updater.InstallModuleUpdate(p.ModulePath, d.dataDir, moduleDir); err != nil {
+			if wasRunning {
+				d.restoreCurrentRuntimeAfterFailedUpdate()
+			}
 			return nil, &ipc.RPCError{
 				Code:    ipc.CodeInternalError,
 				Message: "module install failed: " + err.Error(),
@@ -736,7 +1387,7 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 	}
 
 	// Install APK.
-	if _, err := os.Stat(p.ApkPath); err == nil {
+	if apkExists {
 		if err := updater.InstallApkUpdate(p.ApkPath); err != nil {
 			log.Printf("[updater] APK install failed: %v", err)
 			result["apk_error"] = err.Error()
@@ -759,6 +1410,144 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 	}
 
 	return result, nil
+}
+
+func (d *daemon) restoreCurrentRuntimeAfterFailedUpdate() {
+	d.mu.Lock()
+	cfg := d.cfg
+	d.mu.Unlock()
+
+	profile := cfg.ResolveProfile()
+	if profile.Address == "" {
+		return
+	}
+	if err := d.coreMgr.Start(profile); err != nil {
+		log.Printf("[updater] warning: failed to restore previous runtime after failed update: %v", err)
+		return
+	}
+	d.rescueMgr.Reset()
+	d.startSubsystems()
+}
+
+func (d *daemon) buildStatusPayload(status core.StatusInfo, healthResult *health.HealthResult) map[string]interface{} {
+	activeNodeID, activeNodeName, activeNodeProtocol := d.activePanelNode()
+
+	return map[string]interface{}{
+		"state":            mapCoreStateToConnectionState(status.State),
+		"active_node_id":   activeNodeID,
+		"active_node_name": activeNodeName,
+		"active_node_protocol": activeNodeProtocol,
+		"uptime":           uptimeSeconds(status.StartedAt),
+		"traffic": map[string]interface{}{
+			"txBytes": 0,
+			"rxBytes": 0,
+			"txRate":  0,
+			"rxRate":  0,
+		},
+		"health": buildHealthPayload(d.coreMgr.GetState(), healthResult),
+
+		// Keep the legacy fields for older clients and debugging tools.
+		"pid":             status.PID,
+		"active_profile":  status.ActiveProfile,
+		"started_at":      status.StartedAt,
+		"uptime_legacy":   status.Uptime,
+		"health_fails":    d.healthMon.Failures(),
+		"rescue_attempts": d.rescueMgr.Attempts(),
+	}
+}
+
+func (d *daemon) activePanelNode() (string, string, string) {
+	d.mu.Lock()
+	panel := d.cfg.Panel
+	d.mu.Unlock()
+
+	activeID := panel.ActiveNodeID
+	type nodeMeta struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Protocol string `json:"protocol"`
+	}
+	for _, raw := range panel.Nodes {
+		var node nodeMeta
+		if err := json.Unmarshal(raw, &node); err != nil {
+			continue
+		}
+		if node.ID == activeID {
+			return node.ID, node.Name, node.Protocol
+		}
+	}
+
+	if len(panel.Nodes) > 0 {
+		var first nodeMeta
+		if err := json.Unmarshal(panel.Nodes[0], &first); err == nil {
+			return first.ID, first.Name, first.Protocol
+		}
+	}
+
+	return activeID, "", ""
+}
+
+func mapCoreStateToConnectionState(state string) string {
+	switch state {
+	case "running":
+		return "CONNECTED"
+	case "starting", "stopping":
+		return "CONNECTING"
+	case "degraded", "rescue":
+		return "ERROR"
+	case "stopped":
+		return "DISCONNECTED"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func uptimeSeconds(startedAt time.Time) int64 {
+	if startedAt.IsZero() {
+		return 0
+	}
+	return int64(time.Since(startedAt).Seconds())
+}
+
+func buildHealthPayload(state core.State, result *health.HealthResult) map[string]interface{} {
+	payload := map[string]interface{}{
+		"healthy":        false,
+		"coreRunning":    state != core.StateStopped,
+		"tunActive":      false,
+		"dnsOperational": false,
+		"lastError":      nil,
+		"checkedAt":      int64(0),
+	}
+	if result == nil {
+		return payload
+	}
+
+	payload["healthy"] = result.Overall
+	payload["checkedAt"] = result.Timestamp.Unix()
+
+	dnsOK := false
+	tunOK := false
+	var firstError string
+	for name, check := range result.Checks {
+		if name == "dns" {
+			dnsOK = check.Pass
+		}
+		if name == "iptables" || name == "routing" || name == "tproxy_port" {
+			if check.Pass {
+				tunOK = true
+			}
+		}
+		if !check.Pass && firstError == "" {
+			firstError = fmt.Sprintf("%s: %s", name, check.Detail)
+		}
+	}
+
+	payload["dnsOperational"] = dnsOK
+	payload["tunActive"] = tunOK
+	if firstError != "" {
+		payload["lastError"] = firstError
+	}
+	return payload
 }
 
 // --------------------------------------------------------------------------

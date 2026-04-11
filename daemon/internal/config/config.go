@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ type Config struct {
 	Proxy     ProxyConfig     `json:"proxy"`
 	Transport TransportConfig `json:"transport"`
 	Node      NodeConfig      `json:"node"`
+	Panel     PanelConfig     `json:"panel,omitempty"`
 	Routing   RoutingConfig   `json:"routing"`
 	Apps      AppsConfig      `json:"apps"`
 	DNS       DNSConfig       `json:"dns"`
@@ -57,6 +59,18 @@ type NodeConfig struct {
 	// REALITY-specific fields.
 	RealityPublicKey string `json:"reality_public_key,omitempty"`
 	RealityShortID   string `json:"reality_short_id,omitempty"`
+}
+
+// PanelConfig stores APK-facing metadata that the daemon itself does not need
+// to understand in depth, but must persist without loss.
+type PanelConfig struct {
+	ID           string            `json:"id,omitempty"`
+	Name         string            `json:"name,omitempty"`
+	ActiveNodeID string            `json:"active_node_id,omitempty"`
+	Nodes        []json.RawMessage `json:"nodes,omitempty"`
+	Tun          json.RawMessage   `json:"tun,omitempty"`
+	Inbounds     json.RawMessage   `json:"inbounds,omitempty"`
+	Extra        json.RawMessage   `json:"extra,omitempty"`
 }
 
 // RoutingConfig controls traffic routing rules.
@@ -148,6 +162,10 @@ func DefaultConfig() *Config {
 			Protocol: "vless",
 			Port:     443,
 		},
+		Panel: PanelConfig{
+			ID:   "default",
+			Name: "Default",
+		},
 		Routing: RoutingConfig{
 			Mode:        "whitelist",
 			BypassLAN:   true,
@@ -196,6 +214,36 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := DefaultConfig()
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
+
+	// Older module defaults stored `node` as an empty array. Accept that legacy
+	// shape and normalize it to the current single-node object form.
+	if nodeRaw, ok := raw["node"]; ok {
+		trimmed := bytes.TrimSpace(nodeRaw)
+		if len(trimmed) > 0 && trimmed[0] == '[' {
+			var legacy []NodeConfig
+			if err := json.Unmarshal(trimmed, &legacy); err != nil {
+				return nil, fmt.Errorf("config: parse legacy node field in %s: %w", path, err)
+			}
+			normalized := NodeConfig{}
+			if len(legacy) > 0 {
+				normalized = legacy[0]
+			}
+			nodeObj, err := json.Marshal(normalized)
+			if err != nil {
+				return nil, fmt.Errorf("config: normalize legacy node field in %s: %w", path, err)
+			}
+			raw["node"] = nodeObj
+			data, err = json.Marshal(raw)
+			if err != nil {
+				return nil, fmt.Errorf("config: rebuild normalized config %s: %w", path, err)
+			}
+		}
+	}
+
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
@@ -260,6 +308,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Rescue.MaxAttempts < 1 {
 		return fmt.Errorf("rescue.max_attempts must be >= 1, got %d", c.Rescue.MaxAttempts)
+	}
+	if (c.Routing.BypassChina || c.Routing.BypassRussia) && (c.Routing.GeoIPPath == "" || c.Routing.GeoSitePath == "") {
+		return fmt.Errorf("routing geo bypass requires both geoip_path and geosite_path to be set")
+	}
+	if c.Routing.BlockAds && c.Routing.GeoSitePath == "" {
+		return fmt.Errorf("routing block_ads requires geosite_path to be set")
 	}
 
 	return nil

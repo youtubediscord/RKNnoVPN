@@ -192,6 +192,11 @@ $(if [ "${APP_MODE}" = "whitelist" ]; then
     for uid in ${APP_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j MARK --set-mark ${FWMARK}"
     done
+elif [ "${APP_MODE}" = "blacklist" ]; then
+    for uid in ${APP_UIDS}; do
+        echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j RETURN"
+    done
+    echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
     # If APP_MODE is "all", mark everything (except what was already returned)
 elif [ "${APP_MODE}" = "all" ]; then
     echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
@@ -301,6 +306,11 @@ $(if [ "${APP_MODE}" = "whitelist" ]; then
     for uid in ${APP_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j MARK --set-mark ${FWMARK}"
     done
+elif [ "${APP_MODE}" = "blacklist" ]; then
+    for uid in ${APP_UIDS}; do
+        echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j RETURN"
+    done
+    echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
 elif [ "${APP_MODE}" = "all" ]; then
     echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
 fi)
@@ -383,6 +393,12 @@ $(if [ "${DNS_MODE}" = "per_uid" ]; then
             echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
             echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
         done
+    elif [ "${APP_MODE}" = "blacklist" ]; then
+        for uid in ${APP_UIDS}; do
+            echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -j RETURN"
+        done
+        echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+        echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
     elif [ "${APP_MODE}" = "all" ]; then
         # "all" mode with per_uid DNS doesn't make sense — redirect all DNS
         echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
@@ -421,6 +437,12 @@ $(if [ "${DNS_MODE}" = "per_uid" ]; then
             echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
             echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
         done
+    elif [ "${APP_MODE}" = "blacklist" ]; then
+        for uid in ${APP_UIDS}; do
+            echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -j RETURN"
+        done
+        echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+        echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
     elif [ "${APP_MODE}" = "all" ]; then
         echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
         echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"

@@ -45,7 +45,11 @@ object AmneziaImporter {
      */
     fun import(uri: String): Node? {
         return try {
-            val payload = uri.removePrefix("vpn://").removePrefix("VPN://")
+            val payload = if (uri.length >= 6 && uri.substring(0, 6).equals("vpn://", ignoreCase = true)) {
+                uri.substring(6)
+            } else {
+                uri
+            }
             if (payload.isBlank()) return null
 
             val raw = base64UrlDecode(payload) ?: run {

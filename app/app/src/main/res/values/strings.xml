@@ -71,6 +71,7 @@
     <string name="camera_placeholder">Camera preview will appear here</string>
     <string name="subscription_url_hint">https://example.com/sub</string>
     <string name="fetch">Fetch</string>
+    <string name="importing">Importing…</string>
     <string name="import_selected">Import selected (%d)</string>
     <string name="no_nodes_detected">No valid nodes detected</string>
     <string name="nodes_detected">%d nodes detected</string>
@@ -80,6 +81,8 @@
     <string name="apps_empty">No apps found.\nInstall the daemon to enable per-app routing.</string>
     <string name="app_picker_title">Per-app proxy</string>
     <string name="app_picker_banner">Selected apps route through proxy. Everything else connects directly.</string>
+    <string name="app_picker_banner_bypass">Selected apps connect directly. Everything else routes through proxy.</string>
+    <string name="app_picker_banner_disabled">Per-app app selection is inactive for the current routing mode. Switch Routing to Whitelist or Bypass in Settings.</string>
     <string name="template_browsers">Browsers</string>
     <string name="template_social">Social</string>
     <string name="template_streaming">Streaming</string>
@@ -87,13 +90,16 @@
     <string name="search_apps">Search apps…</string>
     <string name="show_system_apps">Show system apps</string>
     <string name="proxied_count">%d proxied</string>
+    <string name="bypassed_count">%d direct</string>
     <string name="apply">Apply</string>
     <string name="loading_apps">Loading apps…</string>
+    <string name="app_picker_mode_disabled">Per-app selection is unavailable in the current routing mode.</string>
 
     <!-- Settings -->
     <string name="settings_routing">Routing</string>
     <string name="routing_global">Global</string>
     <string name="routing_whitelist">Whitelist</string>
+    <string name="routing_bypass">Bypass</string>
     <string name="routing_direct">Direct</string>
     <string name="settings_dns">DNS</string>
     <string name="dns_cloudflare">Cloudflare</string>
@@ -125,7 +131,7 @@
     <string name="settings_about">About</string>
     <string name="about_version">Version</string>
     <string name="about_github">GitHub</string>
-    <string name="github_url">https://github.com/nickolay168/RKNnoVPN</string>
+    <string name="github_url">https://github.com/youtubediscord/RKNnoVPN</string>
 
     <!-- Update -->
     <string name="settings_update">Update</string>

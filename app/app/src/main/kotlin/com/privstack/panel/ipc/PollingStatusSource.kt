@@ -127,7 +127,7 @@ class PollingStatusSource @Inject constructor(
             }
             is DaemonClientResult.ParseError -> {
                 consecutiveFailures++
-                _connectionState.value = DaemonConnectionState.REACHABLE
+                _connectionState.value = DaemonConnectionState.UNREACHABLE
                 Log.w(TAG, "Failed to parse status response", result.cause)
             }
             is DaemonClientResult.Failure -> {

@@ -7,19 +7,34 @@
     "mark": 8227
   },
   "transport": {
-    "core": "sing-box",
-    "log_level": "warning",
-    "sniff": true,
-    "sniff_override_destination": true
+    "protocol": "reality",
+    "tls_server": "",
+    "fingerprint": "chrome",
+    "extra": {}
   },
-  "node": [],
+  "node": {
+    "address": "",
+    "port": 443,
+    "protocol": "vless",
+    "uuid": "",
+    "flow": ""
+  },
+  "panel": {
+    "id": "default",
+    "name": "Default",
+    "active_node_id": "",
+    "nodes": []
+  },
   "routing": {
     "mode": "whitelist",
     "bypass_lan": true,
     "bypass_china": false,
+    "bypass_russia": false,
     "custom_direct": [],
     "custom_proxy": [],
-    "custom_block": []
+    "custom_block": [],
+    "geoip_path": "/data/adb/privstack/data/geoip.db",
+    "geosite_path": "/data/adb/privstack/data/geosite.db"
   },
   "apps": {
     "mode": "whitelist",
@@ -29,7 +44,9 @@
     "hijack_per_uid": true,
     "proxy_dns": "https://1.1.1.1/dns-query",
     "direct_dns": "https://dns.google/dns-query",
-    "block_quic_dns": true
+    "bootstrap_ip": "1.1.1.1",
+    "block_quic_dns": true,
+    "fake_ip": false
   },
   "ipv6": {
     "mode": "mirror"

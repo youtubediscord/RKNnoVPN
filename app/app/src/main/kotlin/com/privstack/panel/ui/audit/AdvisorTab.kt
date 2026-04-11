@@ -96,6 +96,22 @@ fun AdvisorTab(viewModel: AuditViewModel) {
             )
         }
 
+        if (state.errorMessage != null) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = state.errorMessage ?: "",
+                        color = Color(0xFFE53935),
+                        modifier = Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
+
         if (state.hasLoaded) {
             // Category groups
             state.groupedByCategory.forEach { (category, recommendations) ->

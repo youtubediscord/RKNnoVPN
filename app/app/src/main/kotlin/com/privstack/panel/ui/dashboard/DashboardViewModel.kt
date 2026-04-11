@@ -186,6 +186,7 @@ class DashboardViewModel @Inject constructor(
             it.copy(
                 connectionState = status.state,
                 activeNodeName = status.activeNodeName,
+                activeNodeProtocol = status.activeNodeProtocol,
                 traffic = status.traffic,
                 trafficHistory = _trafficRing.toList(),
                 dnsOperational = status.health.dnsOperational,

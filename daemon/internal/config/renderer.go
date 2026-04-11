@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // RenderSingboxConfig generates a complete sing-box configuration JSON
@@ -84,19 +85,43 @@ func buildDNS(cfg *Config) map[string]interface{} {
 		})
 	}
 
-	// Custom direct domains use direct DNS.
-	if len(cfg.Routing.CustomDirect) > 0 {
+	if cfg.Routing.BypassChina {
 		rules = append(rules, map[string]interface{}{
-			"domain": cfg.Routing.CustomDirect,
+			"rule_set": []string{"geosite-cn"},
+			"server":   "direct-dns",
+		})
+	}
+
+	customDirectDomains, customDirectCIDRs := splitRuleInputs(cfg.Routing.CustomDirect)
+	customBlockDomains, customBlockCIDRs := splitRuleInputs(cfg.Routing.CustomBlock)
+
+	// Custom direct domains use direct DNS.
+	if len(customDirectDomains) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"domain": customDirectDomains,
 			"server": "direct-dns",
 		})
 	}
 
-	// Custom blocked domains use block DNS.
-	if len(cfg.Routing.CustomBlock) > 0 {
+	if len(customDirectCIDRs) > 0 {
 		rules = append(rules, map[string]interface{}{
-			"domain": cfg.Routing.CustomBlock,
+			"ip_cidr": customDirectCIDRs,
+			"server":  "direct-dns",
+		})
+	}
+
+	// Custom blocked domains use block DNS.
+	if len(customBlockDomains) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"domain": customBlockDomains,
 			"server": "block-dns",
+		})
+	}
+
+	if len(customBlockCIDRs) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"ip_cidr": customBlockCIDRs,
+			"server":  "block-dns",
 		})
 	}
 
@@ -175,12 +200,16 @@ func buildProxyOutbound(profile *NodeProfile) map[string]interface{} {
 		if profile.Flow != "" {
 			out["flow"] = profile.Flow
 		}
-		out["tls"] = buildTLS(profile)
+		if tls := buildTLS(profile, false); tls != nil {
+			out["tls"] = tls
+		}
 
 	case "trojan":
 		out["type"] = "trojan"
 		out["password"] = profile.UUID
-		out["tls"] = buildTLS(profile)
+		if tls := buildTLS(profile, true); tls != nil {
+			out["tls"] = tls
+		}
 
 	case "vmess":
 		out["type"] = "vmess"
@@ -191,7 +220,9 @@ func buildProxyOutbound(profile *NodeProfile) map[string]interface{} {
 			sec = "auto"
 		}
 		out["security"] = sec
-		out["tls"] = buildTLS(profile)
+		if tls := buildTLS(profile, false); tls != nil {
+			out["tls"] = tls
+		}
 
 	case "shadowsocks":
 		out["type"] = "shadowsocks"
@@ -211,7 +242,17 @@ func buildProxyOutbound(profile *NodeProfile) map[string]interface{} {
 	return out
 }
 
-func buildTLS(profile *NodeProfile) map[string]interface{} {
+func buildTLS(profile *NodeProfile, force bool) map[string]interface{} {
+	transportSecurity := profile.Extra["security"]
+	tlsEnabled := force ||
+		profile.Transport == "reality" ||
+		profile.RealityPubKey != "" ||
+		transportSecurity == "tls" ||
+		transportSecurity == "reality"
+	if !tlsEnabled {
+		return nil
+	}
+
 	tls := map[string]interface{}{
 		"enabled": true,
 	}
@@ -230,7 +271,7 @@ func buildTLS(profile *NodeProfile) map[string]interface{} {
 	}
 
 	// REALITY TLS settings.
-	if profile.Transport == "reality" || profile.RealityPubKey != "" {
+	if profile.Transport == "reality" || profile.RealityPubKey != "" || transportSecurity == "reality" {
 		tls["reality"] = map[string]interface{}{
 			"enabled":    true,
 			"public_key": profile.RealityPubKey,
@@ -264,16 +305,119 @@ func buildTransport(profile *NodeProfile) map[string]interface{} {
 		if sn, ok := profile.Extra["service_name"]; ok {
 			tp["service_name"] = sn
 		}
+		if mode, ok := profile.Extra["mode"]; ok {
+			tp["mode"] = mode
+		}
+		if authority, ok := profile.Extra["authority"]; ok {
+			tp["authority"] = authority
+		}
 		return tp
 
-	case "h2":
+	case "http", "h2":
 		tp := map[string]interface{}{
 			"type": "http",
 		}
 		if host, ok := profile.Extra["host"]; ok {
-			tp["host"] = []string{host}
+			hosts := []string{}
+			for _, item := range strings.Split(host, ",") {
+				item = strings.TrimSpace(item)
+				if item != "" {
+					hosts = append(hosts, item)
+				}
+			}
+			if len(hosts) > 0 {
+				tp["host"] = hosts
+			}
 		}
 		if path, ok := profile.Extra["path"]; ok {
+			tp["path"] = path
+		}
+		return tp
+
+	case "tcp":
+		headerType, hasHeader := profile.Extra["header_type"]
+		if !hasHeader || headerType == "" || headerType == "none" {
+			return nil
+		}
+		tp := map[string]interface{}{
+			"type": "tcp",
+			"header": map[string]interface{}{
+				"type": headerType,
+			},
+		}
+		if headerType == "http" {
+			request := map[string]interface{}{
+				"path": profile.Extra["path"],
+			}
+			if host, ok := profile.Extra["host"]; ok && host != "" {
+				hosts := []string{}
+				for _, item := range strings.Split(host, ",") {
+					item = strings.TrimSpace(item)
+					if item != "" {
+						hosts = append(hosts, item)
+					}
+				}
+				if len(hosts) > 0 {
+					request["headers"] = map[string]interface{}{
+						"Host": hosts,
+					}
+				}
+			}
+			tp["header"] = map[string]interface{}{
+				"type":    headerType,
+				"request": request,
+			}
+		}
+		return tp
+
+	case "kcp", "mkcp":
+		tp := map[string]interface{}{
+			"type": "mkcp",
+		}
+		if headerType, ok := profile.Extra["header_type"]; ok && headerType != "" {
+			tp["header_type"] = headerType
+		}
+		if seed, ok := profile.Extra["seed"]; ok && seed != "" {
+			tp["seed"] = seed
+		}
+		return tp
+
+	case "quic":
+		tp := map[string]interface{}{
+			"type":     "quic",
+			"security": profile.Extra["quic_security"],
+		}
+		if tp["security"] == "" {
+			tp["security"] = "none"
+		}
+		if key, ok := profile.Extra["key"]; ok && key != "" {
+			tp["key"] = key
+		}
+		if headerType, ok := profile.Extra["header_type"]; ok && headerType != "" {
+			tp["header_type"] = headerType
+		}
+		return tp
+
+	case "httpupgrade":
+		tp := map[string]interface{}{
+			"type": "httpupgrade",
+		}
+		if host, ok := profile.Extra["host"]; ok && host != "" {
+			tp["host"] = host
+		}
+		if path, ok := profile.Extra["path"]; ok && path != "" {
+			tp["path"] = path
+		}
+		return tp
+
+	case "splithttp":
+		tp := map[string]interface{}{
+			"type": "splithttp",
+		}
+		if host, ok := profile.Extra["host"]; ok && host != "" {
+			tp["host"] = host
+		}
+		if path, ok := profile.Extra["path"]; ok && path != "" {
 			tp["path"] = path
 		}
 		return tp
@@ -315,26 +459,55 @@ func buildRoute(cfg *Config) map[string]interface{} {
 		})
 	}
 
-	// Custom direct domains/IPs.
-	if len(cfg.Routing.CustomDirect) > 0 {
+	if cfg.Routing.BypassChina {
 		rules = append(rules, map[string]interface{}{
-			"domain": cfg.Routing.CustomDirect,
+			"rule_set": []string{"geoip-cn", "geosite-cn"},
+			"outbound": "direct",
+		})
+	}
+
+	customDirectDomains, customDirectCIDRs := splitRuleInputs(cfg.Routing.CustomDirect)
+	customProxyDomains, customProxyCIDRs := splitRuleInputs(cfg.Routing.CustomProxy)
+	customBlockDomains, customBlockCIDRs := splitRuleInputs(cfg.Routing.CustomBlock)
+
+	// Custom direct domains/IPs.
+	if len(customDirectDomains) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"domain": customDirectDomains,
+			"outbound": "direct",
+		})
+	}
+	if len(customDirectCIDRs) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"ip_cidr": customDirectCIDRs,
 			"outbound": "direct",
 		})
 	}
 
 	// Custom proxy domains/IPs.
-	if len(cfg.Routing.CustomProxy) > 0 {
+	if len(customProxyDomains) > 0 {
 		rules = append(rules, map[string]interface{}{
-			"domain": cfg.Routing.CustomProxy,
+			"domain": customProxyDomains,
+			"outbound": "proxy",
+		})
+	}
+	if len(customProxyCIDRs) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"ip_cidr": customProxyCIDRs,
 			"outbound": "proxy",
 		})
 	}
 
 	// Custom block domains/IPs.
-	if len(cfg.Routing.CustomBlock) > 0 {
+	if len(customBlockDomains) > 0 {
 		rules = append(rules, map[string]interface{}{
-			"domain": cfg.Routing.CustomBlock,
+			"domain": customBlockDomains,
+			"outbound": "block",
+		})
+	}
+	if len(customBlockCIDRs) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"ip_cidr": customBlockCIDRs,
 			"outbound": "block",
 		})
 	}
@@ -377,6 +550,25 @@ func buildRuleSets(cfg *Config) []map[string]interface{} {
 		}
 	}
 
+	if cfg.Routing.BypassChina {
+		if cfg.Routing.GeoIPPath != "" {
+			sets = append(sets, map[string]interface{}{
+				"type":   "local",
+				"tag":    "geoip-cn",
+				"format": "binary",
+				"path":   cfg.Routing.GeoIPPath,
+			})
+		}
+		if cfg.Routing.GeoSitePath != "" {
+			sets = append(sets, map[string]interface{}{
+				"type":   "local",
+				"tag":    "geosite-cn",
+				"format": "binary",
+				"path":   cfg.Routing.GeoSitePath,
+			})
+		}
+	}
+
 	if cfg.Routing.BlockAds && cfg.Routing.GeoSitePath != "" {
 		sets = append(sets, map[string]interface{}{
 			"type":   "local",
@@ -387,4 +579,19 @@ func buildRuleSets(cfg *Config) []map[string]interface{} {
 	}
 
 	return sets
+}
+
+func splitRuleInputs(values []string) (domains []string, cidrs []string) {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if strings.Contains(value, "/") {
+			cidrs = append(cidrs, value)
+		} else {
+			domains = append(domains, value)
+		}
+	}
+	return domains, cidrs
 }

@@ -343,16 +343,18 @@ private fun NodeCard(
 @Composable
 private fun LatencyChip(ms: Int) {
     val color = when {
+        ms < 0 -> MaterialTheme.colorScheme.outline
         ms < 200 -> MaterialTheme.colorScheme.primary // green/teal
         ms < 500 -> MaterialTheme.colorScheme.tertiary // yellow/amber
         else -> MaterialTheme.colorScheme.error // red
     }
+    val text = if (ms < 0) "ERR" else "${ms}ms"
 
     Card(
         colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.15f)),
     ) {
         Text(
-            text = "${ms}ms",
+            text = text,
             style = MaterialTheme.typography.labelSmall,
             color = color,
             fontWeight = FontWeight.Bold,

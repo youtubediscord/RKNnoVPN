@@ -6,7 +6,7 @@
 #
 # Two interception layers:
 #   1. Port 53 (classic DNS)  — redirected via iptables nat REDIRECT
-#   2. DoT (853) / DoH (443)  — intercepted via mangle TPROXY
+#   2. DoT (853)              — intercepted via mangle TPROXY
 #
 # IMPORTANT: We never touch Settings.Global (Private DNS).  Apps can detect
 #            that change and refuse to work.  Instead we intercept at the
@@ -72,8 +72,8 @@ fill_nat_chain() {
 }
 
 # Populate a single mangle chain ($1=iptables/ip6tables, $2=chain).
-# TPROXY intercepts DoT (853) and DoH (443) so encrypted DNS goes through
-# the proxy core as well.
+# TPROXY intercepts DoT (853). We intentionally do not blanket-intercept
+# generic 443 traffic here because that would break normal HTTPS/QUIC apps.
 fill_mangle_chain() {
     _ipt="$1"; _chain="$2"
 
@@ -84,18 +84,9 @@ fill_mangle_chain() {
         # DoT — TCP 853
         $_ipt -t mangle -A "$_chain" -p tcp --dport 853 \
               -j TPROXY --on-port "$DNS_PORT" --tproxy-mark 0x2023
-        # DoH — TCP 443 (only well-known resolvers; full 443 would break the web)
-        # We intentionally do NOT blanket-TPROXY 443 here.  The core's sniff +
-        # override_destination handles DoH domains matched by routing rules.
-        # This chain is a safety net for stubborn apps that hard-code resolver IPs.
-        $_ipt -t mangle -A "$_chain" -p udp --dport 443 \
-              -j TPROXY --on-port "$DNS_PORT" --tproxy-mark 0x2023
     else
         for uid in $APP_UIDS; do
             $_ipt -t mangle -A "$_chain" -p tcp --dport 853 \
-                  -m owner --uid-owner "$uid" \
-                  -j TPROXY --on-port "$DNS_PORT" --tproxy-mark 0x2023
-            $_ipt -t mangle -A "$_chain" -p udp --dport 443 \
                   -m owner --uid-owner "$uid" \
                   -j TPROXY --on-port "$DNS_PORT" --tproxy-mark 0x2023
         done

@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.privstack.panel.model.ProfileConfig
+import com.privstack.panel.model.RoutingMode
 import com.privstack.panel.repository.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -13,12 +15,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 private const val TAG = "AppPickerViewModel"
+
+private data class RoutingSelection(
+    val routingMode: RoutingMode,
+    val selectedPackages: Set<String>,
+)
 
 /**
  * Lightweight representation of an installed Android app for the UI layer.
@@ -32,6 +41,7 @@ data class AppInfo(
 
 data class AppPickerUiState(
     val apps: List<AppInfo> = emptyList(),
+    val routingMode: RoutingMode = RoutingMode.PER_APP,
     val searchQuery: String = "",
     val showSystemApps: Boolean = false,
     val isLoading: Boolean = true,
@@ -56,6 +66,9 @@ data class AppPickerUiState(
 
     val proxiedCount: Int
         get() = apps.count { it.isProxied }
+
+    val supportsPerAppSelection: Boolean
+        get() = routingMode == RoutingMode.PER_APP || routingMode == RoutingMode.PER_APP_BYPASS
 }
 
 /** Well-known package names for quick-select templates. */
@@ -90,6 +103,7 @@ class AppPickerViewModel @Inject constructor(
     val uiState: StateFlow<AppPickerUiState> = _uiState.asStateFlow()
 
     init {
+        observeProfile()
         loadApps()
     }
 
@@ -102,6 +116,7 @@ class AppPickerViewModel @Inject constructor(
     }
 
     fun toggleApp(packageName: String) {
+        if (!_uiState.value.supportsPerAppSelection) return
         _uiState.update { state ->
             state.copy(
                 apps = state.apps.map {
@@ -113,6 +128,7 @@ class AppPickerViewModel @Inject constructor(
     }
 
     fun applyTemplate(template: AppTemplate) {
+        if (!_uiState.value.supportsPerAppSelection) return
         _uiState.update { state ->
             val targetPackages = when (template) {
                 AppTemplate.BROWSERS -> BROWSER_PACKAGES
@@ -142,28 +158,38 @@ class AppPickerViewModel @Inject constructor(
     }
 
     fun applySelection() {
-        val proxiedPackages = _uiState.value.apps
+        val selectedPackages = _uiState.value.apps
             .filter { it.isProxied }
             .map { it.packageName }
+        val routingMode = _uiState.value.routingMode
 
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
 
+            if (!routingMode.usesPerAppSelection()) {
+                _uiState.update {
+                    it.copy(errorMessage = "Per-app selection is unavailable in the current routing mode")
+                }
+                return@launch
+            }
+
             val ok = profileRepository.updateConfig { config ->
                 config.copy(
                     routing = config.routing.copy(
-                        appProxyList = proxiedPackages,
+                        appProxyList = if (routingMode == RoutingMode.PER_APP) selectedPackages else emptyList(),
+                        appBypassList = if (routingMode == RoutingMode.PER_APP_BYPASS) selectedPackages else emptyList(),
                     ),
                 )
             }
             if (!ok) {
                 val err = profileRepository.error.value
                 Log.w(TAG, "Failed to save app selection: $err")
+                profileRepository.refresh()
                 _uiState.update {
                     it.copy(errorMessage = err ?: "Failed to save app selection")
                 }
             } else {
-                Log.d(TAG, "Saved ${proxiedPackages.size} proxied apps to daemon config")
+                Log.d(TAG, "Saved ${selectedPackages.size} apps for routing mode $routingMode")
             }
         }
     }
@@ -185,7 +211,7 @@ class AppPickerViewModel @Inject constructor(
                 }
 
                 // 2. Get the current per-app proxy list from daemon config
-                val proxiedSet = loadProxiedAppsFromDaemon()
+                val daemonSelection = loadRoutingSelectionFromDaemon()
 
                 // 3. Merge into UI model
                 val appInfoList = installedApps.map { (pkg, label, isSystem) ->
@@ -193,13 +219,14 @@ class AppPickerViewModel @Inject constructor(
                         packageName = pkg,
                         label = label,
                         isSystemApp = isSystem,
-                        isProxied = pkg in proxiedSet,
+                        isProxied = pkg in daemonSelection.selectedPackages,
                     )
                 }.sortedBy { it.label.lowercase() }
 
                 _uiState.update {
                     it.copy(
                         apps = appInfoList,
+                        routingMode = daemonSelection.routingMode,
                         isLoading = false,
                     )
                 }
@@ -243,12 +270,12 @@ class AppPickerViewModel @Inject constructor(
      * Load the set of package names currently configured for per-app proxy
      * from the daemon's profile config.
      *
-     * Returns an empty set if the daemon is unreachable (graceful fallback).
+     * Returns an empty selection if the daemon is unreachable (graceful fallback).
      */
-    private suspend fun loadProxiedAppsFromDaemon(): Set<String> {
+    private suspend fun loadRoutingSelectionFromDaemon(): RoutingSelection {
         val config = profileRepository.getOrLoad()
         if (config != null) {
-            return config.routing.appProxyList.toSet()
+            return config.toRoutingSelection()
         }
 
         // Fallback: daemon unreachable, return empty set
@@ -256,8 +283,40 @@ class AppPickerViewModel @Inject constructor(
         if (err != null) {
             Log.w(TAG, "Could not load proxied apps from daemon: $err")
         }
-        return emptySet()
+        return RoutingSelection(RoutingMode.PROXY_ALL, emptySet())
     }
+
+    private fun observeProfile() {
+        viewModelScope.launch {
+            profileRepository.profile
+                .filterNotNull()
+                .collect { config ->
+                    val selection = config.toRoutingSelection()
+                    _uiState.update { state ->
+                        state.copy(
+                            routingMode = selection.routingMode,
+                            apps = state.apps.map { app ->
+                                app.copy(isProxied = app.packageName in selection.selectedPackages)
+                            },
+                        )
+                    }
+                }
+        }
+    }
+
+}
+
+private fun RoutingMode.usesPerAppSelection(): Boolean =
+    this == RoutingMode.PER_APP || this == RoutingMode.PER_APP_BYPASS
+
+private fun ProfileConfig.toRoutingSelection(): RoutingSelection {
+    val routingMode = routing.mode
+    val selected = when (routingMode) {
+        RoutingMode.PER_APP -> routing.appProxyList.toSet()
+        RoutingMode.PER_APP_BYPASS -> routing.appBypassList.toSet()
+        else -> emptySet()
+    }
+    return RoutingSelection(routingMode, selected)
 }
 
 enum class AppTemplate {

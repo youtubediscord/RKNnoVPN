@@ -1,18 +1,29 @@
 package com.privstack.panel.ui.audit
 
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.privstack.panel.advisor.AppCategory
-import com.privstack.panel.advisor.AppClassifier
 import com.privstack.panel.advisor.PlacementAdvisor
 import com.privstack.panel.advisor.PlacementRecommendation
+import com.privstack.panel.ipc.DaemonClientResult
+import com.privstack.panel.model.AuditCategory as DaemonAuditCategory
+import com.privstack.panel.model.AuditFinding as DaemonAuditFinding
+import com.privstack.panel.model.AuditReport as DaemonAuditReport
+import com.privstack.panel.model.Severity as DaemonSeverity
+import com.privstack.panel.repository.StatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 // ───────────────────────────────────────────────────────────────────── //
@@ -92,6 +103,7 @@ data class AdvisorUiState(
     val recommendations: List<PlacementRecommendation> = emptyList(),
     val groupedByCategory: Map<AppCategory, List<PlacementRecommendation>> = emptyMap(),
     val attentionCount: Int = 0,
+    val errorMessage: String? = null,
 )
 
 // ───────────────────────────────────────────────────────────────────── //
@@ -100,8 +112,9 @@ data class AdvisorUiState(
 
 @HiltViewModel
 class AuditViewModel @Inject constructor(
-    private val classifier: AppClassifier,
+    @ApplicationContext private val context: Context,
     private val advisor: PlacementAdvisor,
+    private val statusRepository: StatusRepository,
 ) : ViewModel() {
 
     private val _audit = MutableStateFlow(AuditUiState())
@@ -116,7 +129,8 @@ class AuditViewModel @Inject constructor(
 
     /**
      * Run the full audit suite. In production this would call `privctl audit`
-     * via the daemon IPC layer. Here we simulate the daemon response.
+     * via the daemon IPC layer. If the daemon does not support it yet, we
+     * gracefully fall back to the built-in simulated checks.
      */
     fun runAudit() {
         if (_audit.value.isRunning) return
@@ -124,29 +138,49 @@ class AuditViewModel @Inject constructor(
             _audit.update { it.copy(isRunning = true, errorMessage = null) }
 
             try {
-                // Simulate daemon call latency
-                delay(1_200L)
-
-                val findings = executeChecks()
-                val passed = findings.count { it.passed }
-                val failed = findings.size - passed
-                val risk = computeRisk(findings)
+                val auditResult = when (val result = statusRepository.audit()) {
+                    is DaemonClientResult.Ok -> buildAuditState(result.data)
+                    is DaemonClientResult.DaemonError -> {
+                        // Old daemon builds do not expose the audit RPC yet.
+                        if (result.code == -32601 ||
+                            result.message.contains("method not found", ignoreCase = true)
+                        ) {
+                            delay(1_200L)
+                            buildAuditState(executeChecks())
+                        } else {
+                            throw IllegalStateException("Daemon audit failed: ${result.message}")
+                        }
+                    }
+                    is DaemonClientResult.RootDenied -> {
+                        throw IllegalStateException("Root access denied")
+                    }
+                    is DaemonClientResult.Timeout -> {
+                        throw IllegalStateException("Audit timed out")
+                    }
+                    is DaemonClientResult.DaemonNotFound -> {
+                        throw IllegalStateException("Daemon not installed")
+                    }
+                    is DaemonClientResult.ParseError -> {
+                        throw IllegalStateException("Invalid audit response from daemon")
+                    }
+                    is DaemonClientResult.Failure -> {
+                        throw IllegalStateException(result.throwable.message ?: "Audit failed")
+                    }
+                }
 
                 _audit.update {
-                    AuditUiState(
-                        isRunning = false,
-                        hasRun = true,
-                        riskLevel = risk,
-                        findings = findings,
-                        findingsByCategory = findings.groupBy { f -> f.category },
-                        passedCount = passed,
-                        failedCount = failed,
-                    )
+                    auditResult.copy(isRunning = false, hasRun = true)
                 }
             } catch (e: Exception) {
                 _audit.update {
-                    it.copy(
+                    AuditUiState(
                         isRunning = false,
+                        hasRun = false,
+                        riskLevel = RiskLevel.GREEN,
+                        findings = emptyList(),
+                        findingsByCategory = emptyMap(),
+                        passedCount = 0,
+                        failedCount = 0,
                         errorMessage = e.message ?: "Audit failed",
                     )
                 }
@@ -160,46 +194,39 @@ class AuditViewModel @Inject constructor(
 
     /**
      * Load installed apps and produce placement recommendations.
-     * In production this would query PackageManager; here we use sample data.
      */
     fun loadAdvisor() {
         if (_advisor.value.isLoading) return
         viewModelScope.launch {
-            _advisor.update { it.copy(isLoading = true) }
+            _advisor.update { it.copy(isLoading = true, errorMessage = null) }
 
-            delay(600L)
+            try {
+                val installedApps = withContext(Dispatchers.IO) {
+                    queryInstalledApps()
+                }
 
-            // Sample installed apps (in production: PackageManager.getInstalledApplications)
-            val installedApps = listOf(
-                "com.android.chrome" to "Chrome",
-                "org.telegram.messenger" to "Telegram",
-                "ru.sberbankmobile" to "Sberbank",
-                "ru.gosuslugi.pos" to "Gosuslugi",
-                "com.google.android.youtube" to "YouTube",
-                "ru.mts.mymts" to "MTS",
-                "com.whatsapp" to "WhatsApp",
-                "org.thoughtcrime.securesms" to "Signal",
-                "com.discord" to "Discord",
-                "ru.tinkoff.android" to "Tinkoff",
-                "com.spotify.music" to "Spotify",
-                "com.vkontakte.android" to "VK",
-                "com.wireguard.android" to "WireGuard",
-                "ru.fns.lkfl" to "FNS",
-                "com.brave.browser" to "Brave",
-            )
+                val recommendations = advisor.advise(installedApps)
+                val grouped = advisor.groupByCategory(recommendations)
+                val attention = advisor.countNeedingAttention(recommendations)
 
-            val recommendations = advisor.advise(installedApps)
-            val grouped = advisor.groupByCategory(recommendations)
-            val attention = advisor.countNeedingAttention(recommendations)
-
-            _advisor.update {
-                AdvisorUiState(
-                    isLoading = false,
-                    hasLoaded = true,
-                    recommendations = recommendations,
-                    groupedByCategory = grouped,
-                    attentionCount = attention,
-                )
+                _advisor.update {
+                    AdvisorUiState(
+                        isLoading = false,
+                        hasLoaded = true,
+                        recommendations = recommendations,
+                        groupedByCategory = grouped,
+                        attentionCount = attention,
+                        errorMessage = null,
+                    )
+                }
+            } catch (e: Exception) {
+                _advisor.update {
+                    it.copy(
+                        isLoading = false,
+                        hasLoaded = false,
+                        errorMessage = e.message ?: "Failed to load installed apps",
+                    )
+                }
             }
         }
     }
@@ -207,6 +234,90 @@ class AuditViewModel @Inject constructor(
     // ---------------------------------------------------------------- //
     //  Internal: simulated audit checks
     // ---------------------------------------------------------------- //
+
+    private fun queryInstalledApps(): List<Pair<String, String>> {
+        val pm = context.packageManager
+        @Suppress("DEPRECATION")
+        val applications = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+
+        return applications.mapNotNull { appInfo ->
+            val label = try {
+                appInfo.loadLabel(pm).toString()
+            } catch (_: Exception) {
+                appInfo.packageName
+            }
+
+            val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            if (isSystem && appInfo.packageName == "com.android.systemui") {
+                null
+            } else {
+                appInfo.packageName to label
+            }
+        }
+    }
+
+    private fun buildAuditState(findings: List<AuditFinding>): AuditUiState {
+        val passed = findings.count { it.passed }
+        val failed = findings.size - passed
+        return AuditUiState(
+            riskLevel = computeRisk(findings),
+            findings = findings,
+            findingsByCategory = findings.groupBy { f -> f.category },
+            passedCount = passed,
+            failedCount = failed,
+        )
+    }
+
+    private fun buildAuditState(report: DaemonAuditReport): AuditUiState {
+        val findings = report.findings.map(::mapDaemonFinding)
+        val passedCount = findings.count { it.passed }
+        val failedCount = findings.count { !it.passed }
+        return AuditUiState(
+            riskLevel = computeRisk(findings),
+            findings = findings,
+            findingsByCategory = findings.groupBy { f -> f.category },
+            passedCount = passedCount,
+            failedCount = failedCount,
+        )
+    }
+
+    private fun mapDaemonFinding(finding: DaemonAuditFinding): AuditFinding {
+        val severity = finding.severity.toUiSeverity()
+        val passed = severity == Severity.PASS
+        return AuditFinding(
+            checkId = mapDaemonFindingToCheckId(finding),
+            passed = passed,
+            title = finding.title,
+            detail = finding.description,
+            remediation = finding.recommendation ?: "No remediation provided.",
+        )
+    }
+
+    private fun mapDaemonFindingToCheckId(finding: DaemonAuditFinding): AuditCheckId {
+        val severity = finding.severity.toUiSeverity()
+        return AuditCheckId.entries.firstOrNull { check ->
+            check.displayName.equals(finding.title, ignoreCase = true)
+        } ?: when (finding.category) {
+            DaemonAuditCategory.DNS -> if (severity.weight >= Severity.HIGH.weight) {
+                AuditCheckId.DNS_LEAK
+            } else {
+                AuditCheckId.PRIVATE_DNS_UNCHANGED
+            }
+            DaemonAuditCategory.ROUTING -> AuditCheckId.IPTABLES_LOOP_SAFE
+            DaemonAuditCategory.ENCRYPTION -> AuditCheckId.API_PORT_PROTECTED
+            DaemonAuditCategory.LEAK -> AuditCheckId.PROC_NET_LEAK
+            DaemonAuditCategory.CONFIG -> AuditCheckId.MODULE_INTEGRITY
+            DaemonAuditCategory.SYSTEM -> AuditCheckId.SELINUX_STATUS
+        }
+    }
+
+    private fun DaemonSeverity.toUiSeverity(): Severity = when (this) {
+        DaemonSeverity.CRITICAL -> Severity.CRITICAL
+        DaemonSeverity.HIGH -> Severity.HIGH
+        DaemonSeverity.MEDIUM -> Severity.MEDIUM
+        DaemonSeverity.LOW -> Severity.LOW
+        DaemonSeverity.INFO -> Severity.PASS
+    }
 
     private fun executeChecks(): List<AuditFinding> = listOf(
         AuditFinding(
