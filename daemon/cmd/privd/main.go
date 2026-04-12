@@ -25,7 +25,7 @@ import (
 	"github.com/privstack/daemon/internal/watcher"
 )
 
-const version = "0.2.0"
+var Version = "0.2.0"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {
@@ -63,7 +63,7 @@ func main() {
 		log.SetOutput(f)
 	}
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
-	log.Printf("privd %s starting", version)
+	log.Printf("privd %s starting", Version)
 
 	// ---- PID file ----------------------------------------------------------
 
@@ -290,7 +290,7 @@ func (d *daemon) dumpState() {
 	d.mu.Unlock()
 
 	state := map[string]interface{}{
-		"version":        version,
+		"version":        Version,
 		"config_path":    cfgPath,
 		"data_dir":       dataDir,
 		"core_state":     status.State,
@@ -1262,11 +1262,11 @@ func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError
 
 func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	return map[string]string{
-		"daemon":  version,
-		"core":    version,
-		"privctl": version,
+		"daemon":  Version,
+		"core":    Version,
+		"privctl": Version,
 		// Keep legacy keys for backward compatibility.
-		"version": version,
+		"version": Version,
 		"go":      "1.22+",
 	}, nil
 }
@@ -1276,7 +1276,7 @@ func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCEr
 // --------------------------------------------------------------------------
 
 func (d *daemon) handleUpdateCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	info, err := updater.CheckForUpdate("v" + version)
+	info, err := updater.CheckForUpdate("v" + Version)
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
@@ -1288,7 +1288,7 @@ func (d *daemon) handleUpdateCheck(params *json.RawMessage) (interface{}, *ipc.R
 
 func (d *daemon) handleUpdateDownload(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	// First, run a check to get the download URLs.
-	info, err := updater.CheckForUpdate("v" + version)
+	info, err := updater.CheckForUpdate("v" + Version)
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,

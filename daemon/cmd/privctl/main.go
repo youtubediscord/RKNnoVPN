@@ -11,6 +11,8 @@ import (
 
 const defaultSocket = "/data/adb/privstack/run/daemon.sock"
 
+var Version = "0.2.0"
+
 var commands = map[string]string{
 	"status":          "Get proxy status",
 	"start":           "Start proxy",
