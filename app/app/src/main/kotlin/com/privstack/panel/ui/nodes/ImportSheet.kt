@@ -1,5 +1,7 @@
 package com.privstack.panel.ui.nodes
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,19 +31,38 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.LifecycleOwner
 import com.privstack.panel.R
+import com.google.mlkit.vision.barcode.BarcodeScanner
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.common.InputImage
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,7 +95,6 @@ fun ImportSheet(
                 modifier = Modifier.padding(bottom = 16.dp),
             )
 
-            // -- Tab row: Paste URI | Scan QR | Subscription --
             TabRow(selectedTabIndex = selectedTab) {
                 Tab(
                     selected = selectedTab == 0,
@@ -117,16 +137,11 @@ fun ImportSheet(
             Spacer(modifier = Modifier.height(16.dp))
 
             when (selectedTab) {
-                0 -> PasteUriTab(
-                    onDetectUris = onDetectUris,
-                )
-                1 -> ScanQrTab()
-                2 -> SubscriptionTab(
-                    onFetchSubscription = onFetchSubscription,
-                )
+                0 -> PasteUriTab(onDetectUris = onDetectUris)
+                1 -> ScanQrTab(onQrDetected = onDetectUris)
+                2 -> SubscriptionTab(onFetchSubscription = onFetchSubscription)
             }
 
-            // -- Error message --
             if (errorMessage != null) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
@@ -137,7 +152,6 @@ fun ImportSheet(
                 )
             }
 
-            // -- Loading indicator --
             if (isLoading) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
@@ -154,17 +168,13 @@ fun ImportSheet(
                 }
             }
 
-            // -- Candidate list (shared across all tabs) --
             if (candidates.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(16.dp))
-
                 Text(
                     text = stringResource(R.string.nodes_detected, candidates.size),
                     style = MaterialTheme.typography.labelLarge,
                 )
-
                 Spacer(modifier = Modifier.height(8.dp))
-
                 LazyColumn(
                     modifier = Modifier.heightIn(max = 240.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -197,9 +207,7 @@ fun ImportSheet(
                         }
                     }
                 }
-
                 Spacer(modifier = Modifier.height(12.dp))
-
                 val selectedCount = candidates.count { it.selected }
                 Button(
                     onClick = onImportSelected,
@@ -241,30 +249,134 @@ private fun PasteUriTab(
 }
 
 @Composable
-private fun ScanQrTab() {
-    // Camera preview placeholder -- actual CameraX implementation belongs
-    // in a separate file (QrScannerView.kt) with AndroidView.
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(240.dp),
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Filled.CameraAlt,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = stringResource(R.string.camera_placeholder),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+private fun ScanQrTab(
+    onQrDetected: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        hasPermission = granted
+    }
+
+    if (hasPermission) {
+        QrScannerPreview(onQrDetected = onQrDetected)
+    } else {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(240.dp),
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Filled.CameraAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                FilledTonalButton(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                    Text(stringResource(R.string.camera_permission_button))
+                }
+            }
         }
     }
+}
+
+@androidx.annotation.OptIn(ExperimentalGetImage::class)
+@Composable
+	private fun QrScannerPreview(
+	    onQrDetected: (String) -> Unit,
+	) {
+	    val lifecycleOwner = LocalContext.current as LifecycleOwner
+    val executor = remember { Executors.newSingleThreadExecutor() }
+    val scanner = remember { BarcodeScanning.getClient() }
+    val lastValue = remember { AtomicReference<String?>(null) }
+    val cameraProviderRef = remember { AtomicReference<ProcessCameraProvider?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraProviderRef.get()?.unbindAll()
+            scanner.close()
+            executor.shutdown()
+        }
+    }
+
+    AndroidView(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(280.dp),
+        factory = { context ->
+            val previewView = PreviewView(context).apply {
+                scaleType = PreviewView.ScaleType.FILL_CENTER
+            }
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            cameraProviderFuture.addListener(
+                {
+                    val cameraProvider = cameraProviderFuture.get()
+                    cameraProviderRef.set(cameraProvider)
+                    val preview = Preview.Builder().build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
+                    val analysis = ImageAnalysis.Builder()
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build()
+
+                    analysis.setAnalyzer(executor) { imageProxy ->
+                        scanBarcode(
+                            imageProxy = imageProxy,
+                            scanner = scanner,
+                            onValue = { value ->
+                                if (value.isNotBlank() && value != lastValue.getAndSet(value)) {
+                                    previewView.post { onQrDetected(value) }
+                                }
+                            },
+                        )
+                    }
+
+                    runCatching {
+                        cameraProvider.unbindAll()
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            CameraSelector.DEFAULT_BACK_CAMERA,
+                            preview,
+                            analysis,
+                        )
+                    }
+                },
+                ContextCompat.getMainExecutor(context),
+            )
+            previewView
+        },
+    )
+}
+
+@androidx.annotation.OptIn(ExperimentalGetImage::class)
+private fun scanBarcode(
+    imageProxy: ImageProxy,
+    scanner: BarcodeScanner,
+    onValue: (String) -> Unit,
+) {
+    val mediaImage = imageProxy.image
+    if (mediaImage == null) {
+        imageProxy.close()
+        return
+    }
+    val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+    scanner.process(image)
+        .addOnSuccessListener { barcodes ->
+            barcodes.firstNotNullOfOrNull { it.rawValue }?.let(onValue)
+        }
+        .addOnCompleteListener {
+            imageProxy.close()
+        }
 }
 
 @Composable

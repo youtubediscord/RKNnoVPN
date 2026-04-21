@@ -13,11 +13,13 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -356,49 +358,72 @@ class DaemonClient @Inject constructor(
         val outbound = buildJsonObject {
             put("protocol", node.protocol)
             when (node.protocol) {
-                "vless", "vmess" -> {
-                    putJsonObject("settings") {
-                        putJsonArray("vnext") {
-                            add(
-                                buildJsonObject {
-                                    put("address", node.address)
-                                    put("port", node.port)
-                                    putJsonArray("users") {
-                                        add(
-                                            buildJsonObject {
-                                                put("id", node.uuid)
-                                                if (node.protocol == "vmess") {
-                                                    put("alterId", node.alterId)
-                                                    put("security", node.security.ifBlank { "auto" })
-                                                } else {
-                                                    put("encryption", "none")
-                                                    if (node.flow.isNotBlank()) {
-                                                        put("flow", node.flow)
-                                                    }
+                "vless", "vmess" -> putJsonObject("settings") {
+                    putJsonArray("vnext") {
+                        add(
+                            buildJsonObject {
+                                put("address", node.address)
+                                put("port", node.port)
+                                putJsonArray("users") {
+                                    add(
+                                        buildJsonObject {
+                                            put("id", node.uuid)
+                                            if (node.protocol == "vmess") {
+                                                put("alterId", node.alterId)
+                                                put("security", node.security.ifBlank { "auto" })
+                                            } else {
+                                                put("encryption", "none")
+                                                if (node.flow.isNotBlank()) {
+                                                    put("flow", node.flow)
                                                 }
                                             }
-                                        )
-                                    }
+                                        }
+                                    )
                                 }
-                            )
+                            }
+                        )
+                    }
+                }
+
+                "trojan", "shadowsocks" -> putJsonObject("settings") {
+                    putJsonArray("servers") {
+                        add(
+                            buildJsonObject {
+                                put("address", node.address)
+                                put("port", node.port)
+                                put("password", node.uuid.ifBlank { node.password })
+                                if (node.protocol == "shadowsocks") {
+                                    put("method", node.ssMethod.ifBlank { "aes-128-gcm" })
+                                    if (node.ssPlugin.isNotBlank()) put("plugin", node.ssPlugin)
+                                    if (node.ssPluginOpts.isNotBlank()) put("plugin_opts", node.ssPluginOpts)
+                                }
+                            }
+                        )
+                    }
+                }
+
+                "hysteria2" -> putJsonObject("settings") {
+                    put("address", node.address)
+                    put("port", node.port)
+                    put("password", node.password.ifBlank { node.uuid })
+	                    if (node.serverPorts.isNotEmpty()) {
+	                        putJsonArray("server_ports") {
+	                            node.serverPorts.forEach { add(it) }
+	                        }
+	                    }
+                    if (node.obfsType.isNotBlank() || node.obfsPassword.isNotBlank()) {
+                        putJsonObject("obfs") {
+                            put("type", node.obfsType.ifBlank { "salamander" })
+                            put("password", node.obfsPassword)
                         }
                     }
                 }
-                "trojan", "shadowsocks" -> {
-                    putJsonObject("settings") {
-                        putJsonArray("servers") {
-                            add(
-                                buildJsonObject {
-                                    put("address", node.address)
-                                    put("port", node.port)
-                                    put("password", node.uuid)
-                                    if (node.protocol == "shadowsocks") {
-                                        put("method", node.ssMethod.ifBlank { "aes-128-gcm" })
-                                    }
-                                }
-                            )
-                        }
-                    }
+
+                "tuic" -> putJsonObject("settings") {
+                    put("address", node.address)
+                    put("port", node.port)
+                    put("uuid", node.uuid)
+                    put("password", node.password)
                 }
             }
 
@@ -521,9 +546,20 @@ private data class DaemonNodeSection(
     val port: Int = 443,
     val protocol: String = "",
     val uuid: String = "",
+    val password: String = "",
     val flow: String = "",
     @SerialName("ss_method")
     val ssMethod: String = "",
+    @SerialName("ss_plugin")
+    val ssPlugin: String = "",
+    @SerialName("ss_plugin_opts")
+    val ssPluginOpts: String = "",
+    @SerialName("server_ports")
+    val serverPorts: List<String> = emptyList(),
+    @SerialName("obfs_type")
+    val obfsType: String = "",
+    @SerialName("obfs_password")
+    val obfsPassword: String = "",
     @SerialName("alter_id")
     val alterId: Int = 0,
     val security: String = "",
@@ -557,6 +593,7 @@ private data class DaemonTransportSection(
                 putJsonObject("realitySettings") {
                     if (tlsServer.isNotBlank()) put("serverName", tlsServer)
                     if (fingerprint.isNotBlank()) put("fingerprint", fingerprint)
+                    appendSharedTlsFields(extra)
                     (extra["public_key"] ?: realityPublicKey)
                         .takeIf { it.isNotBlank() }
                         ?.let { put("publicKey", it) }
@@ -570,6 +607,7 @@ private data class DaemonTransportSection(
                 putJsonObject("tlsSettings") {
                     if (tlsServer.isNotBlank()) put("serverName", tlsServer)
                     if (fingerprint.isNotBlank()) put("fingerprint", fingerprint)
+                    appendSharedTlsFields(extra)
                 }
             }
             tlsServer.isNotBlank() || fingerprint.isNotBlank() -> {
@@ -577,6 +615,7 @@ private data class DaemonTransportSection(
                 putJsonObject("tlsSettings") {
                     if (tlsServer.isNotBlank()) put("serverName", tlsServer)
                     if (fingerprint.isNotBlank()) put("fingerprint", fingerprint)
+                    appendSharedTlsFields(extra)
                 }
             }
         }
@@ -595,11 +634,11 @@ private data class DaemonTransportSection(
             }
             "http", "h2" -> putJsonObject("httpSettings") {
                 put("path", extra["path"] ?: "/")
-                extra["host"]?.takeIf { it.isNotBlank() }?.let { host ->
-                    putJsonArray("host") {
-                        host.split(",").map(String::trim).filter(String::isNotBlank).forEach(::add)
-                    }
-                }
+	                extra["host"]?.takeIf { it.isNotBlank() }?.let { host ->
+	                    putJsonArray("host") {
+	                        host.split(",").map(String::trim).filter(String::isNotBlank).forEach { add(it) }
+	                    }
+	                }
             }
             "tcp" -> {
                 val headerType = extra["header_type"]
@@ -612,9 +651,9 @@ private data class DaemonTransportSection(
                                     put("path", extra["path"] ?: "/")
                                     extra["host"]?.takeIf { it.isNotBlank() }?.let { host ->
                                         putJsonObject("headers") {
-                                            putJsonArray("Host") {
-                                                host.split(",").map(String::trim).filter(String::isNotBlank).forEach(::add)
-                                            }
+	                                        putJsonArray("Host") {
+	                                                host.split(",").map(String::trim).filter(String::isNotBlank).forEach { add(it) }
+	                                            }
                                         }
                                     }
                                 }
@@ -641,6 +680,16 @@ private data class DaemonTransportSection(
                 extra["host"]?.takeIf { it.isNotBlank() }?.let { put("host", it) }
             }
         }
+    }
+
+    private fun JsonObjectBuilder.appendSharedTlsFields(extra: Map<String, String>) {
+	        extra["alpn"]?.takeIf { it.isNotBlank() }?.let { alpn ->
+	            putJsonArray("alpn") {
+	                alpn.split(",").map(String::trim).filter(String::isNotBlank).forEach { add(it) }
+	            }
+	        }
+        if (extra["insecure"] == "true") put("allowInsecure", true)
+        extra["pin_sha256"]?.takeIf { it.isNotBlank() }?.let { put("certificatePublicKeySha256", it) }
     }
 }
 
@@ -821,6 +870,31 @@ private fun Node.toDaemonNodeSection(): DaemonNodeSection {
                 protocol = "shadowsocks",
                 uuid = serverEntry?.get("password")?.jsonPrimitive?.content.orEmpty(),
                 ssMethod = serverEntry?.get("method")?.jsonPrimitive?.content.orEmpty(),
+                ssPlugin = serverEntry?.get("plugin")?.jsonPrimitive?.content.orEmpty(),
+                ssPluginOpts = serverEntry?.get("plugin_opts")?.jsonPrimitive?.content.orEmpty(),
+            )
+        }
+        Protocol.HYSTERIA2 -> {
+            val obfs = settings?.get("obfs")?.jsonObject
+            DaemonNodeSection(
+                address = server,
+                port = port,
+                protocol = "hysteria2",
+                password = settings?.get("password")?.jsonPrimitive?.content.orEmpty(),
+                serverPorts = settings?.get("server_ports")?.jsonArray
+                    ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    .orEmpty(),
+                obfsType = obfs?.get("type")?.jsonPrimitive?.content.orEmpty(),
+                obfsPassword = obfs?.get("password")?.jsonPrimitive?.content.orEmpty(),
+            )
+        }
+        Protocol.TUIC -> {
+            DaemonNodeSection(
+                address = server,
+                port = port,
+                protocol = "tuic",
+                uuid = settings?.get("uuid")?.jsonPrimitive?.content.orEmpty(),
+                password = settings?.get("password")?.jsonPrimitive?.content.orEmpty(),
             )
         }
         else -> DaemonNodeSection(
@@ -833,17 +907,22 @@ private fun Node.toDaemonNodeSection(): DaemonNodeSection {
 
 private fun Node.toDaemonTransportSection(): DaemonTransportSection {
     val stream = outbound["streamSettings"]?.jsonObject
+    val settings = outbound["settings"]?.jsonObject
     val network = stream?.get("network")?.jsonPrimitive?.content.orEmpty().ifBlank { "tcp" }
     val tls = stream?.get("tlsSettings")?.jsonObject
     val reality = stream?.get("realitySettings")?.jsonObject
     val security = stream?.get("security")?.jsonPrimitive?.content.orEmpty()
 
-    val protocol = when {
+    val transportProtocol = when {
+        this.protocol == Protocol.HYSTERIA2 || this.protocol == Protocol.TUIC -> "tcp"
         security == "reality" || reality != null -> "reality"
         else -> network
     }
 
     val extra = mutableMapOf<String, String>()
+    if (this.protocol == Protocol.HYSTERIA2 || this.protocol == Protocol.TUIC) {
+        extra["network"] = network
+    }
     when (network) {
         "ws" -> {
             val ws = stream?.get("wsSettings")?.jsonObject
@@ -902,15 +981,53 @@ private fun Node.toDaemonTransportSection(): DaemonTransportSection {
         }
     }
 
-    if (protocol == "reality") {
+    if (transportProtocol == "reality") {
         extra["public_key"] = reality?.get("publicKey")?.jsonPrimitive?.content.orEmpty()
         extra["short_id"] = reality?.get("shortId")?.jsonPrimitive?.content.orEmpty()
     } else if (security == "tls") {
         extra["security"] = "tls"
     }
 
+    val tlsLike = reality ?: tls
+    val alpn = tlsLike?.get("alpn")?.jsonArray
+        ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+        ?.joinToString(",")
+    if (!alpn.isNullOrBlank()) {
+        extra["alpn"] = alpn
+    }
+    val insecure = tlsLike?.get("allowInsecure")?.jsonPrimitive?.booleanOrNull
+    if (insecure == true) {
+        extra["insecure"] = "true"
+    }
+    tlsLike?.get("certificatePublicKeySha256")?.jsonPrimitive?.contentOrNull?.let {
+        extra["pin_sha256"] = it
+    }
+    tlsLike?.get("certificate_public_key_sha256")?.jsonArray
+        ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+        ?.joinToString(",")
+        ?.takeIf { it.isNotBlank() }
+        ?.let { extra["pin_sha256"] = it }
+
+    if (this.protocol == Protocol.TUIC) {
+        settings?.get("congestion_control")?.jsonPrimitive?.contentOrNull?.let {
+            extra["congestion_control"] = it
+        }
+        settings?.get("udp_relay_mode")?.jsonPrimitive?.contentOrNull?.let {
+            extra["udp_relay_mode"] = it
+        }
+        settings?.get("udp_over_stream")?.jsonPrimitive?.contentOrNull?.let {
+            extra["udp_over_stream"] = it
+        }
+        settings?.get("zero_rtt_handshake")?.jsonPrimitive?.contentOrNull?.let {
+            extra["zero_rtt_handshake"] = it
+        }
+        settings?.get("heartbeat")?.jsonPrimitive?.contentOrNull?.let {
+            extra["heartbeat"] = it
+        }
+    }
+
     return DaemonTransportSection(
-        protocol = protocol,
+        protocol = transportProtocol,
         tlsServer = reality?.get("serverName")?.jsonPrimitive?.content
             ?: tls?.get("serverName")?.jsonPrimitive?.content.orEmpty(),
         fingerprint = reality?.get("fingerprint")?.jsonPrimitive?.content

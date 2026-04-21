@@ -1,7 +1,7 @@
 # PrivStack — Local Build Commands
 # Requires: Go 1.22+, Android SDK, JDK 17
 
-SINGBOX_VERSION := 1.11.0
+SINGBOX_VERSION := 1.13.8
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 OUT_DIR := out
 MODULE_DIR := module
@@ -48,10 +48,8 @@ module: daemon singbox
 # === Android APK ===
 apk:
 	@echo "=== Building APK ==="
-	cd app && ./gradlew assembleRelease --no-daemon
-	cp app/app/build/outputs/apk/release/*.apk $(OUT_DIR)/privstack-$(VERSION)-panel.apk 2>/dev/null || \
-		(cd app && ./gradlew assembleDebug --no-daemon && \
-		 cp app/build/outputs/apk/debug/*.apk ../$(OUT_DIR)/privstack-$(VERSION)-panel.apk)
+	cd app && ./gradlew assembleDebug --no-daemon
+	cp app/app/build/outputs/apk/debug/*.apk $(OUT_DIR)/privstack-$(VERSION)-panel.apk
 	@echo "  -> $(OUT_DIR)/privstack-$(VERSION)-panel.apk"
 
 # === Test daemon (host arch, for development) ===

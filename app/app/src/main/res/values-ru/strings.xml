@@ -52,6 +52,10 @@
     <string name="sort_by_latency">Задержка</string>
     <string name="sort_by_country">Страна</string>
     <string name="edit">Изменить</string>
+    <string name="edit_node_title">Изменить сервер</string>
+    <string name="node_name_label">Имя</string>
+    <string name="node_group_label">Группа</string>
+    <string name="save">Сохранить</string>
     <string name="copy_link">Копировать ссылку</string>
     <string name="test_latency">Проверить задержку</string>
     <string name="delete">Удалить</string>
@@ -66,9 +70,9 @@
     <string name="tab_paste_uri">Вставить URI</string>
     <string name="tab_scan_qr">Сканировать QR</string>
     <string name="tab_subscription">Подписка</string>
-    <string name="paste_uri_hint">Вставьте ссылки vless://, trojan://, ss://…</string>
+    <string name="paste_uri_hint">Вставьте ссылки vless://, trojan://, ss://, hysteria2://, tuic://…</string>
     <string name="detect_uris">Определить URI</string>
-    <string name="camera_placeholder">Здесь будет превью камеры</string>
+    <string name="camera_permission_button">Разрешить камеру</string>
     <string name="subscription_url_hint">https://example.com/sub</string>
     <string name="fetch">Загрузить</string>
     <string name="importing">Импорт…</string>
@@ -108,8 +112,6 @@
     <string name="dns_custom">Свой DoH</string>
     <string name="dns_custom_hint">https://dns.example.com/dns-query</string>
     <string name="settings_advanced">Расширенные</string>
-    <string name="fragment_toggle">Fragment</string>
-    <string name="mux_toggle">MUX</string>
     <string name="log_level">Уровень лога</string>
     <string name="settings_module">Модуль</string>
     <string name="module_version">Версия</string>

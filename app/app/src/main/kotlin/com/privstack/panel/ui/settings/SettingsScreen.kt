@@ -37,7 +37,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -134,30 +133,6 @@ fun SettingsScreen(
         )
 
         SettingsCard {
-            // Fragment toggle
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.fragment_toggle)) },
-                trailingContent = {
-                    Switch(
-                        checked = state.fragmentEnabled,
-                        onCheckedChange = { viewModel.toggleFragment() },
-                    )
-                },
-                colors = transparentListItemColors(),
-            )
-
-            // MUX toggle
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.mux_toggle)) },
-                trailingContent = {
-                    Switch(
-                        checked = state.muxEnabled,
-                        onCheckedChange = { viewModel.toggleMux() },
-                    )
-                },
-                colors = transparentListItemColors(),
-            )
-
             // Log level picker
             LogLevelPicker(
                 currentLevel = state.logLevel,

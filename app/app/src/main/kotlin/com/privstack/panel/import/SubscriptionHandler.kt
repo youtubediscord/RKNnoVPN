@@ -239,7 +239,10 @@ object SubscriptionHandler {
                 t.startsWith("vmess://", true) ||
                 t.startsWith("trojan://", true) ||
                 t.startsWith("ss://", true) ||
-                t.startsWith("vpn://", true)
+                t.startsWith("vpn://", true) ||
+                t.startsWith("hysteria2://", true) ||
+                t.startsWith("hy2://", true) ||
+                t.startsWith("tuic://", true)
         }
     }
 
@@ -281,6 +284,12 @@ object SubscriptionHandler {
                     val method = server?.get("method")?.jsonPrimitive?.content ?: ""
                     val password = server?.get("password")?.jsonPrimitive?.content ?: ""
                     "$method:$password"
+                }
+                Protocol.HYSTERIA2 -> settings["password"]?.jsonPrimitive?.content ?: ""
+                Protocol.TUIC -> {
+                    val uuid = settings["uuid"]?.jsonPrimitive?.content ?: ""
+                    val password = settings["password"]?.jsonPrimitive?.content ?: ""
+                    "$uuid:$password"
                 }
                 else -> ""
             }

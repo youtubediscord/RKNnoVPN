@@ -14,7 +14,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,14 +145,9 @@ func (r *RescueManager) Rollback() error {
 
 	r.logger.Println("rollback: tearing down all proxy state")
 
-	// 1. Restore iptables from backup if available.
-	backupPath := filepath.Join(r.dataDir, "backup", "iptables.rules")
-	if _, err := os.Stat(backupPath); err == nil {
-		r.logger.Println("rollback: restoring iptables from backup")
-		if _, restoreErr := core.ExecCommand("iptables-restore", backupPath); restoreErr != nil {
-			r.logger.Printf("rollback: iptables-restore failed: %v", restoreErr)
-		}
-	}
+	// 1. Restore iptables from backup if available. iptables-restore reads
+	// rules from stdin, so this cannot use ExecCommand(name, path).
+	r.restoreRuleBackups()
 
 	// 2. Full stop (DNS, iptables, sing-box).
 	if err := r.core.Stop(); err != nil {
@@ -310,28 +307,89 @@ func (r *RescueManager) scriptEnv() map[string]string {
 // flushPrivstackChains removes all PRIVSTACK-prefixed chains from
 // iptables as a safety net during rollback.
 func (r *RescueManager) flushPrivstackChains() {
-	chains := []struct {
-		table string
-		chain string
+	mangleChains := []string{
+		"PRIVSTACK_PRE",
+		"PRIVSTACK_OUT",
+		"PRIVSTACK_APP",
+		"PRIVSTACK_BYPASS",
+		"PRIVSTACK_DIVERT",
+	}
+	natChains4 := []string{"PRIVSTACK_DNS", "PRIVSTACK_DNS_NAT"}
+	natChains6 := []string{"PRIVSTACK_DNS", "PRIVSTACK_DNS_NAT6"}
+
+	for _, chain := range mangleChains {
+		flushChain(core.ExecIptables, "mangle", chain)
+		flushChain(core.ExecIp6tables, "mangle", chain)
+	}
+	for _, chain := range natChains4 {
+		flushChain(core.ExecIptables, "nat", chain)
+	}
+	for _, chain := range natChains6 {
+		flushChain(core.ExecIp6tables, "nat", chain)
+	}
+}
+
+func (r *RescueManager) restoreRuleBackups() {
+	candidates := []struct {
+		command string
+		paths   []string
 	}{
-		{"mangle", "PRIVSTACK_PRE"},
-		{"mangle", "PRIVSTACK_OUT"},
-		{"nat", "PRIVSTACK_DNS_NAT"},
-		{"mangle", "PRIVSTACK_DNS_MAN"},
+		{
+			command: "iptables-restore",
+			paths: []string{
+				filepath.Join(r.dataDir, "run", "iptables_backup.rules"),
+				filepath.Join(r.dataDir, "backup", "iptables_pre.rules"),
+				filepath.Join(r.dataDir, "backup", "iptables.rules"),
+			},
+		},
+		{
+			command: "ip6tables-restore",
+			paths: []string{
+				filepath.Join(r.dataDir, "run", "ip6tables_backup.rules"),
+				filepath.Join(r.dataDir, "backup", "ip6tables_pre.rules"),
+				filepath.Join(r.dataDir, "backup", "ip6tables.rules"),
+			},
+		},
 	}
 
-	for _, c := range chains {
-		// Unhook from parent, flush, delete. Ignore errors since chains
-		// may already be gone.
-		_ = core.ExecIptables("-t", c.table, "-D", "PREROUTING", "-j", c.chain)
-		_ = core.ExecIptables("-t", c.table, "-D", "OUTPUT", "-j", c.chain)
-		_ = core.ExecIptables("-t", c.table, "-F", c.chain)
-		_ = core.ExecIptables("-t", c.table, "-X", c.chain)
-
-		// IPv6 counterparts.
-		_ = core.ExecIp6tables("-t", c.table, "-D", "PREROUTING", "-j", c.chain+"6")
-		_ = core.ExecIp6tables("-t", c.table, "-D", "OUTPUT", "-j", c.chain+"6")
-		_ = core.ExecIp6tables("-t", c.table, "-F", c.chain+"6")
-		_ = core.ExecIp6tables("-t", c.table, "-X", c.chain+"6")
+	for _, candidate := range candidates {
+		for _, path := range candidate.paths {
+			if _, err := os.Stat(path); err != nil {
+				continue
+			}
+			r.logger.Printf("rollback: restoring %s from %s", candidate.command, path)
+			if err := restoreRules(candidate.command, path); err != nil {
+				r.logger.Printf("rollback: %s failed: %v", candidate.command, err)
+			}
+			break
+		}
 	}
+}
+
+func restoreRules(command string, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	cmd := exec.Command(command)
+	cmd.Stdin = file
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s < %s: %w; output: %s", command, path, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func flushChain(execFn func(...string) error, table string, chain string) {
+	for _, parent := range []string{"PREROUTING", "OUTPUT", "INPUT", "FORWARD", "POSTROUTING"} {
+		for {
+			if err := execFn("-t", table, "-D", parent, "-j", chain); err != nil {
+				break
+			}
+		}
+	}
+	_ = execFn("-t", table, "-F", chain)
+	_ = execFn("-t", table, "-X", chain)
 }

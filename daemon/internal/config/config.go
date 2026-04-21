@@ -45,12 +45,20 @@ type TransportConfig struct {
 type NodeConfig struct {
 	Address  string `json:"address"`
 	Port     int    `json:"port"`
-	Protocol string `json:"protocol"` // "vless", "trojan", "vmess", "shadowsocks"
-	UUID     string `json:"uuid"`     // also used as password for trojan/ss
+	Protocol string `json:"protocol"` // "vless", "trojan", "vmess", "shadowsocks", "hysteria2", "tuic"
+	UUID     string `json:"uuid"`
+	Password string `json:"password,omitempty"`
 	Flow     string `json:"flow"`     // e.g. "xtls-rprx-vision"
 
 	// Shadowsocks-specific fields.
-	SSMethod string `json:"ss_method,omitempty"`
+	SSMethod     string `json:"ss_method,omitempty"`
+	SSPlugin     string `json:"ss_plugin,omitempty"`
+	SSPluginOpts string `json:"ss_plugin_opts,omitempty"`
+
+	// Hysteria2-specific fields.
+	ServerPorts  []string `json:"server_ports,omitempty"`
+	ObfsType     string   `json:"obfs_type,omitempty"`
+	ObfsPassword string   `json:"obfs_password,omitempty"`
 
 	// VMess-specific fields.
 	AlterID int    `json:"alter_id,omitempty"`
@@ -131,11 +139,17 @@ type NodeProfile struct {
 	Address         string `json:"address"`
 	Port            int    `json:"port"`
 	UUID            string `json:"uuid"`
+	Password        string `json:"password,omitempty"`
 	Flow            string `json:"flow,omitempty"`
 	Transport       string `json:"transport"`
 	TLSServer       string `json:"tls_server"`
 	Fingerprint     string `json:"fingerprint"`
 	SSMethod        string `json:"ss_method,omitempty"`
+	SSPlugin        string `json:"ss_plugin,omitempty"`
+	SSPluginOpts    string `json:"ss_plugin_opts,omitempty"`
+	ServerPorts     []string `json:"server_ports,omitempty"`
+	ObfsType        string `json:"obfs_type,omitempty"`
+	ObfsPassword    string `json:"obfs_password,omitempty"`
 	AlterID         int    `json:"alter_id,omitempty"`
 	Security        string `json:"security,omitempty"`
 	RealityPubKey   string `json:"reality_public_key,omitempty"`
@@ -288,9 +302,40 @@ func (c *Config) Validate() error {
 
 	validProto := map[string]bool{
 		"vless": true, "trojan": true, "vmess": true, "shadowsocks": true,
+		"hysteria2": true, "tuic": true,
 	}
 	if c.Node.Protocol != "" && !validProto[c.Node.Protocol] {
-		return fmt.Errorf("node.protocol must be one of vless/trojan/vmess/shadowsocks, got %q", c.Node.Protocol)
+		return fmt.Errorf("node.protocol must be one of vless/trojan/vmess/shadowsocks/hysteria2/tuic, got %q", c.Node.Protocol)
+	}
+	if c.Node.Address != "" && c.Node.Protocol == "" {
+		return fmt.Errorf("node.protocol is required when node.address is set")
+	}
+	switch c.Node.Protocol {
+	case "vless", "vmess":
+		if c.Node.Address != "" && c.Node.UUID == "" {
+			return fmt.Errorf("node.uuid is required for %s", c.Node.Protocol)
+		}
+	case "trojan", "shadowsocks":
+		if c.Node.Address != "" && c.Node.UUID == "" && c.Node.Password == "" {
+			return fmt.Errorf("node password is required for %s", c.Node.Protocol)
+		}
+	case "hysteria2":
+		if c.Node.Address != "" && c.Node.Password == "" && c.Node.UUID == "" {
+			return fmt.Errorf("node.password is required for hysteria2")
+		}
+	case "tuic":
+		if c.Node.Address != "" && (c.Node.UUID == "" || c.Node.Password == "") {
+			return fmt.Errorf("node.uuid and node.password are required for tuic")
+		}
+	}
+	if c.Transport.Protocol != "" {
+		validTransport := map[string]bool{
+			"tcp": true, "reality": true, "ws": true, "grpc": true,
+			"http": true, "h2": true, "quic": true, "httpupgrade": true,
+		}
+		if !validTransport[c.Transport.Protocol] {
+			return fmt.Errorf("transport.protocol %q is not supported by sing-box V2Ray transport", c.Transport.Protocol)
+		}
 	}
 
 	validAppMode := map[string]bool{
@@ -327,11 +372,17 @@ func (c *Config) ResolveProfile() *NodeProfile {
 		Address:        c.Node.Address,
 		Port:           c.Node.Port,
 		UUID:           c.Node.UUID,
+		Password:       c.Node.Password,
 		Flow:           c.Node.Flow,
 		Transport:      c.Transport.Protocol,
 		TLSServer:      c.Transport.TLSServer,
 		Fingerprint:    c.Transport.Fingerprint,
 		SSMethod:       c.Node.SSMethod,
+		SSPlugin:       c.Node.SSPlugin,
+		SSPluginOpts:   c.Node.SSPluginOpts,
+		ServerPorts:    c.Node.ServerPorts,
+		ObfsType:       c.Node.ObfsType,
+		ObfsPassword:   c.Node.ObfsPassword,
 		AlterID:        c.Node.AlterID,
 		Security:       c.Node.Security,
 		RealityPubKey:  c.Node.RealityPublicKey,

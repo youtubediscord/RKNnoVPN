@@ -141,7 +141,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{
-			Gid: 23333,
+			Gid: m.coreGID(),
 		},
 	}
 
@@ -304,7 +304,7 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{
-			Gid: 23333,
+			Gid: m.coreGID(),
 		},
 	}
 
@@ -396,6 +396,14 @@ func (m *CoreManager) killProcess() error {
 		return fmt.Errorf("SIGKILL pid %d: %w", m.pid, err)
 	}
 	return nil
+}
+
+func (m *CoreManager) coreGID() uint32 {
+	gid := m.config.Proxy.GID
+	if gid == 0 {
+		gid = 23333
+	}
+	return uint32(gid)
 }
 
 // scriptEnv returns the environment variables that shell scripts expect.

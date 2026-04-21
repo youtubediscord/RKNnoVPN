@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,6 +32,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SegmentedButton
@@ -66,9 +66,8 @@ fun NodeListScreen(
     viewModel: NodeListViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-
-    // Delete confirmation dialog
     var nodeToDelete by remember { mutableStateOf<Node?>(null) }
+    var nodeToEdit by remember { mutableStateOf<Node?>(null) }
 
     Scaffold(
         floatingActionButton = {
@@ -82,7 +81,6 @@ fun NodeListScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            // -- Subscription group tabs --
             if (state.groups.size > 1) {
                 ScrollableTabRow(
                     selectedTabIndex = state.groups.indexOf(state.selectedGroup).coerceAtLeast(0),
@@ -98,16 +96,13 @@ fun NodeListScreen(
                 }
             }
 
-            // -- Sort row --
             SortRow(
                 currentSort = state.sortMode,
                 onSortChange = viewModel::setSortMode,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
 
-            // -- Node list --
             val filteredNodes = state.nodes.filter { it.group == state.selectedGroup }
-
             if (filteredNodes.isEmpty()) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -129,12 +124,11 @@ fun NodeListScreen(
                     items(filteredNodes, key = { it.id }) { node ->
                         NodeCard(
                             node = node,
-                            isActive = node.id == state.activeNodeId,
-                            onSelect = { viewModel.selectNode(node.id) },
-                            onEdit = { /* TODO: navigate to edit */ },
-                            onCopyLink = { /* handled inside composable */ },
-                            onTestLatency = { viewModel.testLatency(node.id) },
-                            onDelete = { nodeToDelete = node },
+                                isActive = node.id == state.activeNodeId,
+                                onSelect = { viewModel.selectNode(node.id) },
+                                onEdit = { nodeToEdit = node },
+                                onTestLatency = { viewModel.testLatency(node.id) },
+                                onDelete = { nodeToDelete = node },
                         )
                     }
                 }
@@ -142,7 +136,6 @@ fun NodeListScreen(
         }
     }
 
-    // -- Import bottom sheet --
     if (state.showImportSheet) {
         ImportSheet(
             candidates = state.importCandidates,
@@ -156,7 +149,6 @@ fun NodeListScreen(
         )
     }
 
-    // -- Delete confirmation dialog --
     nodeToDelete?.let { node ->
         AlertDialog(
             onDismissRequest = { nodeToDelete = null },
@@ -174,6 +166,17 @@ fun NodeListScreen(
                 TextButton(onClick = { nodeToDelete = null }) {
                     Text(stringResource(R.string.cancel))
                 }
+            },
+        )
+    }
+
+    nodeToEdit?.let { node ->
+        EditNodeDialog(
+            node = node,
+            onDismiss = { nodeToEdit = null },
+            onSave = { name, group ->
+                viewModel.updateNodeMetadata(node.id, name, group)
+                nodeToEdit = null
             },
         )
     }
@@ -211,11 +214,10 @@ private fun SortRow(
 @Composable
 private fun NodeCard(
     node: Node,
-    isActive: Boolean,
-    onSelect: () -> Unit,
-    onEdit: () -> Unit,
-    onCopyLink: () -> Unit,
-    onTestLatency: () -> Unit,
+        isActive: Boolean,
+        onSelect: () -> Unit,
+        onEdit: () -> Unit,
+        onTestLatency: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
@@ -340,8 +342,54 @@ private fun NodeCard(
     }
 }
 
-@Composable
-private fun LatencyChip(ms: Int) {
+    @Composable
+    private fun EditNodeDialog(
+        node: Node,
+        onDismiss: () -> Unit,
+        onSave: (String, String) -> Unit,
+    ) {
+        var name by remember(node.id) { mutableStateOf(node.name) }
+        var group by remember(node.id) { mutableStateOf(node.group) }
+
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.edit_node_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text(stringResource(R.string.node_name_label)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = group,
+                        onValueChange = { group = it },
+                        label = { Text(stringResource(R.string.node_group_label)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { onSave(name, group) },
+                    enabled = name.isNotBlank(),
+                ) {
+                    Text(stringResource(R.string.save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    @Composable
+    private fun LatencyChip(ms: Int) {
     val color = when {
         ms < 0 -> MaterialTheme.colorScheme.outline
         ms < 200 -> MaterialTheme.colorScheme.primary // green/teal

@@ -181,8 +181,11 @@ gen_mangle_v4() {
 
 # === BYPASS chain (reserved IPv4 addresses) ===
 # Traffic to private/reserved ranges must never enter the proxy.
+# ACCEPT is intentionally terminal for the current table. RETURN here would
+# fall back into PRIVSTACK_OUT/PRIVSTACK_PRE and continue to the APP/TPROXY
+# rules, so bypassed destinations could still be marked or intercepted.
 $(for cidr in ${RESERVED_IPV4}; do
-    echo "-A ${CHAIN_BYPASS} -d ${cidr} -j RETURN"
+    echo "-A ${CHAIN_BYPASS} -d ${cidr} -j ACCEPT"
 done)
 
 # === APP chain (UID whitelist) ===
@@ -298,7 +301,7 @@ gen_mangle_v6() {
 
 # === BYPASS chain (reserved IPv6 addresses) ===
 $(for cidr in ${RESERVED_IPV6}; do
-    echo "-A ${CHAIN_BYPASS} -d ${cidr} -j RETURN"
+    echo "-A ${CHAIN_BYPASS} -d ${cidr} -j ACCEPT"
 done)
 
 # === APP chain (UID whitelist) ===

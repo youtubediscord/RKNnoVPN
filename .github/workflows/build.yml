@@ -12,7 +12,7 @@ permissions:
 
 env:
   GO_VERSION: "1.22"
-  SINGBOX_VERSION: "1.11.0"
+  SINGBOX_VERSION: "1.13.8"
 
 jobs:
   # ============================================================

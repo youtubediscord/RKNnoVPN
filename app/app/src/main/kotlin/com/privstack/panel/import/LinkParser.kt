@@ -57,6 +57,9 @@ object LinkParser {
                 trimmed.startsWith("trojan://", ignoreCase = true) -> parseTrojan(trimmed)
                 trimmed.startsWith("ss://", ignoreCase = true)     -> parseShadowsocks(trimmed)
                 trimmed.startsWith("vpn://", ignoreCase = true)    -> parseAmnezia(trimmed)
+                trimmed.startsWith("hysteria2://", ignoreCase = true) ||
+                    trimmed.startsWith("hy2://", ignoreCase = true)   -> parseHysteria2(trimmed)
+                trimmed.startsWith("tuic://", ignoreCase = true)      -> parseTuic(trimmed)
                 else -> null
             }
         } catch (e: Exception) {
@@ -360,6 +363,104 @@ object LinkParser {
      */
     private fun parseAmnezia(uri: String): Node? = AmneziaImporter.import(uri)
 
+    /**
+     * hysteria2://[password@]host[:port]/?obfs=salamander&obfs-password=...&sni=...&insecure=1#name
+     *
+     * The official Hysteria2 URI allows the port component to contain a
+     * multi-port hopping expression. Node.port keeps the first concrete port
+     * for display, while the full expression is preserved in `server_ports`.
+     */
+    private fun parseHysteria2(uri: String): Node? {
+        val parsed = parseProxyUri(uri, defaultPort = 443, requireUserInfo = true) ?: return null
+        val password = parsed.userInfo
+        val streamSettings = buildTlsOnlyStreamSettings(parsed.params)
+        val serverPorts = parsed.portToken
+            ?.takeIf { it.contains(',') || it.contains('-') }
+            ?.split(',')
+            ?.map(String::trim)
+            ?.filter(String::isNotBlank)
+            .orEmpty()
+
+        val outbound = buildJsonObject {
+            put("protocol", "hysteria2")
+            putJsonObject("settings") {
+                put("address", parsed.host)
+                put("port", parsed.port)
+                put("password", password)
+                if (serverPorts.isNotEmpty()) {
+                    putJsonArray("server_ports") {
+                        serverPorts.forEach { add(JsonPrimitive(it)) }
+                    }
+                }
+                val obfs = parsed.params["obfs"]
+                val obfsPassword = parsed.params["obfs-password"] ?: parsed.params["obfsPassword"]
+                if (!obfs.isNullOrBlank() || !obfsPassword.isNullOrBlank()) {
+                    putJsonObject("obfs") {
+                        put("type", obfs ?: "salamander")
+                        put("password", obfsPassword.orEmpty())
+                    }
+                }
+            }
+            put("streamSettings", streamSettings)
+        }
+
+        return Node(
+            id = UUID.randomUUID().toString(),
+            name = parsed.fragment.ifEmpty { "${parsed.host}:${parsed.port}" },
+            protocol = Protocol.HYSTERIA2,
+            server = parsed.host,
+            port = parsed.port,
+            link = uri,
+            outbound = outbound,
+        )
+    }
+
+    /**
+     * tuic://uuid:password@host:port?congestion_control=cubic&udp_relay_mode=native&sni=...#name
+     */
+    private fun parseTuic(uri: String): Node? {
+        val parsed = parseProxyUri(uri, defaultPort = 443, requireUserInfo = true) ?: return null
+        val split = parsed.userInfo.indexOf(':')
+        if (split <= 0) return null
+        val uuid = parsed.userInfo.substring(0, split)
+        val password = parsed.userInfo.substring(split + 1)
+        if (uuid.isBlank() || password.isBlank()) return null
+
+        val outbound = buildJsonObject {
+            put("protocol", "tuic")
+            putJsonObject("settings") {
+                put("address", parsed.host)
+                put("port", parsed.port)
+                put("uuid", uuid)
+                put("password", password)
+                firstParam(parsed.params, "congestion_control", "congestionControl")?.let {
+                    put("congestion_control", it)
+                }
+                firstParam(parsed.params, "udp_relay_mode", "udpRelayMode")?.let {
+                    put("udp_relay_mode", it)
+                }
+                firstParam(parsed.params, "udp_over_stream", "udpOverStream")?.let {
+                    put("udp_over_stream", it)
+                }
+                firstParam(parsed.params, "zero_rtt_handshake", "zeroRTTHandshake")?.let {
+                    put("zero_rtt_handshake", it)
+                }
+                parsed.params["heartbeat"]?.let { put("heartbeat", it) }
+            }
+            put("streamSettings", buildTlsOnlyStreamSettings(parsed.params))
+        }
+
+        return Node(
+            id = UUID.randomUUID().toString(),
+            name = parsed.fragment.ifEmpty { "${parsed.host}:${parsed.port}" },
+            protocol = Protocol.TUIC,
+            server = parsed.host,
+            port = parsed.port,
+            link = uri,
+            outbound = outbound,
+        )
+    }
+
     // ---------- shared builders ----------
 
     /**
@@ -512,6 +613,29 @@ object LinkParser {
         }
     }
 
+    private fun buildTlsOnlyStreamSettings(params: Map<String, String>): JsonObject = buildJsonObject {
+        put("network", params["network"] ?: "udp")
+        put("security", "tls")
+        put("tlsSettings", buildJsonObject {
+            firstParam(params, "sni", "peer")?.takeIf { it.isNotBlank() }?.let {
+                put("serverName", it)
+            }
+            params["alpn"]?.takeIf { it.isNotBlank() }?.let { alpn ->
+                putJsonArray("alpn") {
+                    alpn.split(',').map(String::trim).filter(String::isNotBlank).forEach {
+                        add(JsonPrimitive(it))
+                    }
+                }
+            }
+            firstParam(params, "insecure", "allowInsecure", "allow_insecure")
+                ?.takeIf { it == "1" || it.equals("true", ignoreCase = true) }
+                ?.let { put("allowInsecure", true) }
+            firstParam(params, "pinSHA256", "pin_sha256")?.takeIf { it.isNotBlank() }?.let {
+                put("certificatePublicKeySha256", it)
+            }
+        })
+    }
+
     // ---------- URI helpers ----------
 
     /**
@@ -523,6 +647,15 @@ object LinkParser {
         val port: Int,
         val params: Map<String, String>,
         val fragment: String
+    )
+
+    private data class ParsedProxyUri(
+        val userInfo: String,
+        val host: String,
+        val port: Int,
+        val portToken: String?,
+        val params: Map<String, String>,
+        val fragment: String,
     )
 
     /**
@@ -552,6 +685,58 @@ object LinkParser {
 
         val (host, port) = parseHostPort(hostPort) ?: return null
         return ParsedUri(userInfo, host, port, params, fragment)
+    }
+
+    private fun parseProxyUri(
+        raw: String,
+        defaultPort: Int,
+        requireUserInfo: Boolean,
+    ): ParsedProxyUri? {
+        val schemeIdx = raw.indexOf("://")
+        if (schemeIdx == -1) return null
+        val afterScheme = raw.substring(schemeIdx + 3)
+
+        val fragmentIdx = afterScheme.lastIndexOf('#')
+        val fragment = if (fragmentIdx != -1) urlDecode(afterScheme.substring(fragmentIdx + 1)) else ""
+        val noFragment = if (fragmentIdx != -1) afterScheme.substring(0, fragmentIdx) else afterScheme
+
+        val queryIdx = noFragment.indexOf('?')
+        val params = if (queryIdx != -1) parseQuery(noFragment.substring(queryIdx + 1)) else emptyMap()
+        val authority = (if (queryIdx != -1) noFragment.substring(0, queryIdx) else noFragment)
+            .trimEnd('/')
+
+        val atIdx = authority.indexOf('@')
+        val userInfo = if (atIdx != -1) urlDecode(authority.substring(0, atIdx)) else ""
+        if (requireUserInfo && userInfo.isBlank()) return null
+        val hostPort = if (atIdx != -1) authority.substring(atIdx + 1) else authority
+        val (host, token) = parseHostPortToken(hostPort) ?: return null
+        val port = token?.let(::firstPortFromToken) ?: defaultPort
+        if (port !in 1..65535) return null
+        return ParsedProxyUri(userInfo, host, port, token, params, fragment)
+    }
+
+    private fun parseHostPortToken(input: String): Pair<String, String?>? {
+        val trimmed = input.trim()
+        if (trimmed.isBlank()) return null
+        if (trimmed.startsWith("[")) {
+            val closeBracket = trimmed.indexOf(']')
+            if (closeBracket == -1) return null
+            val host = trimmed.substring(1, closeBracket)
+            if (host.isBlank()) return null
+            val rest = trimmed.substring(closeBracket + 1)
+            return host to rest.takeIf { it.startsWith(":") }?.substring(1)
+        }
+
+        val lastColon = trimmed.lastIndexOf(':')
+        if (lastColon == -1) return trimmed to null
+        val host = trimmed.substring(0, lastColon)
+        if (host.isBlank()) return null
+        return host to trimmed.substring(lastColon + 1)
+    }
+
+    private fun firstPortFromToken(token: String): Int? {
+        val first = token.substringBefore(',').substringBefore('-').trim()
+        return first.toIntOrNull()
     }
 
     /**
@@ -595,6 +780,13 @@ object LinkParser {
             }
         }
         return map
+    }
+
+    private fun firstParam(params: Map<String, String>, vararg names: String): String? {
+        for (name in names) {
+            params[name]?.let { return it }
+        }
+        return null
     }
 
     /**

@@ -1429,8 +1429,11 @@ func (d *daemon) restoreCurrentRuntimeAfterFailedUpdate() {
 	d.startSubsystems()
 }
 
-func (d *daemon) buildStatusPayload(status core.StatusInfo, healthResult *health.HealthResult) map[string]interface{} {
+func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *health.HealthResult) map[string]interface{} {
 	activeNodeID, activeNodeName, activeNodeProtocol := d.activePanelNode()
+	if status == nil {
+		status = &core.StatusInfo{}
+	}
 
 	return map[string]interface{}{
 		"state":            mapCoreStateToConnectionState(status.State),

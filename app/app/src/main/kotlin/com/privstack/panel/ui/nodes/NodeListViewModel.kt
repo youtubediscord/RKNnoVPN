@@ -7,7 +7,6 @@ import com.privstack.panel.`import`.LinkParser
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.Node
-import com.privstack.panel.model.Protocol
 import com.privstack.panel.repository.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,8 +14,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
 import javax.inject.Inject
 
 private const val TAG = "NodeListViewModel"
@@ -137,6 +134,41 @@ class NodeListViewModel @Inject constructor(
         }
     }
 
+    fun updateNodeMetadata(nodeId: String, name: String, group: String) {
+        val cleanName = name.trim()
+        val cleanGroup = group.trim().ifBlank { "Default" }
+        if (cleanName.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Node name must not be empty") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            val current = _uiState.value.nodes.firstOrNull { it.id == nodeId }
+            if (current == null) {
+                _uiState.update { it.copy(errorMessage = "Node not found") }
+                return@launch
+            }
+
+            val ok = profileRepository.updateNode(
+                current.copy(
+                    name = cleanName,
+                    group = cleanGroup,
+                )
+            )
+            if (!ok) {
+                val err = profileRepository.error.value
+                _uiState.update {
+                    it.copy(errorMessage = err ?: "Failed to update node")
+                }
+            } else {
+                _uiState.update { state ->
+                    state.copy(selectedGroup = cleanGroup)
+                }
+            }
+        }
+    }
+
     fun testLatency(nodeId: String) {
         viewModelScope.launch {
             // Use daemon health/status to measure latency for the specific node.
@@ -189,8 +221,8 @@ class NodeListViewModel @Inject constructor(
      *
      * Uses [LinkParser] for full protocol-aware parsing so that the preview
      * shows correct names, servers, ports, and the outbound JSON is populated.
-     * URIs that LinkParser cannot parse (unsupported protocol, malformed) are
-     * kept as "raw" candidates so the daemon can still attempt to import them.
+     * Malformed or unsupported URIs are skipped with an error instead of being
+     * shown as importable, because persistence goes through the same parser.
      */
     fun detectUris(text: String) {
         val detectedUris = LinkParser.detectUris(text)
@@ -204,30 +236,17 @@ class NodeListViewModel @Inject constructor(
             return
         }
 
-        val candidates = detectedUris.mapIndexed { i, uri ->
-            val parsed = LinkParser.parse(uri)
-            if (parsed != null) {
-                ImportCandidate(node = parsed, selected = true)
-            } else {
-                // LinkParser could not fully parse (e.g. hysteria2/tuic) but the
-                // URI was detected. Keep it as a raw candidate so the daemon can
-                // try to import the link.
-                val scheme = uri.substringBefore("://")
-                val protocol = Protocol.fromString(scheme) ?: Protocol.VLESS
-                ImportCandidate(
-                    node = Node(
-                        id = "import_${System.currentTimeMillis()}_$i",
-                        name = "${scheme.uppercase()}-${i + 1}",
-                        protocol = protocol,
-                        server = extractServerFromUri(uri),
-                        port = extractPortFromUri(uri),
-                        link = uri,
-                        outbound = buildEmptyOutbound(),
-                    ),
-                    selected = true,
+        val parsedNodes = detectedUris.mapNotNull(LinkParser::parse)
+        if (parsedNodes.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    importCandidates = emptyList(),
+                    errorMessage = "Detected proxy URIs, but none could be parsed",
                 )
             }
+            return
         }
+        val candidates = parsedNodes.map { ImportCandidate(node = it, selected = true) }
 
         _uiState.update { it.copy(importCandidates = candidates, errorMessage = null) }
     }
@@ -379,33 +398,10 @@ class NodeListViewModel @Inject constructor(
         NodeSortMode.COUNTRY -> nodes.sortedBy { extractCountryFromName(it.name) }
     }
 
-    /** Placeholder outbound for URIs that LinkParser cannot fully parse. */
-    private fun buildEmptyOutbound(): JsonObject = buildJsonObject {}
-
     private fun extractCountryFromName(name: String): String {
         // Simple heuristic: first word before dash/space
         return name.split(Regex("[\\s-]")).firstOrNull()?.lowercase() ?: ""
     }
-
-    private fun extractServerFromUri(uri: String): String {
-        return try {
-            val afterScheme = uri.substringAfter("://")
-            val hostPart = afterScheme.substringAfter("@").substringBefore(":")
-                .substringBefore("/").substringBefore("?")
-            hostPart.ifBlank { "unknown" }
-        } catch (_: Exception) { "unknown" }
-    }
-
-    private fun extractPortFromUri(uri: String): Int {
-        return try {
-            val afterScheme = uri.substringAfter("://")
-            val afterHost = afterScheme.substringAfter("@").substringAfter(":")
-            val portStr = afterHost.substringBefore("/").substringBefore("?")
-                .substringBefore("#")
-            portStr.toIntOrNull() ?: 443
-        } catch (_: Exception) { 443 }
-    }
-
     private fun <T> describeError(result: DaemonClientResult<T>): String = when (result) {
         is DaemonClientResult.DaemonError -> "Daemon error ${result.code}: ${result.message}"
         is DaemonClientResult.RootDenied -> "Root access denied"

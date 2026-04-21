@@ -25,11 +25,13 @@ object UriExporter {
      * Falls back to the stored [Node.link] if the protocol has no exporter yet.
      */
     fun toUri(node: Node): String = when (node.protocol) {
-        Protocol.VLESS        -> toVlessUri(node)
-        Protocol.VMESS        -> toVmessUri(node)
-        Protocol.TROJAN       -> toTrojanUri(node)
-        Protocol.SHADOWSOCKS  -> toShadowsocksUri(node)
-        else                  -> node.link
+        Protocol.VLESS -> toVlessUri(node)
+        Protocol.VMESS -> toVmessUri(node)
+        Protocol.TROJAN -> toTrojanUri(node)
+        Protocol.SHADOWSOCKS -> toShadowsocksUri(node)
+        Protocol.HYSTERIA2 -> toHysteria2Uri(node)
+        Protocol.TUIC -> toTuicUri(node)
+        else -> node.link
     }
 
     /**
@@ -226,6 +228,73 @@ object UriExporter {
         return "ss://$userInfo@$host:$port#$name"
     }
 
+    /**
+     * hysteria2://password@host:port/?params#name
+     */
+    fun toHysteria2Uri(node: Node): String {
+        val settings = node.outbound.obj("settings") ?: return node.link
+        val password = settings.str("password").ifEmpty { return node.link }
+        val host = formatHost(settings.str("address").ifEmpty { node.server })
+        val port = settings.arr("server_ports")
+            ?.joinToString(",") { it.jsonPrimitive.content }
+            ?.takeIf { it.isNotBlank() }
+            ?: settings.str("port").ifEmpty { node.port.toString() }
+
+        val params = mutableMapOf<String, String>()
+        val obfs = settings.obj("obfs")
+        val obfsType = obfs?.str("type")
+        val obfsPassword = obfs?.str("password")
+        if (!obfsType.isNullOrEmpty()) params["obfs"] = obfsType
+        if (!obfsPassword.isNullOrEmpty()) params["obfs-password"] = obfsPassword
+        appendTlsOnlyParams(node.outbound, params)
+
+        val query = encodeQuery(params)
+        val name = urlEncode(node.name)
+        val base = "hysteria2://${urlEncode(password)}@$host:$port/"
+        val withQuery = if (query.isNotEmpty()) "$base?$query" else base
+        return if (name.isNotEmpty()) "$withQuery#$name" else withQuery
+    }
+
+    /**
+     * tuic://uuid:password@host:port?params#name
+     */
+    fun toTuicUri(node: Node): String {
+        val settings = node.outbound.obj("settings") ?: return node.link
+        val uuid = settings.str("uuid").ifEmpty { return node.link }
+        val password = settings.str("password").ifEmpty { return node.link }
+        val host = formatHost(settings.str("address").ifEmpty { node.server })
+        val port = settings.str("port").ifEmpty { node.port.toString() }
+
+        val params = mutableMapOf<String, String>()
+        settings.str("congestion_control").takeIf { it.isNotEmpty() }?.let {
+            params["congestion_control"] = it
+        }
+        settings.str("udp_relay_mode").takeIf { it.isNotEmpty() }?.let {
+            params["udp_relay_mode"] = it
+        }
+        settings.str("udp_over_stream").takeIf { it.isNotEmpty() }?.let {
+            params["udp_over_stream"] = it
+        }
+        settings.str("zero_rtt_handshake").takeIf { it.isNotEmpty() }?.let {
+            params["zero_rtt_handshake"] = it
+        }
+        settings.str("heartbeat").takeIf { it.isNotEmpty() }?.let {
+            params["heartbeat"] = it
+        }
+        appendTlsOnlyParams(node.outbound, params)
+
+        val query = encodeQuery(params)
+        val name = urlEncode(node.name)
+        return buildStandardUri(
+            scheme = "tuic",
+            userInfo = "${urlEncode(uuid)}:${urlEncode(password)}",
+            host = host,
+            port = port,
+            query = query,
+            name = name,
+        )
+    }
+
     // ---------- stream-settings helpers ----------
 
     /**
@@ -344,6 +413,23 @@ object UriExporter {
                     if (host.isNotEmpty()) params["host"] = host
                 }
             }
+        }
+    }
+
+    private fun appendTlsOnlyParams(outbound: JsonObject, params: MutableMap<String, String>) {
+        val stream = outbound.obj("streamSettings") ?: return
+        val tlsSettings = stream.obj("tlsSettings") ?: return
+        val sni = tlsSettings.str("serverName")
+        if (sni.isNotEmpty()) params["sni"] = sni
+        val alpn = tlsSettings.arr("alpn")
+        if (alpn != null && alpn.isNotEmpty()) {
+            params["alpn"] = alpn.joinToString(",") { it.jsonPrimitive.content }
+        }
+        if (tlsSettings.str("allowInsecure") == "true") {
+            params["insecure"] = "1"
+        }
+        tlsSettings.str("certificatePublicKeySha256").takeIf { it.isNotEmpty() }?.let {
+            params["pinSHA256"] = it
         }
     }
 

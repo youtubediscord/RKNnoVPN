@@ -35,6 +35,7 @@ FWMARK="${FWMARK:-0x2023}"
 ROUTE_TABLE="${ROUTE_TABLE:-2023}"
 ROUTE_TABLE_V6="${ROUTE_TABLE_V6:-2024}"
 TPROXY_PORT="${TPROXY_PORT:-10853}"
+IPT_WAIT="-w 100"
 
 LOG_FILE="$PRIVSTACK_DIR/logs/net_change.log"
 LOCK_FILE="$PRIVSTACK_DIR/run/net_change.lock"
@@ -89,30 +90,32 @@ rebuild_bypass() {
     log "rebuilding bypass chains with current local addresses"
 
     # IPv4 ────────────────────────────────────────────────────────────────
-    iptables -t mangle -F "$BYPASS4_CHAIN" 2>/dev/null || \
-        iptables -t mangle -N "$BYPASS4_CHAIN"
+    iptables $IPT_WAIT -t mangle -F "$BYPASS4_CHAIN" 2>/dev/null || \
+        iptables $IPT_WAIT -t mangle -N "$BYPASS4_CHAIN"
 
-    # Always bypass loopback and link-local.
-    iptables -t mangle -A "$BYPASS4_CHAIN" -d 127.0.0.0/8   -j RETURN
-    iptables -t mangle -A "$BYPASS4_CHAIN" -d 169.254.0.0/16 -j RETURN
+    # Always bypass loopback and link-local. ACCEPT is terminal for the
+    # current table; RETURN would resume PRIVSTACK_PRE/OUT after the bypass
+    # jump and could still hit marking/TPROXY rules.
+    iptables $IPT_WAIT -t mangle -A "$BYPASS4_CHAIN" -d 127.0.0.0/8   -j ACCEPT
+    iptables $IPT_WAIT -t mangle -A "$BYPASS4_CHAIN" -d 169.254.0.0/16 -j ACCEPT
 
     # Add every address currently assigned to an interface.
     ip -4 addr show 2>/dev/null | awk '/inet / { print $2 }' | while read -r cidr; do
-        iptables -t mangle -A "$BYPASS4_CHAIN" -d "$cidr" -j RETURN
+        iptables $IPT_WAIT -t mangle -A "$BYPASS4_CHAIN" -d "$cidr" -j ACCEPT
         log "  bypass4: $cidr"
     done
 
     # IPv6 ────────────────────────────────────────────────────────────────
-    ip6tables -t mangle -F "$BYPASS6_CHAIN" 2>/dev/null || \
-        ip6tables -t mangle -N "$BYPASS6_CHAIN"
+    ip6tables $IPT_WAIT -t mangle -F "$BYPASS6_CHAIN" 2>/dev/null || \
+        ip6tables $IPT_WAIT -t mangle -N "$BYPASS6_CHAIN"
 
     # Always bypass loopback.
-    ip6tables -t mangle -A "$BYPASS6_CHAIN" -d ::1/128 -j RETURN
+    ip6tables $IPT_WAIT -t mangle -A "$BYPASS6_CHAIN" -d ::1/128 -j ACCEPT
 
     # Add non-link-local, non-loopback addresses.
     ip -6 addr show 2>/dev/null | awk '/inet6 / { print $2 }' | \
         grep -vE '^fe80|^::1' | while read -r cidr; do
-        ip6tables -t mangle -A "$BYPASS6_CHAIN" -d "$cidr" -j RETURN
+        ip6tables $IPT_WAIT -t mangle -A "$BYPASS6_CHAIN" -d "$cidr" -j ACCEPT
         log "  bypass6: $cidr"
     done
 
@@ -161,14 +164,14 @@ verify_iptables_hooks() {
     log "verifying iptables hooks"
 
     # IPv4 mangle PREROUTING.
-    if ! iptables -t mangle -C PREROUTING -j "$PRE4_CHAIN" 2>/dev/null; then
-        iptables -t mangle -A PREROUTING -j "$PRE4_CHAIN"
+    if ! iptables $IPT_WAIT -t mangle -C PREROUTING -j "$PRE4_CHAIN" 2>/dev/null; then
+        iptables $IPT_WAIT -t mangle -A PREROUTING -j "$PRE4_CHAIN"
         log "  re-hooked $PRE4_CHAIN into PREROUTING (IPv4)"
     fi
 
     # IPv6 mangle PREROUTING.
-    if ! ip6tables -t mangle -C PREROUTING -j "$PRE6_CHAIN" 2>/dev/null; then
-        ip6tables -t mangle -A PREROUTING -j "$PRE6_CHAIN"
+    if ! ip6tables $IPT_WAIT -t mangle -C PREROUTING -j "$PRE6_CHAIN" 2>/dev/null; then
+        ip6tables $IPT_WAIT -t mangle -A PREROUTING -j "$PRE6_CHAIN"
         log "  re-hooked $PRE6_CHAIN into PREROUTING (IPv6)"
     fi
 }
@@ -186,7 +189,7 @@ handle_tethering() {
                    grep -E '^(ap[0-9]|wlan[1-9]|rndis[0-9]|usb[0-9]|bt-pan|swlan[0-9])'); do
 
         # Skip if a rule for this interface already exists.
-        if iptables -t mangle -C "$PRE4_CHAIN" -i "$iface" \
+        if iptables $IPT_WAIT -t mangle -C "$PRE4_CHAIN" -i "$iface" \
               -p tcp -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$FWMARK" 2>/dev/null; then
             continue
         fi
@@ -194,15 +197,15 @@ handle_tethering() {
         log "  adding TPROXY rules for tethering iface: $iface"
 
         # IPv4 TCP + UDP.
-        iptables -t mangle -A "$PRE4_CHAIN" -i "$iface" -p tcp \
+        iptables $IPT_WAIT -t mangle -A "$PRE4_CHAIN" -i "$iface" -p tcp \
             -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$FWMARK"
-        iptables -t mangle -A "$PRE4_CHAIN" -i "$iface" -p udp \
+        iptables $IPT_WAIT -t mangle -A "$PRE4_CHAIN" -i "$iface" -p udp \
             -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$FWMARK"
 
         # IPv6 TCP + UDP.
-        ip6tables -t mangle -A "$PRE6_CHAIN" -i "$iface" -p tcp \
+        ip6tables $IPT_WAIT -t mangle -A "$PRE6_CHAIN" -i "$iface" -p tcp \
             -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$FWMARK"
-        ip6tables -t mangle -A "$PRE6_CHAIN" -i "$iface" -p udp \
+        ip6tables $IPT_WAIT -t mangle -A "$PRE6_CHAIN" -i "$iface" -p udp \
             -j TPROXY --on-port "$TPROXY_PORT" --tproxy-mark "$FWMARK"
     done
 }

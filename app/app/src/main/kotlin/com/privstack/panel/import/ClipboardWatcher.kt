@@ -2,9 +2,7 @@ package com.privstack.panel.`import`
 
 import android.content.ClipboardManager
 import android.content.Context
-import android.util.Log
 import com.privstack.panel.model.Node
-import com.privstack.panel.model.Protocol
 
 /**
  * Monitors the system clipboard for proxy URIs.
@@ -25,13 +23,6 @@ import com.privstack.panel.model.Protocol
  * ```
  */
 object ClipboardWatcher {
-
-    private const val TAG = "ClipboardWatcher"
-
-    /**
-     * Known proxy URI schemes.
-     */
-    private val PROXY_SCHEMES = listOf("vless://", "vmess://", "trojan://", "ss://", "vpn://")
 
     /**
      * SHA-256 of the last clipboard text we already offered to import.

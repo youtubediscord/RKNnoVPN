@@ -27,10 +27,14 @@ func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
 			},
 		},
 		"dns":       buildDNS(cfg),
-		"inbounds":  buildInbounds(cfg),
-		"outbounds": buildOutbounds(cfg, profile),
+		"inbounds": buildInbounds(cfg),
 		"route":     buildRoute(cfg),
 	}
+	outbounds, err := buildOutbounds(cfg, profile)
+	if err != nil {
+		return nil, err
+	}
+	sbCfg["outbounds"] = outbounds
 
 	data, err := json.MarshalIndent(sbCfg, "", "  ")
 	if err != nil {
@@ -165,8 +169,11 @@ func buildInbounds(cfg *Config) []map[string]interface{} {
 	return inbounds
 }
 
-func buildOutbounds(cfg *Config, profile *NodeProfile) []map[string]interface{} {
-	proxyOut := buildProxyOutbound(profile)
+func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}, error) {
+	proxyOut, err := buildProxyOutbound(profile)
+	if err != nil {
+		return nil, err
+	}
 
 	outbounds := []map[string]interface{}{
 		proxyOut,
@@ -183,10 +190,10 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) []map[string]interface{} 
 			"tag":  "dns-out",
 		},
 	}
-	return outbounds
+	return outbounds, nil
 }
 
-func buildProxyOutbound(profile *NodeProfile) map[string]interface{} {
+func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 	out := map[string]interface{}{
 		"tag":        "proxy",
 		"server":     profile.Address,
@@ -194,26 +201,39 @@ func buildProxyOutbound(profile *NodeProfile) map[string]interface{} {
 	}
 
 	switch profile.Protocol {
-	case "vless":
-		out["type"] = "vless"
-		out["uuid"] = profile.UUID
-		if profile.Flow != "" {
-			out["flow"] = profile.Flow
+		case "vless":
+			out["type"] = "vless"
+			if profile.UUID == "" {
+				return nil, fmt.Errorf("renderer: vless uuid is empty")
+			}
+			out["uuid"] = profile.UUID
+			if profile.Flow != "" {
+				out["flow"] = profile.Flow
 		}
 		if tls := buildTLS(profile, false); tls != nil {
 			out["tls"] = tls
 		}
 
-	case "trojan":
-		out["type"] = "trojan"
-		out["password"] = profile.UUID
-		if tls := buildTLS(profile, true); tls != nil {
-			out["tls"] = tls
-		}
+		case "trojan":
+			out["type"] = "trojan"
+			password := profile.Password
+			if password == "" {
+				password = profile.UUID
+			}
+			if password == "" {
+				return nil, fmt.Errorf("renderer: trojan password is empty")
+			}
+			out["password"] = password
+			if tls := buildTLS(profile, true); tls != nil {
+				out["tls"] = tls
+			}
 
-	case "vmess":
-		out["type"] = "vmess"
-		out["uuid"] = profile.UUID
+		case "vmess":
+			out["type"] = "vmess"
+			if profile.UUID == "" {
+				return nil, fmt.Errorf("renderer: vmess uuid is empty")
+			}
+			out["uuid"] = profile.UUID
 		out["alter_id"] = profile.AlterID
 		sec := profile.Security
 		if sec == "" {
@@ -224,22 +244,96 @@ func buildProxyOutbound(profile *NodeProfile) map[string]interface{} {
 			out["tls"] = tls
 		}
 
-	case "shadowsocks":
-		out["type"] = "shadowsocks"
-		out["password"] = profile.UUID
+		case "shadowsocks":
+			out["type"] = "shadowsocks"
+			password := profile.Password
+			if password == "" {
+				password = profile.UUID
+			}
+			if password == "" {
+				return nil, fmt.Errorf("renderer: shadowsocks password is empty")
+			}
+			out["password"] = password
 		method := profile.SSMethod
 		if method == "" {
 			method = "2022-blake3-aes-128-gcm"
 		}
 		out["method"] = method
-	}
+		if profile.SSPlugin != "" {
+			out["plugin"] = profile.SSPlugin
+		}
+		if profile.SSPluginOpts != "" {
+			out["plugin_opts"] = profile.SSPluginOpts
+		}
+
+	case "hysteria2":
+		out["type"] = "hysteria2"
+		password := profile.Password
+			if password == "" {
+				password = profile.UUID
+			}
+			if password == "" {
+				return nil, fmt.Errorf("renderer: hysteria2 password is empty")
+			}
+			out["password"] = password
+		if len(profile.ServerPorts) > 0 {
+			out["server_ports"] = profile.ServerPorts
+		}
+		if profile.ObfsType != "" || profile.ObfsPassword != "" {
+			out["obfs"] = map[string]interface{}{
+				"type":     valueOrDefault(profile.ObfsType, "salamander"),
+				"password": profile.ObfsPassword,
+			}
+		}
+		if tls := buildTLS(profile, true); tls != nil {
+			out["tls"] = tls
+		}
+		if value := profile.Extra["network"]; value != "" {
+			out["network"] = value
+		}
+
+	case "tuic":
+			out["type"] = "tuic"
+			if profile.UUID == "" || profile.Password == "" {
+				return nil, fmt.Errorf("renderer: tuic uuid/password is empty")
+			}
+			out["uuid"] = profile.UUID
+		out["password"] = profile.Password
+		if value := profile.Extra["congestion_control"]; value != "" {
+			out["congestion_control"] = value
+		}
+		if value := profile.Extra["udp_relay_mode"]; value != "" {
+			out["udp_relay_mode"] = value
+		}
+		if value := profile.Extra["udp_over_stream"]; value != "" {
+			out["udp_over_stream"] = parseBool(value)
+		}
+		if value := profile.Extra["zero_rtt_handshake"]; value != "" {
+			out["zero_rtt_handshake"] = parseBool(value)
+		}
+		if value := profile.Extra["heartbeat"]; value != "" {
+			out["heartbeat"] = value
+		}
+		if tls := buildTLS(profile, true); tls != nil {
+			out["tls"] = tls
+		}
+		if value := profile.Extra["network"]; value != "" {
+			out["network"] = value
+		}
+	default:
+			return nil, fmt.Errorf("renderer: unsupported protocol %q", profile.Protocol)
+		}
 
 	// Transport layer (WebSocket, gRPC, HTTP/2).
-	if tp := buildTransport(profile); tp != nil {
+	tp, err := buildTransport(profile)
+	if err != nil {
+		return nil, err
+	}
+	if tp != nil {
 		out["transport"] = tp
 	}
 
-	return out
+	return out, nil
 }
 
 func buildTLS(profile *NodeProfile, force bool) map[string]interface{} {
@@ -260,6 +354,15 @@ func buildTLS(profile *NodeProfile, force bool) map[string]interface{} {
 	if profile.TLSServer != "" {
 		tls["server_name"] = profile.TLSServer
 	}
+	if parseBool(profile.Extra["insecure"]) {
+		tls["insecure"] = true
+	}
+	if alpn := splitCSV(profile.Extra["alpn"]); len(alpn) > 0 {
+		tls["alpn"] = alpn
+	}
+	if pins := splitCSV(profile.Extra["pin_sha256"]); len(pins) > 0 {
+		tls["certificate_public_key_sha256"] = pins
+	}
 
 	fp := profile.Fingerprint
 	if fp == "" {
@@ -272,17 +375,25 @@ func buildTLS(profile *NodeProfile, force bool) map[string]interface{} {
 
 	// REALITY TLS settings.
 	if profile.Transport == "reality" || profile.RealityPubKey != "" || transportSecurity == "reality" {
+		publicKey := profile.RealityPubKey
+		if publicKey == "" {
+			publicKey = profile.Extra["public_key"]
+		}
+		shortID := profile.RealityShortID
+		if shortID == "" {
+			shortID = profile.Extra["short_id"]
+		}
 		tls["reality"] = map[string]interface{}{
 			"enabled":    true,
-			"public_key": profile.RealityPubKey,
-			"short_id":   profile.RealityShortID,
+			"public_key": publicKey,
+			"short_id":   shortID,
 		}
 	}
 
 	return tls
 }
 
-func buildTransport(profile *NodeProfile) map[string]interface{} {
+func buildTransport(profile *NodeProfile) (map[string]interface{}, error) {
 	switch profile.Transport {
 	case "ws":
 		tp := map[string]interface{}{
@@ -296,7 +407,7 @@ func buildTransport(profile *NodeProfile) map[string]interface{} {
 				"Host": host,
 			}
 		}
-		return tp
+		return tp, nil
 
 	case "grpc":
 		tp := map[string]interface{}{
@@ -311,7 +422,7 @@ func buildTransport(profile *NodeProfile) map[string]interface{} {
 		if authority, ok := profile.Extra["authority"]; ok {
 			tp["authority"] = authority
 		}
-		return tp
+		return tp, nil
 
 	case "http", "h2":
 		tp := map[string]interface{}{
@@ -332,55 +443,13 @@ func buildTransport(profile *NodeProfile) map[string]interface{} {
 		if path, ok := profile.Extra["path"]; ok {
 			tp["path"] = path
 		}
-		return tp
+		return tp, nil
 
 	case "tcp":
-		headerType, hasHeader := profile.Extra["header_type"]
-		if !hasHeader || headerType == "" || headerType == "none" {
-			return nil
+		if headerType := profile.Extra["header_type"]; headerType != "" && headerType != "none" {
+			return nil, fmt.Errorf("renderer: sing-box does not support V2Ray TCP header transport")
 		}
-		tp := map[string]interface{}{
-			"type": "tcp",
-			"header": map[string]interface{}{
-				"type": headerType,
-			},
-		}
-		if headerType == "http" {
-			request := map[string]interface{}{
-				"path": profile.Extra["path"],
-			}
-			if host, ok := profile.Extra["host"]; ok && host != "" {
-				hosts := []string{}
-				for _, item := range strings.Split(host, ",") {
-					item = strings.TrimSpace(item)
-					if item != "" {
-						hosts = append(hosts, item)
-					}
-				}
-				if len(hosts) > 0 {
-					request["headers"] = map[string]interface{}{
-						"Host": hosts,
-					}
-				}
-			}
-			tp["header"] = map[string]interface{}{
-				"type":    headerType,
-				"request": request,
-			}
-		}
-		return tp
-
-	case "kcp", "mkcp":
-		tp := map[string]interface{}{
-			"type": "mkcp",
-		}
-		if headerType, ok := profile.Extra["header_type"]; ok && headerType != "" {
-			tp["header_type"] = headerType
-		}
-		if seed, ok := profile.Extra["seed"]; ok && seed != "" {
-			tp["seed"] = seed
-		}
-		return tp
+		return nil, nil
 
 	case "quic":
 		tp := map[string]interface{}{
@@ -396,7 +465,7 @@ func buildTransport(profile *NodeProfile) map[string]interface{} {
 		if headerType, ok := profile.Extra["header_type"]; ok && headerType != "" {
 			tp["header_type"] = headerType
 		}
-		return tp
+		return tp, nil
 
 	case "httpupgrade":
 		tp := map[string]interface{}{
@@ -408,23 +477,11 @@ func buildTransport(profile *NodeProfile) map[string]interface{} {
 		if path, ok := profile.Extra["path"]; ok && path != "" {
 			tp["path"] = path
 		}
-		return tp
-
-	case "splithttp":
-		tp := map[string]interface{}{
-			"type": "splithttp",
-		}
-		if host, ok := profile.Extra["host"]; ok && host != "" {
-			tp["host"] = host
-		}
-		if path, ok := profile.Extra["path"]; ok && path != "" {
-			tp["path"] = path
-		}
-		return tp
+		return tp, nil
 	}
 
 	// "reality", "tcp", or empty -- no separate transport block needed.
-	return nil
+	return nil, nil
 }
 
 func buildRoute(cfg *Config) map[string]interface{} {
@@ -526,6 +583,33 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	}
 
 	return route
+}
+
+func splitCSV(value string) []string {
+	var result []string
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func parseBool(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func valueOrDefault(value string, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 func buildRuleSets(cfg *Config) []map[string]interface{} {

@@ -71,9 +71,6 @@ data class SettingsUiState(
     // DNS
     val dnsPreset: DnsPreset = DnsPreset.CLOUDFLARE,
     val customDnsUrl: String = "",
-    // Advanced
-    val fragmentEnabled: Boolean = false,
-    val muxEnabled: Boolean = false,
     val logLevel: LogLevel = LogLevel.WARNING,
     // Module
     val moduleVersion: String = "0.1.0",
@@ -148,19 +145,6 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(dnsPreset = DnsPreset.CUSTOM, errorMessage = null) }
             saveDnsToProfile(url, previousPreset)
         }
-    }
-
-    fun toggleFragment() {
-        val newVal = !_uiState.value.fragmentEnabled
-        _uiState.update { it.copy(fragmentEnabled = newVal, errorMessage = null) }
-        // Fragment is a local xray setting; save via profile config if the daemon supports it.
-        // For now, this is persisted locally and applied on next connection start.
-    }
-
-    fun toggleMux() {
-        val newVal = !_uiState.value.muxEnabled
-        _uiState.update { it.copy(muxEnabled = newVal, errorMessage = null) }
-        // Mux is a local xray setting; same as fragment above.
     }
 
     fun setLogLevel(level: LogLevel) {

@@ -35,7 +35,7 @@ App traffic → iptables TPROXY → sing-box → proxy server
 
 4. Install and open the APK
 
-5. Add a server: paste a `vless://` or `trojan://` link
+5. Add a server: paste a `vless://`, `trojan://`, `ss://`, `hysteria2://`, or `tuic://` link
 
 6. Go to **Apps** tab → select which apps to proxy
 
@@ -50,13 +50,13 @@ App traffic → iptables TPROXY → sing-box → proxy server
 | Trojan | Supported |
 | VMess | Supported |
 | Shadowsocks 2022 | Supported |
-| Hysteria2 | Planned (sing-box supports it, URI parser coming) |
-| TUIC v5 | Planned (sing-box supports it, URI parser coming) |
+| Hysteria2 | Supported (sing-box) |
+| TUIC v5 | Supported (sing-box) |
 | AmneziaWG | Planned (via wireproxy-awg) |
 
 ## Import Formats
 
-- `vless://`, `vmess://`, `trojan://`, `ss://` URIs
+- `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`, `hy2://`, `tuic://` URIs
 - Amnezia `vpn://` format
 - Subscription URLs (base64-encoded URI lists)
 - QR codes
