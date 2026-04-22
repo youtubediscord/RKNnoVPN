@@ -41,7 +41,22 @@ type daemon struct {
 	netWatcher *watcher.NetworkWatcher
 	ipcServer  *ipc.Server
 
-	mu sync.Mutex // protects cfg
+	mu        sync.Mutex // protects cfg
+	metricsMu sync.Mutex
+	traffic   trafficSnapshot
+	latency   latencySnapshot
+}
+
+type trafficSnapshot struct {
+	TxBytes   int64
+	RxBytes   int64
+	CheckedAt time.Time
+}
+
+type latencySnapshot struct {
+	Ms        int64
+	Valid     bool
+	CheckedAt time.Time
 }
 
 func main() {
@@ -418,32 +433,16 @@ func (d *daemon) handleReload(params *json.RawMessage) (interface{}, *ipc.RPCErr
 func (d *daemon) handleNetworkReset(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	d.stopSubsystems()
 
-	var errors []string
 	if d.coreMgr.GetState() != core.StateStopped {
 		if err := d.coreMgr.Stop(); err != nil {
-			errors = append(errors, "core stop: "+err.Error())
+			log.Printf("network-reset: core stop: %v", err)
 		}
 	}
 
 	d.mu.Lock()
 	cfg := d.cfg
 	d.mu.Unlock()
-	env := buildScriptEnv(cfg, d.dataDir)
-
-	dnsScript := filepath.Join(d.dataDir, "scripts", "dns.sh")
-	if err := core.ExecScript(dnsScript, "stop", env); err != nil {
-		errors = append(errors, "dns stop: "+err.Error())
-	}
-
-	iptablesScript := filepath.Join(d.dataDir, "scripts", "iptables.sh")
-	if err := core.ExecScript(iptablesScript, "stop", env); err != nil {
-		errors = append(errors, "iptables stop: "+err.Error())
-	}
-
-	_, _ = core.ExecCommand("killall", "-TERM", "sing-box")
-	_, _ = core.ExecCommand("killall", "-KILL", "sing-box")
-	d.rescueMgr.Reset()
-	d.coreMgr.SetState(core.StateStopped)
+	errors := d.resetNetworkState(cfg)
 
 	if len(errors) > 0 {
 		return map[string]interface{}{
@@ -950,10 +949,6 @@ func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Co
 }
 
 func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
-	d.mu.Lock()
-	oldCfg := d.cfg
-	d.mu.Unlock()
-
 	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
 		d.coreMgr.GetState() == core.StateDegraded
 
@@ -998,27 +993,40 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 		d.stopSubsystems()
 		profile := newCfg.ResolveProfile()
 		if err := d.coreMgr.HotSwap(profile); err != nil {
-			rollbackErr := d.rollbackConfig(oldCfg, wasRunning)
-			if rollbackErr != nil {
-				return fmt.Errorf("apply config hot-swap failed: %w; rollback failed: %v", err, rollbackErr)
-			}
-			return fmt.Errorf("apply config hot-swap failed: %w", err)
+			_ = d.resetNetworkState(newCfg)
+			return fmt.Errorf("apply config hot-swap failed; config saved, runtime stopped for safety: %w", err)
 		}
 		if err := d.reapplyRuntimeRules(newCfg); err != nil {
-			rollbackErr := d.rollbackConfig(oldCfg, wasRunning)
-			if rollbackErr == nil {
-				_ = d.reapplyRuntimeRules(oldCfg)
-			}
-			if rollbackErr != nil {
-				return fmt.Errorf("apply config rules failed: %w; rollback failed: %v", err, rollbackErr)
-			}
-			return fmt.Errorf("apply config rules failed: %w", err)
+			_ = d.resetNetworkState(newCfg)
+			return fmt.Errorf("apply config rules failed; config saved, runtime stopped for safety: %w", err)
 		}
 		d.rescueMgr.Reset()
 		d.startSubsystems()
 	}
 
 	return nil
+}
+
+func (d *daemon) resetNetworkState(cfg *config.Config) []string {
+	var errors []string
+	env := buildScriptEnv(cfg, d.dataDir)
+
+	dnsScript := filepath.Join(d.dataDir, "scripts", "dns.sh")
+	if err := core.ExecScript(dnsScript, "stop", env); err != nil {
+		errors = append(errors, "dns stop: "+err.Error())
+	}
+
+	iptablesScript := filepath.Join(d.dataDir, "scripts", "iptables.sh")
+	if err := core.ExecScript(iptablesScript, "stop", env); err != nil {
+		errors = append(errors, "iptables stop: "+err.Error())
+	}
+
+	_, _ = core.ExecCommand("killall", "-TERM", "sing-box")
+	_, _ = core.ExecCommand("killall", "-KILL", "sing-box")
+	d.rescueMgr.Reset()
+	d.coreMgr.SetState(core.StateStopped)
+	d.resetRuntimeMetrics()
+	return errors
 }
 
 func (d *daemon) reapplyRuntimeRules(cfg *config.Config) error {
@@ -1737,20 +1745,28 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 	if status == nil {
 		status = &core.StatusInfo{}
 	}
+	state := d.coreMgr.GetState()
+	d.mu.Lock()
+	cfg := d.cfg
+	d.mu.Unlock()
+	apiPort := cfg.Proxy.APIPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	traffic := d.buildTrafficPayload(state, apiPort)
+	latencyMs := d.cachedLatencyMs(state, cfg, apiPort)
 
 	return map[string]interface{}{
 		"state":                mapCoreStateToConnectionState(status.State),
 		"active_node_id":       activeNodeID,
 		"active_node_name":     activeNodeName,
 		"active_node_protocol": activeNodeProtocol,
+		"egress_ip":            nil,
+		"country_flag":         nil,
 		"uptime":               uptimeSeconds(status.StartedAt),
-		"traffic": map[string]interface{}{
-			"txBytes": 0,
-			"rxBytes": 0,
-			"txRate":  0,
-			"rxRate":  0,
-		},
-		"health": buildHealthPayload(d.coreMgr.GetState(), healthResult),
+		"traffic":              traffic,
+		"latency_ms":           latencyMs,
+		"health":               buildHealthPayload(state, healthResult),
 
 		// Keep the legacy fields for older clients and debugging tools.
 		"pid":             status.PID,
@@ -1791,6 +1807,123 @@ func (d *daemon) activePanelNode() (string, string, string) {
 	}
 
 	return activeID, "", ""
+}
+
+func (d *daemon) buildTrafficPayload(state core.State, apiPort int) map[string]interface{} {
+	payload := map[string]interface{}{
+		"txBytes": int64(0),
+		"rxBytes": int64(0),
+		"txRate":  int64(0),
+		"rxRate":  int64(0),
+	}
+	if state != core.StateRunning && state != core.StateDegraded {
+		d.resetRuntimeMetrics()
+		return payload
+	}
+
+	txBytes, rxBytes, err := queryClashTraffic(apiPort, 1200*time.Millisecond)
+	if err != nil {
+		return payload
+	}
+
+	now := time.Now()
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+
+	txRate := int64(0)
+	rxRate := int64(0)
+	if !d.traffic.CheckedAt.IsZero() {
+		elapsed := now.Sub(d.traffic.CheckedAt).Seconds()
+		if elapsed > 0 {
+			if txBytes >= d.traffic.TxBytes {
+				txRate = int64(float64(txBytes-d.traffic.TxBytes) / elapsed)
+			}
+			if rxBytes >= d.traffic.RxBytes {
+				rxRate = int64(float64(rxBytes-d.traffic.RxBytes) / elapsed)
+			}
+		}
+	}
+	d.traffic = trafficSnapshot{
+		TxBytes:   txBytes,
+		RxBytes:   rxBytes,
+		CheckedAt: now,
+	}
+
+	payload["txBytes"] = txBytes
+	payload["rxBytes"] = rxBytes
+	payload["txRate"] = txRate
+	payload["rxRate"] = rxRate
+	return payload
+}
+
+func (d *daemon) cachedLatencyMs(state core.State, cfg *config.Config, apiPort int) *int64 {
+	if state != core.StateRunning && state != core.StateDegraded {
+		return nil
+	}
+
+	now := time.Now()
+	d.metricsMu.Lock()
+	if d.latency.Valid && now.Sub(d.latency.CheckedAt) < 30*time.Second {
+		value := d.latency.Ms
+		d.metricsMu.Unlock()
+		return &value
+	}
+	if !d.latency.Valid && !d.latency.CheckedAt.IsZero() && now.Sub(d.latency.CheckedAt) < 10*time.Second {
+		d.metricsMu.Unlock()
+		return nil
+	}
+	d.metricsMu.Unlock()
+
+	testURL := cfg.Health.URL
+	if testURL == "" {
+		testURL = "https://www.gstatic.com/generate_204"
+	}
+	latency, _, err := testClashDelay(apiPort, "proxy", testURL, 2500)
+
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+	d.latency.CheckedAt = now
+	if err != nil {
+		d.latency.Valid = false
+		return nil
+	}
+	d.latency.Valid = true
+	d.latency.Ms = latency
+	value := latency
+	return &value
+}
+
+func (d *daemon) resetRuntimeMetrics() {
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+	d.traffic = trafficSnapshot{}
+	d.latency = latencySnapshot{}
+}
+
+func queryClashTraffic(apiPort int, timeout time.Duration) (int64, int64, error) {
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/connections", apiPort)
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, 0, fmt.Errorf("connections HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var parsed struct {
+		UploadTotal   int64 `json:"uploadTotal"`
+		DownloadTotal int64 `json:"downloadTotal"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return 0, 0, err
+	}
+	return parsed.UploadTotal, parsed.DownloadTotal, nil
 }
 
 func mapCoreStateToConnectionState(state string) string {

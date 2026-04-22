@@ -93,7 +93,7 @@
     <string name="template_browsers">Browsers</string>
     <string name="template_social">Social</string>
     <string name="template_streaming">Streaming</string>
-    <string name="template_all_except_banks">All except banks</string>
+    <string name="template_all_except_banks">All except RU/direct</string>
     <string name="select_all_apps">Select all</string>
     <string name="clear_app_selection">Clear all</string>
     <string name="search_apps">Search apps…</string>

@@ -15,6 +15,12 @@ data class DaemonStatus(
     val activeNodeName: String? = null,
     @SerialName("active_node_protocol")
     val activeNodeProtocol: String? = null,
+    @SerialName("egress_ip")
+    val egressIp: String? = null,
+    @SerialName("country_flag")
+    val countryFlag: String? = null,
+    @SerialName("latency_ms")
+    val latencyMs: Int? = null,
     val uptime: Long = 0L,
     val traffic: TrafficStats = TrafficStats(),
     val health: HealthResult = HealthResult()

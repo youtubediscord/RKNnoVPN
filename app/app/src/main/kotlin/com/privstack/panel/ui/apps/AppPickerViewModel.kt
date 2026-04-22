@@ -166,14 +166,16 @@ class AppPickerViewModel @Inject constructor(
     fun applyTemplate(template: AppTemplate) {
         if (!_uiState.value.supportsPerAppSelection) return
         _uiState.update { state ->
+            val visiblePackages = state.filteredApps.map { it.packageName }.toSet()
             val targetPackages = when (template) {
-                AppTemplate.BROWSERS -> BROWSER_PACKAGES
-                AppTemplate.SOCIAL -> SOCIAL_PACKAGES
-                AppTemplate.STREAMING -> STREAMING_PACKAGES
+                AppTemplate.BROWSERS -> BROWSER_PACKAGES intersect visiblePackages
+                AppTemplate.SOCIAL -> SOCIAL_PACKAGES intersect visiblePackages
+                AppTemplate.STREAMING -> STREAMING_PACKAGES intersect visiblePackages
                 AppTemplate.ALL_EXCEPT_BANKS -> {
-                    // Select everything except banks
+                    // Select visible apps except sensitive/RU/network clients.
                     state.apps
-                        .filter { it.packageName !in BANK_PACKAGES }
+                        .filter { it.packageName in visiblePackages }
+                        .filterNot { it.isAlwaysDirect || it.packageName in BANK_PACKAGES }
                         .map { it.packageName }
                         .toSet()
                 }
