@@ -25,35 +25,40 @@ type Config struct {
 
 // ProxyConfig controls the sing-box proxy listener ports.
 type ProxyConfig struct {
-	Mode       string `json:"mode"`        // "tproxy" (matches config.json proxy.mode)
+	Mode       string `json:"mode"` // "tproxy" (matches config.json proxy.mode)
 	TProxyPort int    `json:"tproxy_port"`
 	DNSPort    int    `json:"dns_port"`
-	GID        int    `json:"gid"`         // core process GID (matches config.json proxy.gid)
-	Mark       int    `json:"mark"`        // fwmark for policy routing (matches config.json proxy.mark)
+	GID        int    `json:"gid"`  // core process GID (matches config.json proxy.gid)
+	Mark       int    `json:"mark"` // fwmark for policy routing (matches config.json proxy.mark)
 	APIPort    int    `json:"api_port"`
 }
 
 // TransportConfig controls the outbound protocol transport layer.
 type TransportConfig struct {
-	Protocol   string            `json:"protocol"`    // "reality", "ws", "grpc", "tcp", "h2"
-	TLSServer  string            `json:"tls_server"`  // SNI for TLS
-	Fingerprint string           `json:"fingerprint"` // uTLS fingerprint
-	Extra      map[string]string `json:"extra"`       // protocol-specific fields
+	Protocol    string            `json:"protocol"`    // "reality", "ws", "grpc", "tcp", "h2"
+	TLSServer   string            `json:"tls_server"`  // SNI for TLS
+	Fingerprint string            `json:"fingerprint"` // uTLS fingerprint
+	Extra       map[string]string `json:"extra"`       // protocol-specific fields
 }
 
 // NodeConfig describes the remote proxy server.
 type NodeConfig struct {
 	Address  string `json:"address"`
 	Port     int    `json:"port"`
-	Protocol string `json:"protocol"` // "vless", "trojan", "vmess", "shadowsocks", "hysteria2", "tuic"
+	Protocol string `json:"protocol"` // "vless", "trojan", "vmess", "shadowsocks", "socks", "hysteria2", "tuic"
 	UUID     string `json:"uuid"`
+	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
-	Flow     string `json:"flow"`     // e.g. "xtls-rprx-vision"
+	Flow     string `json:"flow"` // e.g. "xtls-rprx-vision"
 
 	// Shadowsocks-specific fields.
 	SSMethod     string `json:"ss_method,omitempty"`
 	SSPlugin     string `json:"ss_plugin,omitempty"`
 	SSPluginOpts string `json:"ss_plugin_opts,omitempty"`
+
+	// SOCKS-specific fields.
+	SocksVersion string `json:"socks_version,omitempty"`
+	Network      string `json:"network,omitempty"`
 
 	// Hysteria2-specific fields.
 	ServerPorts  []string `json:"server_ports,omitempty"`
@@ -61,7 +66,7 @@ type NodeConfig struct {
 	ObfsPassword string   `json:"obfs_password,omitempty"`
 
 	// VMess-specific fields.
-	AlterID int    `json:"alter_id,omitempty"`
+	AlterID  int    `json:"alter_id,omitempty"`
 	Security string `json:"security,omitempty"` // vmess encryption
 
 	// REALITY-specific fields.
@@ -83,22 +88,22 @@ type PanelConfig struct {
 
 // RoutingConfig controls traffic routing rules.
 type RoutingConfig struct {
-	Mode           string   `json:"mode"`            // "whitelist" etc. (matches config.json routing.mode)
-	BypassLAN      bool     `json:"bypass_lan"`
-	BypassChina    bool     `json:"bypass_china"`    // matches config.json routing.bypass_china
-	BypassRussia   bool     `json:"bypass_russia"`
-	BlockAds       bool     `json:"block_ads"`
-	CustomDirect   []string `json:"custom_direct"`   // domains/IPs to route directly
-	CustomProxy    []string `json:"custom_proxy"`     // domains/IPs to force through proxy
-	CustomBlock    []string `json:"custom_block"`     // domains/IPs to block
-	GeoIPPath      string   `json:"geoip_path"`
-	GeoSitePath    string   `json:"geosite_path"`
+	Mode         string   `json:"mode"` // "whitelist" etc. (matches config.json routing.mode)
+	BypassLAN    bool     `json:"bypass_lan"`
+	BypassChina  bool     `json:"bypass_china"` // matches config.json routing.bypass_china
+	BypassRussia bool     `json:"bypass_russia"`
+	BlockAds     bool     `json:"block_ads"`
+	CustomDirect []string `json:"custom_direct"` // domains/IPs to route directly
+	CustomProxy  []string `json:"custom_proxy"`  // domains/IPs to force through proxy
+	CustomBlock  []string `json:"custom_block"`  // domains/IPs to block
+	GeoIPPath    string   `json:"geoip_path"`
+	GeoSitePath  string   `json:"geosite_path"`
 }
 
 // AppsConfig controls per-app routing (Android split tunnel).
 type AppsConfig struct {
-	Mode     string   `json:"mode"`   // "all", "whitelist", "blacklist"
-	Packages []string `json:"list"`   // package names for whitelist/blacklist (matches config.json apps.list)
+	Mode     string   `json:"mode"` // "all", "whitelist", "blacklist"
+	Packages []string `json:"list"` // package names for whitelist/blacklist (matches config.json apps.list)
 }
 
 // DNSConfig controls DNS resolution.
@@ -118,43 +123,46 @@ type IPv6Config struct {
 
 // HealthConfig controls automatic health checking.
 type HealthConfig struct {
-	Enabled     bool   `json:"enabled"`      // matches config.json health.enabled
+	Enabled     bool   `json:"enabled"` // matches config.json health.enabled
 	IntervalSec int    `json:"interval_sec"`
-	Threshold   int    `json:"threshold"`    // failure threshold (matches config.json health.threshold)
-	URL         string `json:"check_url"`    // URL to probe (matches config.json health.check_url)
+	Threshold   int    `json:"threshold"` // failure threshold (matches config.json health.threshold)
+	URL         string `json:"check_url"` // URL to probe (matches config.json health.check_url)
 	TimeoutSec  int    `json:"timeout_sec"`
 }
 
 // RescueConfig controls automatic fallback on persistent failures.
 type RescueConfig struct {
-	Enabled       bool `json:"enabled"`         // matches config.json rescue.enabled
-	MaxAttempts   int  `json:"max_attempts"`    // consecutive failures before rescue (matches config.json rescue.max_attempts)
-	CooldownSec   int  `json:"cooldown_sec"`    // wait time before retrying after rescue
+	Enabled     bool `json:"enabled"`      // matches config.json rescue.enabled
+	MaxAttempts int  `json:"max_attempts"` // consecutive failures before rescue (matches config.json rescue.max_attempts)
+	CooldownSec int  `json:"cooldown_sec"` // wait time before retrying after rescue
 }
 
 // NodeProfile is a resolved node profile ready for sing-box config rendering.
 // It merges NodeConfig + TransportConfig into a flat structure.
 type NodeProfile struct {
-	Protocol        string `json:"protocol"`
-	Address         string `json:"address"`
-	Port            int    `json:"port"`
-	UUID            string `json:"uuid"`
-	Password        string `json:"password,omitempty"`
-	Flow            string `json:"flow,omitempty"`
-	Transport       string `json:"transport"`
-	TLSServer       string `json:"tls_server"`
-	Fingerprint     string `json:"fingerprint"`
-	SSMethod        string `json:"ss_method,omitempty"`
-	SSPlugin        string `json:"ss_plugin,omitempty"`
-	SSPluginOpts    string `json:"ss_plugin_opts,omitempty"`
-	ServerPorts     []string `json:"server_ports,omitempty"`
-	ObfsType        string `json:"obfs_type,omitempty"`
-	ObfsPassword    string `json:"obfs_password,omitempty"`
-	AlterID         int    `json:"alter_id,omitempty"`
-	Security        string `json:"security,omitempty"`
-	RealityPubKey   string `json:"reality_public_key,omitempty"`
-	RealityShortID  string `json:"reality_short_id,omitempty"`
-	Extra           map[string]string `json:"extra,omitempty"`
+	Protocol       string            `json:"protocol"`
+	Address        string            `json:"address"`
+	Port           int               `json:"port"`
+	UUID           string            `json:"uuid"`
+	Username       string            `json:"username,omitempty"`
+	Password       string            `json:"password,omitempty"`
+	Flow           string            `json:"flow,omitempty"`
+	Transport      string            `json:"transport"`
+	TLSServer      string            `json:"tls_server"`
+	Fingerprint    string            `json:"fingerprint"`
+	SSMethod       string            `json:"ss_method,omitempty"`
+	SSPlugin       string            `json:"ss_plugin,omitempty"`
+	SSPluginOpts   string            `json:"ss_plugin_opts,omitempty"`
+	SocksVersion   string            `json:"socks_version,omitempty"`
+	Network        string            `json:"network,omitempty"`
+	ServerPorts    []string          `json:"server_ports,omitempty"`
+	ObfsType       string            `json:"obfs_type,omitempty"`
+	ObfsPassword   string            `json:"obfs_password,omitempty"`
+	AlterID        int               `json:"alter_id,omitempty"`
+	Security       string            `json:"security,omitempty"`
+	RealityPubKey  string            `json:"reality_public_key,omitempty"`
+	RealityShortID string            `json:"reality_short_id,omitempty"`
+	Extra          map[string]string `json:"extra,omitempty"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -301,11 +309,11 @@ func (c *Config) Validate() error {
 	}
 
 	validProto := map[string]bool{
-		"vless": true, "trojan": true, "vmess": true, "shadowsocks": true,
+		"vless": true, "trojan": true, "vmess": true, "shadowsocks": true, "socks": true,
 		"hysteria2": true, "tuic": true,
 	}
 	if c.Node.Protocol != "" && !validProto[c.Node.Protocol] {
-		return fmt.Errorf("node.protocol must be one of vless/trojan/vmess/shadowsocks/hysteria2/tuic, got %q", c.Node.Protocol)
+		return fmt.Errorf("node.protocol must be one of vless/trojan/vmess/shadowsocks/socks/hysteria2/tuic, got %q", c.Node.Protocol)
 	}
 	if c.Node.Address != "" && c.Node.Protocol == "" {
 		return fmt.Errorf("node.protocol is required when node.address is set")
@@ -372,6 +380,7 @@ func (c *Config) ResolveProfile() *NodeProfile {
 		Address:        c.Node.Address,
 		Port:           c.Node.Port,
 		UUID:           c.Node.UUID,
+		Username:       c.Node.Username,
 		Password:       c.Node.Password,
 		Flow:           c.Node.Flow,
 		Transport:      c.Transport.Protocol,
@@ -380,6 +389,8 @@ func (c *Config) ResolveProfile() *NodeProfile {
 		SSMethod:       c.Node.SSMethod,
 		SSPlugin:       c.Node.SSPlugin,
 		SSPluginOpts:   c.Node.SSPluginOpts,
+		SocksVersion:   c.Node.SocksVersion,
+		Network:        c.Node.Network,
 		ServerPorts:    c.Node.ServerPorts,
 		ObfsType:       c.Node.ObfsType,
 		ObfsPassword:   c.Node.ObfsPassword,

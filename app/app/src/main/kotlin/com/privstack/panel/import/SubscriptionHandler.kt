@@ -239,6 +239,10 @@ object SubscriptionHandler {
                 t.startsWith("vmess://", true) ||
                 t.startsWith("trojan://", true) ||
                 t.startsWith("ss://", true) ||
+                t.startsWith("socks://", true) ||
+                t.startsWith("socks4://", true) ||
+                t.startsWith("socks4a://", true) ||
+                t.startsWith("socks5://", true) ||
                 t.startsWith("vpn://", true) ||
                 t.startsWith("hysteria2://", true) ||
                 t.startsWith("hy2://", true) ||
@@ -284,6 +288,11 @@ object SubscriptionHandler {
                     val method = server?.get("method")?.jsonPrimitive?.content ?: ""
                     val password = server?.get("password")?.jsonPrimitive?.content ?: ""
                     "$method:$password"
+                }
+                Protocol.SOCKS -> {
+                    val username = settings["username"]?.jsonPrimitive?.content ?: ""
+                    val password = settings["password"]?.jsonPrimitive?.content ?: ""
+                    "$username:$password"
                 }
                 Protocol.HYSTERIA2 -> settings["password"]?.jsonPrimitive?.content ?: ""
                 Protocol.TUIC -> {

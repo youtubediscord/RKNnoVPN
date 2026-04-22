@@ -402,6 +402,15 @@ class DaemonClient @Inject constructor(
                     }
                 }
 
+                "socks" -> putJsonObject("settings") {
+                    put("address", node.address)
+                    put("port", node.port)
+                    put("version", node.socksVersion.ifBlank { "5" })
+                    if (node.username.isNotBlank()) put("username", node.username)
+                    if (node.password.isNotBlank()) put("password", node.password)
+                    if (node.network.isNotBlank()) put("network", node.network)
+                }
+
                 "hysteria2" -> putJsonObject("settings") {
                     put("address", node.address)
                     put("port", node.port)
@@ -456,7 +465,7 @@ class DaemonClient @Inject constructor(
     }
 
     private fun legacyNodeId(node: DaemonNodeSection): String {
-        val seed = "${node.protocol}|${node.address}|${node.port}|${node.uuid}"
+        val seed = "${node.protocol}|${node.address}|${node.port}|${node.uuid}|${node.username}|${node.password}"
         return UUID.nameUUIDFromBytes(seed.toByteArray(StandardCharsets.UTF_8)).toString()
     }
 }
@@ -546,6 +555,7 @@ private data class DaemonNodeSection(
     val port: Int = 443,
     val protocol: String = "",
     val uuid: String = "",
+    val username: String = "",
     val password: String = "",
     val flow: String = "",
     @SerialName("ss_method")
@@ -563,6 +573,9 @@ private data class DaemonNodeSection(
     @SerialName("alter_id")
     val alterId: Int = 0,
     val security: String = "",
+    @SerialName("socks_version")
+    val socksVersion: String = "",
+    val network: String = "",
     @SerialName("reality_public_key")
     val realityPublicKey: String = "",
     @SerialName("reality_short_id")
@@ -872,6 +885,17 @@ private fun Node.toDaemonNodeSection(): DaemonNodeSection {
                 ssMethod = serverEntry?.get("method")?.jsonPrimitive?.content.orEmpty(),
                 ssPlugin = serverEntry?.get("plugin")?.jsonPrimitive?.content.orEmpty(),
                 ssPluginOpts = serverEntry?.get("plugin_opts")?.jsonPrimitive?.content.orEmpty(),
+            )
+        }
+        Protocol.SOCKS -> {
+            DaemonNodeSection(
+                address = server,
+                port = port,
+                protocol = "socks",
+                username = settings?.get("username")?.jsonPrimitive?.content.orEmpty(),
+                password = settings?.get("password")?.jsonPrimitive?.content.orEmpty(),
+                socksVersion = settings?.get("version")?.jsonPrimitive?.content.orEmpty(),
+                network = settings?.get("network")?.jsonPrimitive?.content.orEmpty(),
             )
         }
         Protocol.HYSTERIA2 -> {

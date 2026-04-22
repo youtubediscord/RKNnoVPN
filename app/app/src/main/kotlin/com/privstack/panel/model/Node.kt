@@ -37,6 +37,7 @@ enum class Protocol {
     VMESS,
     TROJAN,
     SHADOWSOCKS,
+    SOCKS,
     HYSTERIA2,
     TUIC;
 
@@ -50,6 +51,7 @@ enum class Protocol {
             "vmess" -> VMESS
             "trojan" -> TROJAN
             "ss", "shadowsocks" -> SHADOWSOCKS
+            "socks", "socks4", "socks4a", "socks5" -> SOCKS
             "hysteria2", "hy2" -> HYSTERIA2
             "tuic" -> TUIC
             else -> null

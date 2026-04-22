@@ -50,13 +50,14 @@ App traffic → iptables TPROXY → sing-box → proxy server
 | Trojan | Supported |
 | VMess | Supported |
 | Shadowsocks 2022 | Supported |
+| SOCKS4/SOCKS5 upstream | Supported |
 | Hysteria2 | Supported (sing-box) |
 | TUIC v5 | Supported (sing-box) |
 | AmneziaWG | Planned (via wireproxy-awg) |
 
 ## Import Formats
 
-- `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`, `hy2://`, `tuic://` URIs
+- `vless://`, `vmess://`, `trojan://`, `ss://`, `socks://`, `socks5://`, `hysteria2://`, `hy2://`, `tuic://` URIs
 - Amnezia `vpn://` format
 - Subscription URLs (base64-encoded URI lists)
 - QR codes
@@ -106,7 +107,7 @@ make all
 
 ```bash
 make daemon    # Build privd + privctl (arm64 + armeabi-v7a)
-make singbox   # Download Android sing-box binaries
+make singbox   # Build static sing-box binaries
 make module    # Assemble Magisk ZIP
 make apk       # Build Android APK
 ```

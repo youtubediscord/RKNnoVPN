@@ -26,9 +26,9 @@ func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
 				"external_controller": fmt.Sprintf("127.0.0.1:%d", cfg.Proxy.APIPort),
 			},
 		},
-		"dns":       buildDNS(cfg),
+		"dns":      buildDNS(cfg),
 		"inbounds": buildInbounds(cfg),
-		"route":     buildRoute(cfg),
+		"route":    buildRoute(cfg),
 	}
 	outbounds, err := buildOutbounds(cfg, profile)
 	if err != nil {
@@ -46,16 +46,16 @@ func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
 func buildDNS(cfg *Config) map[string]interface{} {
 	servers := []map[string]interface{}{
 		{
-			"tag":             "remote-dns",
-			"address":         cfg.DNS.ProxyDNS,
+			"tag":              "remote-dns",
+			"address":          cfg.DNS.ProxyDNS,
 			"address_resolver": "bootstrap-dns",
-			"detour":          "proxy",
+			"detour":           "proxy",
 		},
 		{
-			"tag":             "direct-dns",
-			"address":         cfg.DNS.DirectDNS,
+			"tag":              "direct-dns",
+			"address":          cfg.DNS.DirectDNS,
 			"address_resolver": "bootstrap-dns",
-			"detour":          "direct",
+			"detour":           "direct",
 		},
 		{
 			"tag":     "bootstrap-dns",
@@ -130,15 +130,15 @@ func buildDNS(cfg *Config) map[string]interface{} {
 	}
 
 	dns := map[string]interface{}{
-		"servers": servers,
-		"rules":   rules,
-		"final":   "remote-dns",
+		"servers":           servers,
+		"rules":             rules,
+		"final":             "remote-dns",
 		"independent_cache": true,
 	}
 
 	if cfg.DNS.FakeIP {
 		dns["fakeip"] = map[string]interface{}{
-			"enabled":    true,
+			"enabled":     true,
 			"inet4_range": "198.18.0.0/15",
 			"inet6_range": "fc00::/18",
 		}
@@ -150,18 +150,16 @@ func buildDNS(cfg *Config) map[string]interface{} {
 func buildInbounds(cfg *Config) []map[string]interface{} {
 	inbounds := []map[string]interface{}{
 		{
-			"type":             "tproxy",
-			"tag":              "tproxy-in",
-			"listen":           "::",
-			"listen_port":      cfg.Proxy.TProxyPort,
-			"sniff":            true,
-			"sniff_override_destination": true,
+			"type":        "tproxy",
+			"tag":         "tproxy-in",
+			"listen":      "::",
+			"listen_port": cfg.Proxy.TProxyPort,
 		},
 		{
-			"type":        "direct",
-			"tag":         "dns-in",
-			"listen":      "::",
-			"listen_port": cfg.Proxy.DNSPort,
+			"type":             "direct",
+			"tag":              "dns-in",
+			"listen":           "::",
+			"listen_port":      cfg.Proxy.DNSPort,
 			"override_address": "1.1.1.1",
 			"override_port":    53,
 		},
@@ -181,59 +179,51 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 			"type": "direct",
 			"tag":  "direct",
 		},
-		{
-			"type": "block",
-			"tag":  "block",
-		},
-		{
-			"type": "dns",
-			"tag":  "dns-out",
-		},
 	}
 	return outbounds, nil
 }
 
 func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 	out := map[string]interface{}{
-		"tag":        "proxy",
-		"server":     profile.Address,
+		"tag":         "proxy",
+		"server":      profile.Address,
 		"server_port": profile.Port,
 	}
 
 	switch profile.Protocol {
-		case "vless":
-			out["type"] = "vless"
-			if profile.UUID == "" {
-				return nil, fmt.Errorf("renderer: vless uuid is empty")
-			}
-			out["uuid"] = profile.UUID
-			if profile.Flow != "" {
-				out["flow"] = profile.Flow
+	case "vless":
+		out["type"] = "vless"
+		if profile.UUID == "" {
+			return nil, fmt.Errorf("renderer: vless uuid is empty")
+		}
+		out["uuid"] = profile.UUID
+		if profile.Flow != "" {
+			out["flow"] = profile.Flow
 		}
 		if tls := buildTLS(profile, false); tls != nil {
 			out["tls"] = tls
 		}
 
-		case "trojan":
-			out["type"] = "trojan"
-			password := profile.Password
-			if password == "" {
-				password = profile.UUID
-			}
-			if password == "" {
-				return nil, fmt.Errorf("renderer: trojan password is empty")
-			}
-			out["password"] = password
-			if tls := buildTLS(profile, true); tls != nil {
-				out["tls"] = tls
-			}
+	case "trojan":
+		out["type"] = "trojan"
+		password := profile.Password
+		if password == "" {
+			password = profile.UUID
+		}
+		if password == "" {
+			return nil, fmt.Errorf("renderer: trojan password is empty")
+		}
+		out["password"] = password
+		if tls := buildTLS(profile, true); tls != nil {
+			out["tls"] = tls
+		}
 
-		case "vmess":
-			out["type"] = "vmess"
-			if profile.UUID == "" {
-				return nil, fmt.Errorf("renderer: vmess uuid is empty")
-			}
-			out["uuid"] = profile.UUID
+	case "vmess":
+		out["type"] = "vmess"
+		if profile.UUID == "" {
+			return nil, fmt.Errorf("renderer: vmess uuid is empty")
+		}
+		out["uuid"] = profile.UUID
 		out["alter_id"] = profile.AlterID
 		sec := profile.Security
 		if sec == "" {
@@ -244,16 +234,16 @@ func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 			out["tls"] = tls
 		}
 
-		case "shadowsocks":
-			out["type"] = "shadowsocks"
-			password := profile.Password
-			if password == "" {
-				password = profile.UUID
-			}
-			if password == "" {
-				return nil, fmt.Errorf("renderer: shadowsocks password is empty")
-			}
-			out["password"] = password
+	case "shadowsocks":
+		out["type"] = "shadowsocks"
+		password := profile.Password
+		if password == "" {
+			password = profile.UUID
+		}
+		if password == "" {
+			return nil, fmt.Errorf("renderer: shadowsocks password is empty")
+		}
+		out["password"] = password
 		method := profile.SSMethod
 		if method == "" {
 			method = "2022-blake3-aes-128-gcm"
@@ -266,16 +256,29 @@ func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 			out["plugin_opts"] = profile.SSPluginOpts
 		}
 
+	case "socks":
+		out["type"] = "socks"
+		out["version"] = valueOrDefault(profile.SocksVersion, "5")
+		if profile.Username != "" {
+			out["username"] = profile.Username
+		}
+		if profile.Password != "" {
+			out["password"] = profile.Password
+		}
+		if profile.Network != "" {
+			out["network"] = profile.Network
+		}
+
 	case "hysteria2":
 		out["type"] = "hysteria2"
 		password := profile.Password
-			if password == "" {
-				password = profile.UUID
-			}
-			if password == "" {
-				return nil, fmt.Errorf("renderer: hysteria2 password is empty")
-			}
-			out["password"] = password
+		if password == "" {
+			password = profile.UUID
+		}
+		if password == "" {
+			return nil, fmt.Errorf("renderer: hysteria2 password is empty")
+		}
+		out["password"] = password
 		if len(profile.ServerPorts) > 0 {
 			out["server_ports"] = profile.ServerPorts
 		}
@@ -293,11 +296,11 @@ func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 		}
 
 	case "tuic":
-			out["type"] = "tuic"
-			if profile.UUID == "" || profile.Password == "" {
-				return nil, fmt.Errorf("renderer: tuic uuid/password is empty")
-			}
-			out["uuid"] = profile.UUID
+		out["type"] = "tuic"
+		if profile.UUID == "" || profile.Password == "" {
+			return nil, fmt.Errorf("renderer: tuic uuid/password is empty")
+		}
+		out["uuid"] = profile.UUID
 		out["password"] = profile.Password
 		if value := profile.Extra["congestion_control"]; value != "" {
 			out["congestion_control"] = value
@@ -321,16 +324,19 @@ func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 			out["network"] = value
 		}
 	default:
-			return nil, fmt.Errorf("renderer: unsupported protocol %q", profile.Protocol)
-		}
-
-	// Transport layer (WebSocket, gRPC, HTTP/2).
-	tp, err := buildTransport(profile)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("renderer: unsupported protocol %q", profile.Protocol)
 	}
-	if tp != nil {
-		out["transport"] = tp
+
+	// Transport layer (WebSocket, gRPC, HTTP/2). SOCKS is already a complete
+	// outbound and must not inherit VLESS/Trojan transport settings.
+	if profile.Protocol != "socks" {
+		tp, err := buildTransport(profile)
+		if err != nil {
+			return nil, err
+		}
+		if tp != nil {
+			out["transport"] = tp
+		}
 	}
 
 	return out, nil
@@ -487,8 +493,12 @@ func buildTransport(profile *NodeProfile) (map[string]interface{}, error) {
 func buildRoute(cfg *Config) map[string]interface{} {
 	rules := []map[string]interface{}{
 		{
+			"inbound": []string{"tproxy-in"},
+			"action":  "sniff",
+		},
+		{
 			"protocol": []string{"dns"},
-			"outbound": "dns-out",
+			"action":   "hijack-dns",
 		},
 	}
 
@@ -504,7 +514,7 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	if cfg.Routing.BlockAds {
 		rules = append(rules, map[string]interface{}{
 			"rule_set": []string{"geosite-ads"},
-			"outbound": "block",
+			"action":   "reject",
 		})
 	}
 
@@ -530,13 +540,13 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	// Custom direct domains/IPs.
 	if len(customDirectDomains) > 0 {
 		rules = append(rules, map[string]interface{}{
-			"domain": customDirectDomains,
+			"domain":   customDirectDomains,
 			"outbound": "direct",
 		})
 	}
 	if len(customDirectCIDRs) > 0 {
 		rules = append(rules, map[string]interface{}{
-			"ip_cidr": customDirectCIDRs,
+			"ip_cidr":  customDirectCIDRs,
 			"outbound": "direct",
 		})
 	}
@@ -544,13 +554,13 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	// Custom proxy domains/IPs.
 	if len(customProxyDomains) > 0 {
 		rules = append(rules, map[string]interface{}{
-			"domain": customProxyDomains,
+			"domain":   customProxyDomains,
 			"outbound": "proxy",
 		})
 	}
 	if len(customProxyCIDRs) > 0 {
 		rules = append(rules, map[string]interface{}{
-			"ip_cidr": customProxyCIDRs,
+			"ip_cidr":  customProxyCIDRs,
 			"outbound": "proxy",
 		})
 	}
@@ -559,20 +569,20 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	if len(customBlockDomains) > 0 {
 		rules = append(rules, map[string]interface{}{
 			"domain": customBlockDomains,
-			"outbound": "block",
+			"action": "reject",
 		})
 	}
 	if len(customBlockCIDRs) > 0 {
 		rules = append(rules, map[string]interface{}{
 			"ip_cidr": customBlockCIDRs,
-			"outbound": "block",
+			"action":  "reject",
 		})
 	}
 
 	route := map[string]interface{}{
-		"rules":                rules,
-		"final":                "proxy",
-		"default_mark":         255,
+		"rules":                 rules,
+		"final":                 "proxy",
+		"default_mark":          255,
 		"auto_detect_interface": true,
 	}
 

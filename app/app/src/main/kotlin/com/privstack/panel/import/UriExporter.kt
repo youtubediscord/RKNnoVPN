@@ -29,6 +29,7 @@ object UriExporter {
         Protocol.VMESS -> toVmessUri(node)
         Protocol.TROJAN -> toTrojanUri(node)
         Protocol.SHADOWSOCKS -> toShadowsocksUri(node)
+        Protocol.SOCKS -> toSocksUri(node)
         Protocol.HYSTERIA2 -> toHysteria2Uri(node)
         Protocol.TUIC -> toTuicUri(node)
         else -> node.link
@@ -226,6 +227,35 @@ object UriExporter {
 
         val name = urlEncode(node.name)
         return "ss://$userInfo@$host:$port#$name"
+    }
+
+    /**
+     * socks5://[username:password@]host:port?network=tcp#name
+     */
+    fun toSocksUri(node: Node): String {
+        val settings = node.outbound.obj("settings") ?: return node.link
+        val host = formatHost(settings.str("address").ifEmpty { node.server })
+        val port = settings.str("port").ifEmpty { node.port.toString() }
+        val version = settings.str("version").ifEmpty { "5" }
+        val scheme = when (version) {
+            "4" -> "socks4"
+            "4a" -> "socks4a"
+            else -> "socks5"
+        }
+        val username = settings.str("username")
+        val password = settings.str("password")
+        val auth = when {
+            username.isBlank() && password.isBlank() -> ""
+            password.isBlank() -> "${urlEncode(username)}@"
+            else -> "${urlEncode(username)}:${urlEncode(password)}@"
+        }
+        val params = mutableMapOf<String, String>()
+        settings.str("network").takeIf { it.isNotBlank() }?.let { params["network"] = it }
+        val query = encodeQuery(params)
+        val base = "$scheme://$auth$host:$port"
+        val withQuery = if (query.isNotEmpty()) "$base?$query" else base
+        val name = urlEncode(node.name)
+        return if (name.isNotEmpty()) "$withQuery#$name" else withQuery
     }
 
     /**

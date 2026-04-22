@@ -21,7 +21,8 @@ import java.util.UUID
 /**
  * Universal proxy link parser.
  *
- * Handles vless://, vmess://, trojan://, ss:// (SIP002 + legacy), and vpn:// (Amnezia).
+ * Handles vless://, vmess://, trojan://, ss:// (SIP002 + legacy),
+ * socks:// / socks5://, and vpn:// (Amnezia).
  * Produces [Node] instances with the protocol-specific outbound stored as a [JsonObject]
  * in the daemon's canonical xray schema.
  */
@@ -34,6 +35,7 @@ object LinkParser {
     // Schemes we recognise in free-text / clipboard detection.
     private val KNOWN_SCHEMES = listOf(
         "vless://", "vmess://", "trojan://", "ss://", "vpn://",
+        "socks://", "socks4://", "socks4a://", "socks5://",
         "hysteria2://", "hy2://", "tuic://",
     )
 
@@ -56,6 +58,10 @@ object LinkParser {
                 trimmed.startsWith("vmess://", ignoreCase = true)  -> parseVmess(trimmed)
                 trimmed.startsWith("trojan://", ignoreCase = true) -> parseTrojan(trimmed)
                 trimmed.startsWith("ss://", ignoreCase = true)     -> parseShadowsocks(trimmed)
+                trimmed.startsWith("socks://", ignoreCase = true) ||
+                    trimmed.startsWith("socks4://", ignoreCase = true) ||
+                    trimmed.startsWith("socks4a://", ignoreCase = true) ||
+                    trimmed.startsWith("socks5://", ignoreCase = true) -> parseSocks(trimmed)
                 trimmed.startsWith("vpn://", ignoreCase = true)    -> parseAmnezia(trimmed)
                 trimmed.startsWith("hysteria2://", ignoreCase = true) ||
                     trimmed.startsWith("hy2://", ignoreCase = true)   -> parseHysteria2(trimmed)
@@ -362,6 +368,62 @@ object LinkParser {
      * vpn:// (Amnezia format) -- delegates to [AmneziaImporter].
      */
     private fun parseAmnezia(uri: String): Node? = AmneziaImporter.import(uri)
+
+    /**
+     * socks5://[username:password@]host:port?network=tcp#name
+     *
+     * Also accepts socks://, socks4:// and socks4a://. socks:// defaults to SOCKS5.
+     */
+    private fun parseSocks(uri: String): Node? {
+        val parsed = parseProxyUri(uri, defaultPort = 1080, requireUserInfo = false) ?: return null
+        val scheme = uri.substringBefore("://").lowercase()
+        val version = when (scheme) {
+            "socks4" -> "4"
+            "socks4a" -> "4a"
+            else -> "5"
+        }
+        val username: String
+        val password: String
+        if (parsed.userInfo.isBlank()) {
+            username = ""
+            password = ""
+        } else {
+            val split = parsed.userInfo.indexOf(':')
+            if (split == -1) {
+                username = parsed.userInfo
+                password = ""
+            } else {
+                username = parsed.userInfo.substring(0, split)
+                password = parsed.userInfo.substring(split + 1)
+            }
+        }
+        val network = parsed.params["network"]?.takeIf { it == "tcp" || it == "udp" }
+
+        val outbound = buildJsonObject {
+            put("protocol", "socks")
+            putJsonObject("settings") {
+                put("address", parsed.host)
+                put("port", parsed.port)
+                put("version", version)
+                if (username.isNotBlank()) put("username", username)
+                if (password.isNotBlank()) put("password", password)
+                if (!network.isNullOrBlank()) put("network", network)
+            }
+            putJsonObject("streamSettings") {
+                put("network", "tcp")
+            }
+        }
+
+        return Node(
+            id = UUID.randomUUID().toString(),
+            name = parsed.fragment.ifEmpty { "${parsed.host}:${parsed.port}" },
+            protocol = Protocol.SOCKS,
+            server = parsed.host,
+            port = parsed.port,
+            link = uri,
+            outbound = outbound,
+        )
+    }
 
     /**
      * hysteria2://[password@]host[:port]/?obfs=salamander&obfs-password=...&sni=...&insecure=1#name

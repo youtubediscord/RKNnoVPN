@@ -12,7 +12,9 @@ permissions:
 
 env:
   GO_VERSION: "1.22"
+  SINGBOX_GO_VERSION: "1.24.x"
   SINGBOX_VERSION: "1.13.8"
+  SINGBOX_TAGS: "with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0"
 
 jobs:
   # ============================================================
@@ -73,29 +75,53 @@ jobs:
           retention-days: 1
 
   # ============================================================
-  # Job 2: Download Android sing-box binaries
+  # Job 2: Build static sing-box binaries for Android module runtime
   # ============================================================
-  fetch-singbox:
-    name: Fetch sing-box (${{ matrix.arch }})
+  build-singbox:
+    name: Build sing-box (${{ matrix.arch }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: arm64
-            asset_arch: android-arm64
+            goarch: arm64
+            goarm: ""
           - arch: armv7
-            asset_arch: android-arm
+            goarch: arm
+            goarm: "7"
     steps:
-      - name: Download sing-box
+      - name: Checkout sing-box
+        uses: actions/checkout@v4
+        with:
+          repository: SagerNet/sing-box
+          ref: v${{ env.SINGBOX_VERSION }}
+          path: sing-box-src
+
+      - name: Setup Go for sing-box
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.SINGBOX_GO_VERSION }}
+          cache-dependency-path: sing-box-src/go.sum
+
+      - name: Build static sing-box
         run: |
           mkdir -p "out/${{ matrix.arch }}"
-          DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-${{ matrix.asset_arch }}.tar.gz"
-          echo "Downloading sing-box v${SINGBOX_VERSION} from $DOWNLOAD_URL"
-          curl -fSL "$DOWNLOAD_URL" -o singbox.tar.gz
-          tar xzf singbox.tar.gz
-          cp "sing-box-${SINGBOX_VERSION}-${{ matrix.asset_arch }}/sing-box" "out/${{ matrix.arch }}/sing-box"
+          cd sing-box-src
+          LDFLAGS="$(cat release/LDFLAGS)"
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
+            -trimpath \
+            -tags "${SINGBOX_TAGS}" \
+            -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${SINGBOX_VERSION}' ${LDFLAGS} -s -w -buildid=" \
+            -o "../out/${{ matrix.arch }}/sing-box" ./cmd/sing-box
+          cd ..
           chmod 755 "out/${{ matrix.arch }}/sing-box"
+          if readelf -l "out/${{ matrix.arch }}/sing-box" | grep -q "Requesting program interpreter"; then
+            echo "ERROR: sing-box is dynamically linked and will not run from Magisk on Android"
+            readelf -l "out/${{ matrix.arch }}/sing-box"
+            exit 1
+          fi
+          readelf -h "out/${{ matrix.arch }}/sing-box"
           sha256sum "out/${{ matrix.arch }}/sing-box"
 
       - name: Upload sing-box artifact
@@ -111,7 +137,7 @@ jobs:
   build-module:
     name: Build Magisk Module
     runs-on: ubuntu-latest
-    needs: [build-daemon, fetch-singbox]
+    needs: [build-daemon, build-singbox]
     steps:
       - uses: actions/checkout@v4
 
