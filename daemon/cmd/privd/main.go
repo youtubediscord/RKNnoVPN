@@ -1111,9 +1111,6 @@ func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCE
 			}
 		}
 	}
-	if p.URL == "" {
-		p.URL = "https://www.gstatic.com/generate_204"
-	}
 	if p.TimeoutMS <= 0 {
 		p.TimeoutMS = 5000
 	}
@@ -1137,7 +1134,14 @@ func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCE
 	if apiPort == 0 {
 		apiPort = 9090
 	}
+	testURL := strings.TrimSpace(p.URL)
+	if testURL == "" {
+		testURL = strings.TrimSpace(cfg.Health.URL)
+	}
 	d.mu.Unlock()
+	if testURL == "" {
+		testURL = "https://www.gstatic.com/generate_204"
+	}
 
 	results := make([]map[string]interface{}, 0, len(profiles))
 	for _, profile := range profiles {
@@ -1160,7 +1164,7 @@ func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCE
 			result["tcp_ms"] = tcpMS
 		}
 
-		urlMS, statusCode, urlErr := testClashDelay(apiPort, profile.Tag, p.URL, p.TimeoutMS)
+		urlMS, statusCode, urlErr := testClashDelay(apiPort, profile.Tag, testURL, p.TimeoutMS)
 		if urlErr != nil {
 			result["url_error"] = urlErr.Error()
 		} else {
@@ -1171,7 +1175,7 @@ func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCE
 	}
 
 	return map[string]interface{}{
-		"url":     p.URL,
+		"url":     testURL,
 		"results": results,
 	}, nil
 }

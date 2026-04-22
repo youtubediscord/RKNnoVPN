@@ -71,6 +71,7 @@ data class SettingsUiState(
     // DNS
     val dnsPreset: DnsPreset = DnsPreset.CLOUDFLARE,
     val customDnsUrl: String = "",
+    val urlTestUrl: String = "https://www.gstatic.com/generate_204",
     val logLevel: LogLevel = LogLevel.WARNING,
     // Module
     val moduleVersion: String = "0.1.0",
@@ -144,6 +145,29 @@ class SettingsViewModel @Inject constructor(
             val previousPreset = _uiState.value.dnsPreset
             _uiState.update { it.copy(dnsPreset = DnsPreset.CUSTOM, errorMessage = null) }
             saveDnsToProfile(url, previousPreset)
+        }
+    }
+
+    fun setUrlTestUrl(url: String) {
+        _uiState.update { it.copy(urlTestUrl = url, errorMessage = null) }
+    }
+
+    fun applyUrlTestUrl() {
+        val url = _uiState.value.urlTestUrl.trim()
+        if (url.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "URL test endpoint must not be empty") }
+            return
+        }
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(health = config.health.copy(checkUrl = url))
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save URL test setting: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(errorMessage = err) }
+            }
         }
     }
 
@@ -347,6 +371,7 @@ class SettingsViewModel @Inject constructor(
                 routingMode = routingMode,
                 dnsPreset = dnsPreset,
                 customDnsUrl = if (dnsPreset == DnsPreset.CUSTOM) dnsUrl else it.customDnsUrl,
+                urlTestUrl = config.health.checkUrl,
             )
         }
     }

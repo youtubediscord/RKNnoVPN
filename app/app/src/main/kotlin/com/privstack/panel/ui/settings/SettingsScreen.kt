@@ -138,6 +138,25 @@ fun SettingsScreen(
                 currentLevel = state.logLevel,
                 onLevelChange = viewModel::setLogLevel,
             )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = state.urlTestUrl,
+                onValueChange = viewModel::setUrlTestUrl,
+                label = { Text(stringResource(R.string.urltest_url)) },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            )
+
+            TextButton(
+                onClick = viewModel::applyUrlTestUrl,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) {
+                Text(stringResource(R.string.apply))
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))

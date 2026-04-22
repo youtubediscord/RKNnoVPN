@@ -18,6 +18,7 @@ data class ProfileConfig(
     val nodes: List<Node> = emptyList(),
     val routing: RoutingConfig = RoutingConfig(),
     val dns: DnsConfig = DnsConfig(),
+    val health: HealthConfig = HealthConfig(),
     val tun: TunConfig = TunConfig(),
     val inbounds: InboundsConfig = InboundsConfig(),
     /** Arbitrary extension fields the daemon may add in future versions. */
@@ -67,6 +68,15 @@ data class DnsConfig(
     val blockQuic: Boolean = false,
     /** Fake-DNS / DNS-hijack enabled. */
     val fakeDns: Boolean = false
+)
+
+@Serializable
+data class HealthConfig(
+    val enabled: Boolean = true,
+    val intervalSec: Int = 30,
+    val threshold: Int = 3,
+    val checkUrl: String = "https://www.gstatic.com/generate_204",
+    val timeoutSec: Int = 5
 )
 
 @Serializable

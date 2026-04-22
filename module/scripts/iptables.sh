@@ -225,16 +225,19 @@ fi)
 #    ICMP, and blocking it causes diagnostic black holes.
 -A ${CHAIN_OUT} -p icmp -j RETURN
 
-# 4. Anti-loopback: prevent packets destined for the tproxy port from
-#    being marked. If a local process connects to the tproxy port directly,
-#    marking it would cause an infinite loop.
+# 4. Local listener protection: tproxy, DNS and API ports are internal
+#    control-plane surfaces. Only root and the sing-box core GID may connect
+#    directly; app traffic must enter through marking/TPROXY or DNS REDIRECT.
+-A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
-
-# 5. API port protection: the sing-box API listens on a random port.
-#    Only root (UID 0) should access it. Drop non-root traffic to prevent
-#    unauthorized apps from querying or controlling sing-box.
--A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 -j DROP
+-A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
+-A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
+-A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -j RETURN
 
 # 6. Bypass UIDs: specific UIDs that must always go direct.
 #    UID 1073 = NetworkStack — needed for captive portal detection.
@@ -331,12 +334,17 @@ fi)
 #    Also critical for IPv6 NDP (neighbor discovery) which uses ICMPv6.
 -A ${CHAIN_OUT} -p icmpv6 -j RETURN
 
-# 4. Anti-loopback on tproxy port
+# 4. Local listener protection: root and core-GID only.
+-A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
-
-# 5. API port protection (root-only)
--A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 -j DROP
+-A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
+-A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
+-A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -j RETURN
 
 # 6. Bypass UIDs
 $(for uid in ${BYPASS_UIDS}; do

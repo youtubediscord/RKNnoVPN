@@ -118,6 +118,7 @@
     <string name="dns_custom_hint">https://dns.example.com/dns-query</string>
     <string name="settings_advanced">Расширенные</string>
     <string name="log_level">Уровень лога</string>
+    <string name="urltest_url">URL для проверки</string>
     <string name="settings_module">Модуль</string>
     <string name="module_version">Версия</string>
     <string name="daemon_status">Статус демона</string>

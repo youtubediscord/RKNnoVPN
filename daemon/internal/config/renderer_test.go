@@ -62,6 +62,9 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 	}
 
 	rules := rendered["route"].(map[string]any)["rules"].([]any)
+	if rendered["route"].(map[string]any)["default_domain_resolver"] != "direct-dns" {
+		t.Fatalf("route should define default_domain_resolver: %#v", rendered["route"])
+	}
 	if rules[0].(map[string]any)["action"] != "sniff" {
 		t.Fatalf("first route rule should sniff tproxy traffic: %#v", rules[0])
 	}

@@ -1006,10 +1006,11 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	}
 
 	route := map[string]interface{}{
-		"rules":                 rules,
-		"final":                 "proxy",
-		"default_mark":          255,
-		"auto_detect_interface": true,
+		"rules":                   rules,
+		"final":                   "proxy",
+		"default_domain_resolver": "direct-dns",
+		"default_mark":            255,
+		"auto_detect_interface":   true,
 	}
 
 	// Build rule sets for geo databases.

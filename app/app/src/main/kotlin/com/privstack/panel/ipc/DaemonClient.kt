@@ -4,6 +4,7 @@ import com.privstack.panel.`import`.UriExporter
 import com.privstack.panel.model.AppInfo
 import com.privstack.panel.model.AuditReport
 import com.privstack.panel.model.DaemonStatus
+import com.privstack.panel.model.HealthConfig
 import com.privstack.panel.model.Node
 import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.model.InboundsConfig
@@ -97,12 +98,23 @@ class DaemonClient @Inject constructor(
         val routingResult = fetchSection("routing")
         val appsResult = fetchSection("apps")
         val dnsResult = fetchSection("dns")
+        val healthResult = fetchSection("health")
 
         val node = nodeResult.dataOrReturnFailure() ?: return nodeResult.asFailure()
         val transport = transportResult.dataOrReturnFailure() ?: return transportResult.asFailure()
         val routing = routingResult.dataOrReturnFailure() ?: return routingResult.asFailure()
         val apps = appsResult.dataOrReturnFailure() ?: return appsResult.asFailure()
         val dns = dnsResult.dataOrReturnFailure() ?: return dnsResult.asFailure()
+        val health = when (healthResult) {
+            is DaemonClientResult.Ok -> healthResult.data
+            is DaemonClientResult.DaemonError ->
+                if (healthResult.message.contains("unknown config key: health", ignoreCase = true)) {
+                    json.encodeToJsonElement(DaemonHealthSection.serializer(), DaemonHealthSection())
+                } else {
+                    return healthResult
+                }
+            else -> return healthResult.asFailure()
+        }
 
         val panelResult = fetchSection("panel")
         val panel = when (panelResult) {
@@ -121,6 +133,7 @@ class DaemonClient @Inject constructor(
         val routingSection = json.decodeFromJsonElement(DaemonRoutingSection.serializer(), routing)
         val appsSection = json.decodeFromJsonElement(DaemonAppsSection.serializer(), apps)
         val dnsSection = json.decodeFromJsonElement(DaemonDnsSection.serializer(), dns)
+        val healthSection = json.decodeFromJsonElement(DaemonHealthSection.serializer(), health)
 
         val storedNodes = panel.nodes
         val effectiveNodes = if (storedNodes.isNotEmpty()) {
@@ -141,6 +154,7 @@ class DaemonClient @Inject constructor(
             panel.extra?.let { put("panel", it) }
             put("routing_raw", routing)
             put("dns_raw", dns)
+            put("health_raw", health)
         }
 
         return DaemonClientResult.Ok(
@@ -151,6 +165,7 @@ class DaemonClient @Inject constructor(
                 nodes = effectiveNodes,
                 routing = routingSection.toPanelRouting(appsSection),
                 dns = dnsSection.toPanelDns(),
+                health = healthSection.toPanelHealth(),
                 tun = panel.tun ?: TunConfig(),
                 inbounds = panel.inbounds ?: InboundsConfig(),
                 extra = extra,
@@ -167,6 +182,7 @@ class DaemonClient @Inject constructor(
         val daemonRouting = config.routing.toDaemonRoutingSection(extra?.obj("routing_raw"))
         val daemonApps = config.routing.toDaemonAppsSection()
         val daemonDns = config.dns.toDaemonDnsSection(extra?.obj("dns_raw"))
+        val daemonHealth = config.health.toDaemonHealthSection(extra?.obj("health_raw"))
         val daemonPanel = DaemonPanelSection(
             id = config.id,
             name = config.name,
@@ -184,6 +200,7 @@ class DaemonClient @Inject constructor(
             put("routing", json.encodeToJsonElement(DaemonRoutingSection.serializer(), daemonRouting))
             put("apps", json.encodeToJsonElement(DaemonAppsSection.serializer(), daemonApps))
             put("dns", json.encodeToJsonElement(DaemonDnsSection.serializer(), daemonDns))
+            put("health", json.encodeToJsonElement(DaemonHealthSection.serializer(), daemonHealth))
         }
         val params = buildJsonObject {
             put("values", values)
@@ -234,14 +251,16 @@ class DaemonClient @Inject constructor(
 
     suspend fun nodeTest(
         nodeIds: List<String> = emptyList(),
-        url: String = "https://www.gstatic.com/generate_204",
+        url: String = "",
         timeoutMs: Int = 5_000,
     ): DaemonClientResult<NodeTestInfo> {
         val params = buildJsonObject {
             putJsonArray("node_ids") {
                 nodeIds.forEach { add(it) }
             }
-            put("url", url)
+            if (url.isNotBlank()) {
+                put("url", url)
+            }
             put("timeout_ms", timeoutMs)
         }
         return call("node-test", params, timeoutMs = timeoutMs.toLong() + 5_000L) { element ->
@@ -837,6 +856,27 @@ private data class DaemonDnsSection(
         )
 }
 
+@Serializable
+private data class DaemonHealthSection(
+    val enabled: Boolean = true,
+    @SerialName("interval_sec")
+    val intervalSec: Int = 30,
+    val threshold: Int = 3,
+    @SerialName("check_url")
+    val checkUrl: String = "https://www.gstatic.com/generate_204",
+    @SerialName("timeout_sec")
+    val timeoutSec: Int = 5,
+) {
+    fun toPanelHealth(): HealthConfig =
+        HealthConfig(
+            enabled = enabled,
+            intervalSec = intervalSec,
+            threshold = threshold,
+            checkUrl = checkUrl,
+            timeoutSec = timeoutSec,
+        )
+}
+
 private fun DaemonClientResult<JsonElement>.dataOrReturnFailure(): JsonElement? =
     (this as? DaemonClientResult.Ok)?.data
 
@@ -895,6 +935,18 @@ private fun com.privstack.panel.model.DnsConfig.toDaemonDnsSection(base: JsonObj
         put("fake_ip", fakeDns)
     }
     return bridgeJson.decodeFromJsonElement(DaemonDnsSection.serializer(), merged)
+}
+
+private fun HealthConfig.toDaemonHealthSection(base: JsonObject?): DaemonHealthSection {
+    val merged = buildJsonObject {
+        base?.forEach { (key, value) -> put(key, value) }
+        put("enabled", enabled)
+        put("interval_sec", intervalSec)
+        put("threshold", threshold)
+        put("check_url", checkUrl)
+        put("timeout_sec", timeoutSec)
+    }
+    return bridgeJson.decodeFromJsonElement(DaemonHealthSection.serializer(), merged)
 }
 
 private fun Node.toDaemonNodeSection(): DaemonNodeSection {
