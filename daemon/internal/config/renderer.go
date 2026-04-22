@@ -52,12 +52,11 @@ func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
 func buildDNS(cfg *Config) map[string]interface{} {
 	servers := []map[string]interface{}{
 		buildDNSServer("remote-dns", cfg.DNS.ProxyDNS, "proxy"),
-		buildDNSServer("direct-dns", cfg.DNS.DirectDNS, "direct"),
+		buildDNSServer("direct-dns", cfg.DNS.DirectDNS, ""),
 		{
 			"type":   "udp",
 			"tag":    "bootstrap-dns",
 			"server": cfg.DNS.BootstrapIP,
-			"detour": "direct",
 		},
 	}
 
@@ -130,8 +129,10 @@ func buildDNS(cfg *Config) map[string]interface{} {
 
 func buildDNSServer(tag, address, detour string) map[string]interface{} {
 	server := map[string]interface{}{
-		"tag":    tag,
-		"detour": detour,
+		"tag": tag,
+	}
+	if detour != "" {
+		server["detour"] = detour
 	}
 
 	parsed, err := url.Parse(address)
@@ -1010,7 +1011,6 @@ func buildRoute(cfg *Config) map[string]interface{} {
 		"final":                   "proxy",
 		"default_domain_resolver": "direct-dns",
 		"default_mark":            255,
-		"auto_detect_interface":   true,
 	}
 
 	// Build rule sets for geo databases.

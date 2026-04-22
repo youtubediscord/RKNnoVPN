@@ -49,6 +49,9 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 		if _, ok := server["address_resolver"]; ok {
 			t.Fatalf("legacy DNS server address_resolver field rendered: %#v", server)
 		}
+		if tag := server["tag"]; (tag == "direct-dns" || tag == "bootstrap-dns") && server["detour"] == "direct" {
+			t.Fatalf("DNS server must not detour through empty direct outbound: %#v", server)
+		}
 	}
 
 	for _, rawInbound := range rendered["inbounds"].([]any) {
@@ -64,6 +67,9 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 	rules := rendered["route"].(map[string]any)["rules"].([]any)
 	if rendered["route"].(map[string]any)["default_domain_resolver"] != "direct-dns" {
 		t.Fatalf("route should define default_domain_resolver: %#v", rendered["route"])
+	}
+	if _, ok := rendered["route"].(map[string]any)["auto_detect_interface"]; ok {
+		t.Fatalf("route should not require default interface during service start: %#v", rendered["route"])
 	}
 	if rules[0].(map[string]any)["action"] != "sniff" {
 		t.Fatalf("first route rule should sniff tproxy traffic: %#v", rules[0])
