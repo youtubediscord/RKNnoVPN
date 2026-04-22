@@ -26,6 +26,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -34,11 +35,11 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -67,6 +68,8 @@ import java.util.concurrent.atomic.AtomicReference
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImportSheet(
+    initialTab: ImportSheetTab,
+    initialText: String,
     candidates: List<ImportCandidate>,
     isLoading: Boolean,
     errorMessage: String?,
@@ -77,7 +80,7 @@ fun ImportSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by remember(initialTab) { mutableStateOf(initialTab) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -95,10 +98,10 @@ fun ImportSheet(
                 modifier = Modifier.padding(bottom = 16.dp),
             )
 
-            TabRow(selectedTabIndex = selectedTab) {
+            TabRow(selectedTabIndex = selectedTab.ordinal) {
                 Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
+                    selected = selectedTab == ImportSheetTab.PASTE_URI,
+                    onClick = { selectedTab = ImportSheetTab.PASTE_URI },
                     text = { Text(stringResource(R.string.tab_paste_uri)) },
                     icon = {
                         Icon(
@@ -109,8 +112,8 @@ fun ImportSheet(
                     },
                 )
                 Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
+                    selected = selectedTab == ImportSheetTab.SCAN_QR,
+                    onClick = { selectedTab = ImportSheetTab.SCAN_QR },
                     text = { Text(stringResource(R.string.tab_scan_qr)) },
                     icon = {
                         Icon(
@@ -121,8 +124,8 @@ fun ImportSheet(
                     },
                 )
                 Tab(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
+                    selected = selectedTab == ImportSheetTab.SUBSCRIPTION,
+                    onClick = { selectedTab = ImportSheetTab.SUBSCRIPTION },
                     text = { Text(stringResource(R.string.tab_subscription)) },
                     icon = {
                         Icon(
@@ -137,9 +140,15 @@ fun ImportSheet(
             Spacer(modifier = Modifier.height(16.dp))
 
             when (selectedTab) {
-                0 -> PasteUriTab(onDetectUris = onDetectUris)
-                1 -> ScanQrTab(onQrDetected = onDetectUris)
-                2 -> SubscriptionTab(onFetchSubscription = onFetchSubscription)
+                ImportSheetTab.PASTE_URI -> PasteUriTab(
+                    initialText = if (initialTab == ImportSheetTab.PASTE_URI) initialText else "",
+                    onDetectUris = onDetectUris,
+                )
+                ImportSheetTab.SCAN_QR -> ScanQrTab(onQrDetected = onDetectUris)
+                ImportSheetTab.SUBSCRIPTION -> SubscriptionTab(
+                    initialUrl = if (initialTab == ImportSheetTab.SUBSCRIPTION) initialText else "",
+                    onFetchSubscription = onFetchSubscription,
+                )
             }
 
             if (errorMessage != null) {
@@ -223,9 +232,11 @@ fun ImportSheet(
 
 @Composable
 private fun PasteUriTab(
+    initialText: String,
     onDetectUris: (String) -> Unit,
 ) {
-    var text by remember { mutableStateOf("") }
+    val clipboardManager = LocalClipboardManager.current
+    var text by remember(initialText) { mutableStateOf(initialText) }
 
     OutlinedTextField(
         value = text,
@@ -239,12 +250,44 @@ private fun PasteUriTab(
 
     Spacer(modifier = Modifier.height(12.dp))
 
-    FilledTonalButton(
-        onClick = { onDetectUris(text) },
-        enabled = text.isNotBlank(),
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(stringResource(R.string.detect_uris))
+        OutlinedButton(
+            onClick = {
+                val clipboardText = clipboardManager.getText()?.text.orEmpty()
+                if (clipboardText.isNotBlank()) {
+                    text = clipboardText
+                    onDetectUris(clipboardText)
+                }
+            },
+            modifier = Modifier.weight(1f),
+        ) {
+            Icon(
+                Icons.Filled.ContentPaste,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text(
+                text = stringResource(R.string.paste_from_clipboard),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        FilledTonalButton(
+            onClick = { onDetectUris(text) },
+            enabled = text.isNotBlank(),
+            modifier = Modifier.weight(1f),
+        ) {
+            Text(
+                text = stringResource(R.string.detect_uris),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -381,9 +424,10 @@ private fun scanBarcode(
 
 @Composable
 private fun SubscriptionTab(
+    initialUrl: String,
     onFetchSubscription: (String) -> Unit,
 ) {
-    var url by remember { mutableStateOf("") }
+    var url by remember(initialUrl) { mutableStateOf(initialUrl) }
 
     OutlinedTextField(
         value = url,

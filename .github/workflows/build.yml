@@ -16,11 +16,21 @@ env:
 
 jobs:
   # ============================================================
-  # Job 1: Build Go daemon (privd + privctl) for arm64
+  # Job 1: Build Go daemon (privd + privctl) for Android ABIs
   # ============================================================
   build-daemon:
-    name: Build Daemon (arm64)
+    name: Build Daemon (${{ matrix.arch }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            goarch: arm64
+            goarm: ""
+          - arch: armv7
+            goarch: arm
+            goarm: "7"
     steps:
       - uses: actions/checkout@v4
 
@@ -37,9 +47,10 @@ jobs:
           else
             VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
           fi
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
+          mkdir -p "../out/${{ matrix.arch }}"
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
             -ldflags="-s -w -X main.Version=${VERSION}" \
-            -o ../out/privd ./cmd/privd
+            -o "../out/${{ matrix.arch }}/privd" ./cmd/privd
 
       - name: Build privctl
         working-directory: daemon
@@ -49,40 +60,49 @@ jobs:
           else
             VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
           fi
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
+          mkdir -p "../out/${{ matrix.arch }}"
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
             -ldflags="-s -w -X main.Version=${VERSION}" \
-            -o ../out/privctl ./cmd/privctl
+            -o "../out/${{ matrix.arch }}/privctl" ./cmd/privctl
 
       - name: Upload daemon artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: daemon-arm64
-          path: out/
+          name: daemon-${{ matrix.arch }}
+          path: out/${{ matrix.arch }}/
           retention-days: 1
 
   # ============================================================
-  # Job 2: Download sing-box arm64 binary
+  # Job 2: Download Android sing-box binaries
   # ============================================================
   fetch-singbox:
-    name: Fetch sing-box
+    name: Fetch sing-box (${{ matrix.arch }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            asset_arch: android-arm64
+          - arch: armv7
+            asset_arch: android-arm
     steps:
       - name: Download sing-box
         run: |
-          mkdir -p out
-          DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-arm64.tar.gz"
+          mkdir -p "out/${{ matrix.arch }}"
+          DOWNLOAD_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-${{ matrix.asset_arch }}.tar.gz"
           echo "Downloading sing-box v${SINGBOX_VERSION} from $DOWNLOAD_URL"
           curl -fSL "$DOWNLOAD_URL" -o singbox.tar.gz
           tar xzf singbox.tar.gz
-          cp sing-box-${SINGBOX_VERSION}-linux-arm64/sing-box out/sing-box
-          chmod 755 out/sing-box
-          sha256sum out/sing-box
+          cp "sing-box-${SINGBOX_VERSION}-${{ matrix.asset_arch }}/sing-box" "out/${{ matrix.arch }}/sing-box"
+          chmod 755 "out/${{ matrix.arch }}/sing-box"
+          sha256sum "out/${{ matrix.arch }}/sing-box"
 
       - name: Upload sing-box artifact
         uses: actions/upload-artifact@v4
         with:
-          name: singbox-arm64
-          path: out/
+          name: singbox-${{ matrix.arch }}
+          path: out/${{ matrix.arch }}/
           retention-days: 1
 
   # ============================================================
@@ -101,14 +121,26 @@ jobs:
           name: daemon-arm64
           path: module/binaries/arm64/
 
+      - name: Download daemon binaries (armv7)
+        uses: actions/download-artifact@v4
+        with:
+          name: daemon-armv7
+          path: module/binaries/armv7/
+
       - name: Download sing-box binary
         uses: actions/download-artifact@v4
         with:
           name: singbox-arm64
           path: module/binaries/arm64/
 
+      - name: Download sing-box binary (armv7)
+        uses: actions/download-artifact@v4
+        with:
+          name: singbox-armv7
+          path: module/binaries/armv7/
+
       - name: Set permissions
-        run: chmod 755 module/binaries/arm64/*
+        run: chmod 755 module/binaries/arm64/* module/binaries/armv7/*
 
       - name: Stamp version in module.prop
         run: |

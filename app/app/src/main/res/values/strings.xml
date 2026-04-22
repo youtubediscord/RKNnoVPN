@@ -71,6 +71,7 @@
     <string name="tab_scan_qr">Scan QR</string>
     <string name="tab_subscription">Subscription</string>
     <string name="paste_uri_hint">Paste vless://, trojan://, ss://, hysteria2://, tuic:// links…</string>
+    <string name="paste_from_clipboard">Paste</string>
     <string name="detect_uris">Detect URIs</string>
     <string name="camera_permission_button">Allow camera</string>
     <string name="subscription_url_hint">https://example.com/sub</string>

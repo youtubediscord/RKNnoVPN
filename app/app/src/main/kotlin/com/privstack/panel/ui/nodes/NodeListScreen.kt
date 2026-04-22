@@ -42,6 +42,8 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -56,8 +59,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.privstack.panel.R
+import com.privstack.panel.`import`.ClipboardWatcher
 import com.privstack.panel.model.Node
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,8 +73,30 @@ fun NodeListScreen(
     viewModel: NodeListViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var nodeToDelete by remember { mutableStateOf<Node?>(null) }
     var nodeToEdit by remember { mutableStateOf<Node?>(null) }
+
+    fun checkClipboardForImport() {
+        ClipboardWatcher.check(context)?.let(viewModel::showClipboardImport)
+    }
+
+    LaunchedEffect(context) {
+        checkClipboardForImport()
+    }
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                checkClipboardForImport()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Scaffold(
         floatingActionButton = {
@@ -138,6 +167,8 @@ fun NodeListScreen(
 
     if (state.showImportSheet) {
         ImportSheet(
+            initialTab = state.importSheetTab,
+            initialText = state.importInitialText,
             candidates = state.importCandidates,
             isLoading = state.isLoading,
             errorMessage = state.errorMessage,

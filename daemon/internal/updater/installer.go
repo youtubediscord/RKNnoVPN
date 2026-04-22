@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -41,6 +42,7 @@ const (
 //  7. Set correct permissions
 //  8. Verify the new privd binary can at least print its version
 //  9. Fork the new privd daemon
+//
 // 10. Schedule self-termination of the old daemon (after IPC response)
 //
 // If any step before the fork fails, binaries are rolled back from backup
@@ -112,8 +114,12 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	}
 
 	// --- 4. Atomically replace binaries ---
-	// Binaries may be in <staging>/binaries/arm64/ or directly in <staging>/.
-	stagedBinDir := findSubdir(staging, "binaries", "arm64")
+	// Binaries may be in <staging>/binaries/<device-arch>/ or directly in <staging>/.
+	stagedBinDir, err := stagedBinaryDir(staging)
+	if err != nil {
+		rollbackBinaries()
+		return err
+	}
 	if stagedBinDir == "" {
 		stagedBinDir = staging
 	}
@@ -366,6 +372,43 @@ func execScriptWithEnv(scriptPath string, action string, env []string) error {
 		return fmt.Errorf("%s %s: %s: %w", scriptPath, action, string(output), err)
 	}
 	return nil
+}
+
+func stagedBinaryDir(staging string) (string, error) {
+	binariesRoot := filepath.Join(staging, "binaries")
+	info, err := os.Stat(binariesRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("stat binaries dir: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory", binariesRoot)
+	}
+
+	arch := runtimeBinaryArch()
+	if dir := findSubdir(staging, "binaries", arch); dir != "" {
+		return dir, nil
+	}
+	if arch == "armv7" {
+		if dir := findSubdir(staging, "binaries", "arm"); dir != "" {
+			return dir, nil
+		}
+	}
+
+	return "", fmt.Errorf("module update does not contain binaries for %s", arch)
+}
+
+func runtimeBinaryArch() string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return "arm64"
+	case "arm":
+		return "armv7"
+	default:
+		return runtime.GOARCH
+	}
 }
 
 // verifyBinary runs the binary with --help (or -h) and checks that it

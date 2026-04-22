@@ -105,8 +105,8 @@ make all
 ### Individual Components
 
 ```bash
-make daemon    # Build privd + privctl (arm64)
-make singbox   # Download sing-box binary
+make daemon    # Build privd + privctl (arm64 + armeabi-v7a)
+make singbox   # Download Android sing-box binaries
 make module    # Assemble Magisk ZIP
 make apk       # Build Android APK
 ```

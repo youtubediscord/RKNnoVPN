@@ -3,6 +3,7 @@ package com.privstack.panel.ui.nodes
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.privstack.panel.`import`.ClipboardWatcher
 import com.privstack.panel.`import`.LinkParser
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
@@ -19,6 +20,7 @@ import javax.inject.Inject
 private const val TAG = "NodeListViewModel"
 
 enum class NodeSortMode { NAME, LATENCY, COUNTRY }
+enum class ImportSheetTab { PASTE_URI, SCAN_QR, SUBSCRIPTION }
 
 data class NodeListUiState(
     val groups: List<String> = listOf("Default"),
@@ -27,6 +29,8 @@ data class NodeListUiState(
     val activeNodeId: String? = null,
     val sortMode: NodeSortMode = NodeSortMode.NAME,
     val showImportSheet: Boolean = false,
+    val importSheetTab: ImportSheetTab = ImportSheetTab.PASTE_URI,
+    val importInitialText: String = "",
     /** Nodes parsed from import input, waiting for user selection. */
     val importCandidates: List<ImportCandidate> = emptyList(),
     val isLoading: Boolean = false,
@@ -202,18 +206,57 @@ class NodeListViewModel @Inject constructor(
 
     fun showImportSheet() {
         _uiState.update {
-            it.copy(showImportSheet = true, importCandidates = emptyList(), errorMessage = null)
+            it.copy(
+                showImportSheet = true,
+                importSheetTab = ImportSheetTab.PASTE_URI,
+                importInitialText = "",
+                importCandidates = emptyList(),
+                errorMessage = null,
+            )
         }
     }
 
     fun hideImportSheet() {
         _uiState.update {
-            it.copy(showImportSheet = false, importCandidates = emptyList(), errorMessage = null)
+            it.copy(
+                showImportSheet = false,
+                importInitialText = "",
+                importCandidates = emptyList(),
+                errorMessage = null,
+            )
         }
     }
 
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    fun showClipboardImport(preview: ClipboardWatcher.ImportPreview) {
+        if (preview.isSubscription) {
+            _uiState.update {
+                it.copy(
+                    showImportSheet = true,
+                    importSheetTab = ImportSheetTab.SUBSCRIPTION,
+                    importInitialText = preview.rawText.trim(),
+                    importCandidates = emptyList(),
+                    errorMessage = null,
+                )
+            }
+            return
+        }
+
+        val candidates = preview.parsedNodes.map { ImportCandidate(node = it, selected = true) }
+        if (candidates.isEmpty()) return
+
+        _uiState.update {
+            it.copy(
+                showImportSheet = true,
+                importSheetTab = ImportSheetTab.PASTE_URI,
+                importInitialText = preview.rawText,
+                importCandidates = candidates,
+                errorMessage = null,
+            )
+        }
     }
 
     /**

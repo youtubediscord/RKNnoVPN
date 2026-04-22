@@ -71,6 +71,7 @@
     <string name="tab_scan_qr">Сканировать QR</string>
     <string name="tab_subscription">Подписка</string>
     <string name="paste_uri_hint">Вставьте ссылки vless://, trojan://, ss://, hysteria2://, tuic://…</string>
+    <string name="paste_from_clipboard">Из буфера</string>
     <string name="detect_uris">Определить URI</string>
     <string name="camera_permission_button">Разрешить камеру</string>
     <string name="subscription_url_hint">https://example.com/sub</string>

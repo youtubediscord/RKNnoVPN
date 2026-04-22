@@ -71,10 +71,15 @@ check_architecture() {
     ARCH="$(getprop ro.product.cpu.abi)"
     case "$ARCH" in
         arm64-v8a|arm64*)
-            ui_print "  [*] Architecture: $ARCH (OK)"
+            ARCH_DIR="arm64"
+            ui_print "  [*] Architecture: $ARCH -> ${ARCH_DIR} (OK)"
+            ;;
+        armeabi-v7a|armeabi|armv7*|arm*)
+            ARCH_DIR="armv7"
+            ui_print "  [*] Architecture: $ARCH -> ${ARCH_DIR} (OK)"
             ;;
         *)
-            abort_install "Unsupported architecture: $ARCH. Only arm64 is supported."
+            abort_install "Unsupported architecture: $ARCH. Supported: arm64-v8a and armeabi-v7a."
             ;;
     esac
 }
@@ -205,15 +210,13 @@ install_default_config() {
 }
 
 install_binaries() {
-    SRC_BIN="${MODPATH}/binaries/arm64"
+    SRC_BIN="${MODPATH}/binaries/${ARCH_DIR:-arm64}"
 
     if [ ! -d "$SRC_BIN" ]; then
-        ui_print "  [!] No binaries directory at ${SRC_BIN}"
-        ui_print "  [!] Skipping binary installation — add them manually"
-        return
+        abort_install "No binaries directory for ${ARCH:-unknown} at ${SRC_BIN}"
     fi
 
-    ui_print "  [*] Installing binaries..."
+    ui_print "  [*] Installing ${ARCH_DIR:-arm64} binaries..."
 
     for bin_file in "$SRC_BIN"/*; do
         [ ! -f "$bin_file" ] && continue
