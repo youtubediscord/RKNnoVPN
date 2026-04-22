@@ -1,160 +1,217 @@
-# RKNnoVPN
+# RKNnoVPN / PrivStack
 
-**Transparent proxy for rooted Android — invisible to VPN detection.**
+Прозрачный прокси для rooted Android без `VpnService`, TUN-интерфейса и VPN-иконки.
 
-No VPN. No TUN. No icon. No `TRANSPORT_VPN`. Banking apps see nothing.
+Проект состоит из Magisk/KernelSU/APatch-модуля и Android-приложения-контроллера. Трафик выбранных приложений перехватывается на уровне ядра через `iptables TPROXY` и отправляется в `sing-box`.
 
-## How It Works
+## Что это даёт
 
+- Нет Android VPN API: приложения не видят `TRANSPORT_VPN`.
+- Нет `tun0` и системной VPN-иконки.
+- APK не имеет `INTERNET` permission и работает только как панель управления.
+- Можно проксировать только выбранные приложения, оставляя остальные напрямую.
+- Сохранённые серверы рендерятся в `sing-box` как отдельные outbounds.
+- Над несколькими серверами используется `urltest`, чтобы `sing-box` выбирал рабочий и быстрый outbound.
+- Поддерживается `arm64-v8a` и `armeabi-v7a`.
+
+## Как это работает
+
+```text
+Приложение Android
+  -> iptables mangle / TPROXY
+  -> sing-box tproxy inbound
+  -> urltest / outbound
+  -> прокси-сервер
 ```
-App traffic → iptables TPROXY → sing-box → proxy server
-```
 
-- Uses kernel-level `tproxy + iptables` instead of Android VPN
-- No `VpnService`, no TUN interface, no status bar icon
-- **Whitelist mode**: only selected apps go through proxy, everything else is direct
-- Full IPv4 + IPv6 support with mirrored rules
-- Tested against [RKNHardering](https://github.com/xtclovver/RKNHardering) → **NOT_DETECTED**
+APK вызывает `privctl` через `su`. `privctl` общается с root-демоном `privd` по Unix socket. `privd` хранит конфигурацию, рендерит `sing-box` config, запускает core, применяет iptables и выполняет health checks.
 
-## Components
+## Компоненты
 
-| Component | Description |
-|-----------|-------------|
-| **Magisk Module** | Shell scripts + Go daemon. Manages sing-box, iptables rules, DNS, health monitoring |
-| **Android APK** | Kotlin + Jetpack Compose controller. Zero network permissions. Talks to daemon via `su` |
+| Компонент | Назначение |
+|---|---|
+| Magisk-модуль | Скрипты установки, boot service, SELinux policy, `privd`, `privctl`, `sing-box` |
+| `privd` | root-демон: config, IPC, запуск core, iptables, DNS, health, update |
+| `privctl` | CLI-клиент для ручной диагностики и IPC-команд |
+| Android APK | Kotlin/Compose панель управления без сетевых разрешений |
+| `sing-box` | transport core: tproxy inbound, outbounds, `urltest`, Clash API для delay-тестов |
 
-## Quick Start
+## Быстрый старт
 
-1. Download from [Releases](../../releases/latest):
-   - `privstack-vX.X.X-module.zip` — Magisk module
-   - `privstack-vX.X.X-panel.apk` — Controller app
+1. Скачайте свежий релиз:
+   - `privstack-vX.X.X-module.zip`
+   - `privstack-vX.X.X-panel.apk`
 
-2. Flash module via **Magisk Manager** / **KSU Manager** / **APatch**
+2. Прошейте module ZIP через Magisk Manager / KernelSU Manager / APatch.
 
-3. Reboot
+3. Перезагрузите устройство.
 
-4. Install and open the APK
+4. Установите APK.
 
-5. Add a server: paste a `vless://`, `trojan://`, `ss://`, `hysteria2://`, or `tuic://` link
+5. Добавьте сервер на вкладке `Серверы`:
+   - вставкой ссылки;
+   - QR-кодом;
+   - подпиской.
 
-6. Go to **Apps** tab → select which apps to proxy
+6. На вкладке `Приложения` выберите приложения для проксирования.
 
-7. Tap **Connect**
+7. Нажмите `Подключить`.
 
-## Supported Protocols
+## Поддерживаемые протоколы
 
-| Protocol | Status |
-|----------|--------|
-| VLESS + Reality | Primary (recommended) |
-| VLESS + TLS | Supported |
-| Trojan | Supported |
-| VMess | Supported |
-| Shadowsocks 2022 | Supported |
-| SOCKS4/SOCKS5 upstream | Supported |
-| Hysteria2 | Supported (sing-box) |
-| TUIC v5 | Supported (sing-box) |
-| AmneziaWG | Planned (via wireproxy-awg) |
+| Протокол | Статус |
+|---|---|
+| VLESS + Reality | основной сценарий |
+| VLESS + TLS | поддерживается |
+| Trojan | поддерживается |
+| VMess | поддерживается |
+| Shadowsocks / Shadowsocks 2022 | поддерживается |
+| SOCKS4 / SOCKS5 upstream | поддерживается |
+| Hysteria2 | поддерживается через `sing-box` |
+| TUIC v5 | поддерживается через `sing-box` |
+| WireGuard | запланирован; `sing-box` собирается с `with_wireguard` |
+| AmneziaWG | отдельный будущий слой, не равен обычному WireGuard |
 
-## Import Formats
+## Форматы импорта
 
-- `vless://`, `vmess://`, `trojan://`, `ss://`, `socks://`, `socks5://`, `hysteria2://`, `hy2://`, `tuic://` URIs
-- Amnezia `vpn://` format
-- Subscription URLs (base64-encoded URI lists)
-- QR codes
-- Clash YAML (planned)
-- v2rayNG JSON backup (planned)
+Поддерживаются:
 
-## Detection Resistance
+- `vless://`
+- `vmess://`
+- `trojan://`
+- `ss://`
+- `socks://`, `socks4://`, `socks4a://`, `socks5://`
+- `hysteria2://`, `hy2://`
+- `tuic://`
+- `vpn://` Amnezia
+- подписки с base64/plain URI list
+- QR-коды
 
-Tested against all 6 modules of [RKNHardering](https://github.com/xtclovver/RKNHardering):
+Пока не реализовано:
 
-| Check | Result |
-|-------|--------|
-| `TRANSPORT_VPN` flag | Not set (no VpnService) |
-| TUN interface (`tun0`) | Not created |
-| VPN status bar icon | Not shown |
-| `NOT_VPN` capability | Present |
-| Package scan (23 VPN apps) | Not found (APK has no VPN indicators) |
-| SOCKS5/HTTP proxy scan | Not detected (TPROXY ≠ SOCKS5) |
-| Xray gRPC API scan | Blocked (iptables root-only) |
-| `/proc/net/tcp` scan | Invisible (SELinux, Android 10+) |
-| **VerdictEngine result** | **NOT_DETECTED** |
+- Clash YAML import;
+- sing-box JSON import;
+- v2rayNG backup import;
+- WireGuard `.conf` import.
 
-## APK Features
+## Выбор серверов и тесты
 
-- **Dashboard**: connection state, traffic graph, egress IP, latency
-- **Nodes**: server list with groups, latency test, import (paste/QR/subscription)
-- **Apps**: whitelist picker with templates (Browsers, Social, Streaming)
-- **Audit**: 14 security checks + Work Profile placement advisor
-- Material 3 with Dynamic Color (Android 12+)
-- Russian + English
+Все сохранённые nodes попадают в `sing-box` как outbounds. Если серверов несколько, `privd` рендерит `urltest` outbound с тегом `proxy`, а маршрут по умолчанию указывает на него.
 
-## Building
+В UI есть `Проверить все`:
 
-### Prerequisites
+- TCP connect показывает время соединения до адреса сервера.
+- URL delay показывает задержку реального запроса через конкретный outbound, если core уже запущен.
 
-- Go 1.22+ (for daemon)
-- JDK 17 + Android SDK (for APK)
-- Linux/macOS (for cross-compilation)
+Для белых списков важно смотреть не только TCP ping. Низкий ping не гарантирует нормальную скорость: при ограничении со стороны ТСПУ пакет может отвечать быстро, но реальный HTTP/HTTPS response будет идти секунды. Поэтому главная метрика для авто-выбора - URL response / delay, а ping используется как вспомогательная диагностика.
 
-### Quick Build
+## Режимы приложений
+
+Текущая модель:
+
+- один общий `urltest`/`proxy` outbound для выбранных приложений;
+- список приложений через прокси или список приложений в обход;
+- быстрые кнопки `Выбрать все` и `Снять весь выбор`.
+
+Планируемая модель:
+
+- несколько групп outbounds;
+- привязка `package -> outbound/tag`;
+- разные приложения через разные серверы или группы;
+- отдельные `urltest` группы для браузеров, мессенджеров и т.п.
+
+## Сборка
+
+Требования:
+
+- Go 1.22+ для `privd`/`privctl`;
+- Go 1.24.x для сборки актуального `sing-box`;
+- JDK 17 + Android SDK для APK;
+- Linux/macOS для кросс-сборки.
+
+Команды:
 
 ```bash
+make daemon    # privd + privctl для arm64 + armeabi-v7a
+make singbox   # статическая сборка sing-box для arm64 + armv7
+make module    # Magisk module ZIP
+make apk       # debug APK
 make all
 ```
 
-### Individual Components
+По умолчанию `make singbox` пытается взять последний релиз `sing-box` через GitHub CLI. Можно зафиксировать версию:
 
 ```bash
-make daemon    # Build privd + privctl (arm64 + armeabi-v7a)
-make singbox   # Build static sing-box binaries
-make module    # Assemble Magisk ZIP
-make apk       # Build Android APK
+make singbox SINGBOX_VERSION=1.14.0-alpha.16
 ```
 
-### CI/CD
+## CI/CD
 
-Push a tag to trigger automatic release:
+Тег `v*` запускает GitHub Actions:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.4.2
+git push origin v1.4.2
 ```
 
-GitHub Actions will build everything and create a release with downloadable artifacts.
+Workflow:
 
-## Architecture
+- собирает `privd`/`privctl` для `arm64` и `armv7`;
+- резолвит актуальный release `sing-box`;
+- собирает `sing-box` статически;
+- собирает module ZIP;
+- собирает APK;
+- создаёт GitHub Release;
+- обновляет `update.json`.
 
-```
-┌─────────────────────────────────────────────┐
-│              Android Device (rooted)         │
-│                                              │
-│  ┌──────────┐        ┌────────────────────┐  │
-│  │ APK      │ su -c  │ Magisk Module      │  │
-│  │ (no NET) │──────→ │ ┌────────────────┐ │  │
-│  │          │ privctl│ │ privd (daemon)  │ │  │
-│  └──────────┘        │ │ state machine   │ │  │
-│                      │ │ health monitor  │ │  │
-│                      │ └───────┬────────┘ │  │
-│                      │ ┌───────▼────────┐ │  │
-│                      │ │ sing-box       │ │  │
-│                      │ │ tproxy inbound │ │  │
-│                      │ └───────┬────────┘ │  │
-│                      │ ┌───────▼────────┐ │  │
-│                      │ │ iptables       │ │  │
-│                      │ │ mangle TPROXY  │ │  │
-│                      │ │ IPv4 + IPv6    │ │  │
-│                      │ └────────────────┘ │  │
-│                      └────────────────────┘  │
-└─────────────────────────────────────────────┘
+## Диагностика
+
+Проверка состояния:
+
+```sh
+su -c '/data/adb/privstack/bin/privctl status'
 ```
 
-## License
+Запуск:
+
+```sh
+su -c '/data/adb/privstack/bin/privctl start'
+```
+
+Логи core:
+
+```sh
+su -c 'cat /data/adb/privstack/logs/sing-box.log'
+```
+
+Логи daemon:
+
+```sh
+su -c '/data/adb/privstack/bin/privctl logs {"lines":100}'
+```
+
+Проверка всех nodes:
+
+```sh
+su -c '/data/adb/privstack/bin/privctl node-test'
+```
+
+Если `sing-box` упал до открытия порта `10853`, ошибка в приложении должна содержать хвост `sing-box.log`.
+
+## Что пока не готово
+
+- VPN sharing / раздача как в NetProxy.
+- Per-app multi-proxy с привязкой каждого приложения к отдельному outbound.
+- WireGuard import и renderer.
+- AmneziaWG runtime.
+- Полный speed-throttle probe для диагностики второго типа белых списков.
+
+## Лицензия
 
 MIT
 
-## Credits
+## Благодарности
 
-- [sing-box](https://github.com/SagerNet/sing-box) — transport core
-- [box_for_magisk](https://github.com/taamarin/box_for_magisk) — reference implementation
-- [RKNHardering](https://github.com/xtclovver/RKNHardering) — threat model / test suite
+- [sing-box](https://github.com/SagerNet/sing-box)
+- [box_for_magisk](https://github.com/taamarin/box_for_magisk)
+- [RKNHardering](https://github.com/xtclovver/RKNHardering)
