@@ -125,7 +125,9 @@ class ProfileRepository @Inject constructor(
             _error.value = null
             try {
                 val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
-                    _error.value = "No profile loaded"
+                    if (_error.value.isNullOrBlank()) {
+                        _error.value = "No profile loaded"
+                    }
                     return@withLock emptyList()
                 }
 
@@ -185,7 +187,9 @@ class ProfileRepository @Inject constructor(
         _error.value = null
         try {
             val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
-                _error.value = "No profile loaded"
+                if (_error.value.isNullOrBlank()) {
+                    _error.value = "No profile loaded"
+                }
                 return@withLock false
             }
             val updated = transform(current)
