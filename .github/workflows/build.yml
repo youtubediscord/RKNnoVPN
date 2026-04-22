@@ -14,7 +14,7 @@ env:
   GO_VERSION: "1.22"
   SINGBOX_GO_VERSION: "1.24.x"
   SINGBOX_VERSION: "latest"
-  SINGBOX_TAGS: "with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0"
+  SINGBOX_TAGS: "with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0"
 
 jobs:
   # ============================================================

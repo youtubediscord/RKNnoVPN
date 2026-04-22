@@ -7,7 +7,7 @@ VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 OUT_DIR := out
 MODULE_DIR := module
 SINGBOX_SRC_DIR := /tmp/sing-box-$(SINGBOX_RESOLVED_VERSION)
-SINGBOX_TAGS := with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0
+SINGBOX_TAGS := with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0
 SINGBOX_LDFLAGS := -X 'github.com/sagernet/sing-box/constant.Version=$(SINGBOX_RESOLVED_VERSION)' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0 -s -w -buildid=
 
 .PHONY: all daemon daemon-arm64 daemon-armv7 singbox singbox-src singbox-arm64 singbox-armv7 apk module clean
