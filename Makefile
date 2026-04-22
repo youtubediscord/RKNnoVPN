@@ -1,7 +1,7 @@
 # PrivStack — Local Build Commands
 # Requires: Go 1.22+, Android SDK, JDK 17
 
-SINGBOX_VERSION := 1.13.8
+SINGBOX_VERSION := 1.14.0-alpha.16
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 OUT_DIR := out
 MODULE_DIR := module

@@ -13,7 +13,7 @@ permissions:
 env:
   GO_VERSION: "1.22"
   SINGBOX_GO_VERSION: "1.24.x"
-  SINGBOX_VERSION: "1.13.8"
+  SINGBOX_VERSION: "1.14.0-alpha.16"
   SINGBOX_TAGS: "with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0"
 
 jobs:
@@ -348,7 +348,7 @@ jobs:
             - **No VPN, no TUN, no icon** — uses tproxy+iptables at kernel level
             - **Whitelist mode** — only selected apps go through proxy
             - **Full IPv4+IPv6** — mirrored iptables/ip6tables rules
-            - **sing-box v${{ env.SINGBOX_VERSION }}** — VLESS, Trojan, VMess, SS, Hysteria2, TUIC
+            - **sing-box v${{ env.SINGBOX_VERSION }}** — VLESS, Trojan, VMess, SS, SOCKS, Hysteria2, TUIC
             - **Auto-recovery** — health monitor + rescue on failure
           files: |
             release/privstack-${{ steps.version.outputs.version }}-module.zip
