@@ -32,15 +32,25 @@ jobs:
       - name: Build privd
         working-directory: daemon
         run: |
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+          fi
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
-            -ldflags="-s -w -X main.Version=${{ github.ref_name || 'dev' }}" \
+            -ldflags="-s -w -X main.Version=${VERSION}" \
             -o ../out/privd ./cmd/privd
 
       - name: Build privctl
         working-directory: daemon
         run: |
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+          fi
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
-            -ldflags="-s -w -X main.Version=${{ github.ref_name || 'dev' }}" \
+            -ldflags="-s -w -X main.Version=${VERSION}" \
             -o ../out/privctl ./cmd/privctl
 
       - name: Upload daemon artifacts
@@ -102,12 +112,12 @@ jobs:
 
       - name: Stamp version in module.prop
         run: |
-          VERSION="${{ github.ref_name || 'dev' }}"
-          BUILD_NUM="${{ github.run_number }}"
-          if [[ "$VERSION" == v* ]]; then
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
             CODE=$(echo "$VERSION" | sed 's/v//;s/\.//g')
           else
-            CODE="$BUILD_NUM"
+            VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+            CODE="${GITHUB_RUN_NUMBER}"
           fi
           sed -i "s/^version=.*/version=${VERSION}/" module/module.prop
           sed -i "s/^versionCode=.*/versionCode=${CODE}/" module/module.prop
@@ -148,14 +158,13 @@ jobs:
 
       - name: Stamp version
         run: |
-          VERSION="${{ github.ref_name || 'dev' }}"
-          BUILD_NUM="${{ github.run_number }}"
-          if [[ "$VERSION" == v* ]]; then
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
             VER_NAME="$VERSION"
             VER_CODE=$(echo "$VERSION" | sed 's/v//;s/\.//g')
           else
-            VER_NAME="dev-build-${BUILD_NUM}"
-            VER_CODE="$BUILD_NUM"
+            VER_NAME="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+            VER_CODE="${GITHUB_RUN_NUMBER}"
           fi
           # Inject version into build.gradle.kts
           sed -i "s/versionName = \".*\"/versionName = \"${VER_NAME}\"/" app/app/build.gradle.kts
@@ -185,15 +194,28 @@ jobs:
           retention-days: 5
 
   # ============================================================
-  # Job 5: Create GitHub Release (on tag push only)
+  # Job 5: Create GitHub Release
   # ============================================================
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: [build-module, build-apk]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+            STABLE=true
+          else
+            VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+            STABLE=false
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "stable=${STABLE}" >> "$GITHUB_OUTPUT"
 
       - name: Download Magisk module
         uses: actions/download-artifact@v4
@@ -209,15 +231,16 @@ jobs:
 
       - name: Rename with version
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ steps.version.outputs.version }}"
           mv release/privstack-module.zip "release/privstack-${VERSION}-module.zip"
           mv release/privstack-panel.apk "release/privstack-${VERSION}-panel.apk"
           # Generate checksums
           cd release && sha256sum * > SHA256SUMS.txt && cd ..
 
       - name: Update update.json for Magisk manager
+        if: steps.version.outputs.stable == 'true'
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ steps.version.outputs.version }}"
           VERSION_CODE=$(echo "$VERSION" | sed 's/v//;s/\.//g')
           cat > update.json <<ENDJSON
           {
@@ -237,19 +260,21 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "PrivStack ${{ github.ref_name }}"
+          tag_name: ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: "PrivStack ${{ steps.version.outputs.version }}"
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.version.outputs.stable != 'true' }}
           generate_release_notes: true
           body: |
-            ## PrivStack ${{ github.ref_name }}
+            ## PrivStack ${{ steps.version.outputs.version }}
 
             ### Downloads
 
             | File | Description |
             |------|-------------|
-            | `privstack-${{ github.ref_name }}-module.zip` | Magisk/KernelSU/APatch module — flash via manager |
-            | `privstack-${{ github.ref_name }}-panel.apk` | Controller APK — install on same device |
+            | `privstack-${{ steps.version.outputs.version }}-module.zip` | Magisk/KernelSU/APatch module — flash via manager |
+            | `privstack-${{ steps.version.outputs.version }}-panel.apk` | Controller APK — install on same device |
 
             ### Quick Start
 
@@ -268,6 +293,6 @@ jobs:
             - **sing-box v${{ env.SINGBOX_VERSION }}** — VLESS, Trojan, VMess, SS, Hysteria2, TUIC
             - **Auto-recovery** — health monitor + rescue on failure
           files: |
-            release/privstack-${{ github.ref_name }}-module.zip
-            release/privstack-${{ github.ref_name }}-panel.apk
+            release/privstack-${{ steps.version.outputs.version }}-module.zip
+            release/privstack-${{ steps.version.outputs.version }}-panel.apk
             release/SHA256SUMS.txt
