@@ -31,6 +31,23 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 		}
 	}
 
+	dns := rendered["dns"].(map[string]any)
+	if _, ok := dns["independent_cache"]; ok {
+		t.Fatal("deprecated independent_cache field rendered")
+	}
+	for _, rawServer := range dns["servers"].([]any) {
+		server := rawServer.(map[string]any)
+		if _, ok := server["type"]; !ok {
+			t.Fatalf("legacy DNS server without type rendered: %#v", server)
+		}
+		if _, ok := server["address"]; ok {
+			t.Fatalf("legacy DNS server address field rendered: %#v", server)
+		}
+		if _, ok := server["address_resolver"]; ok {
+			t.Fatalf("legacy DNS server address_resolver field rendered: %#v", server)
+		}
+	}
+
 	for _, rawInbound := range rendered["inbounds"].([]any) {
 		inbound := rawInbound.(map[string]any)
 		if _, ok := inbound["sniff"]; ok {

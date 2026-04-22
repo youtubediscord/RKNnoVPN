@@ -3,6 +3,9 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -45,40 +48,23 @@ func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
 
 func buildDNS(cfg *Config) map[string]interface{} {
 	servers := []map[string]interface{}{
+		buildDNSServer("remote-dns", cfg.DNS.ProxyDNS, "proxy"),
+		buildDNSServer("direct-dns", cfg.DNS.DirectDNS, "direct"),
 		{
-			"tag":              "remote-dns",
-			"address":          cfg.DNS.ProxyDNS,
-			"address_resolver": "bootstrap-dns",
-			"detour":           "proxy",
-		},
-		{
-			"tag":              "direct-dns",
-			"address":          cfg.DNS.DirectDNS,
-			"address_resolver": "bootstrap-dns",
-			"detour":           "direct",
-		},
-		{
-			"tag":     "bootstrap-dns",
-			"address": cfg.DNS.BootstrapIP,
-			"detour":  "direct",
-		},
-		{
-			"tag":     "block-dns",
-			"address": "rcode://success",
+			"type":   "udp",
+			"tag":    "bootstrap-dns",
+			"server": cfg.DNS.BootstrapIP,
+			"detour": "direct",
 		},
 	}
 
-	rules := []map[string]interface{}{
-		{
-			"outbound": []string{"any"},
-			"server":   "bootstrap-dns",
-		},
-	}
+	rules := []map[string]interface{}{}
 
 	if cfg.Routing.BlockAds {
 		rules = append(rules, map[string]interface{}{
 			"rule_set": []string{"geosite-ads"},
-			"server":   "block-dns",
+			"action":   "predefined",
+			"rcode":    "NOERROR",
 		})
 	}
 
@@ -96,8 +82,8 @@ func buildDNS(cfg *Config) map[string]interface{} {
 		})
 	}
 
-	customDirectDomains, customDirectCIDRs := splitRuleInputs(cfg.Routing.CustomDirect)
-	customBlockDomains, customBlockCIDRs := splitRuleInputs(cfg.Routing.CustomBlock)
+	customDirectDomains, _ := splitRuleInputs(cfg.Routing.CustomDirect)
+	customBlockDomains, _ := splitRuleInputs(cfg.Routing.CustomBlock)
 
 	// Custom direct domains use direct DNS.
 	if len(customDirectDomains) > 0 {
@@ -107,44 +93,102 @@ func buildDNS(cfg *Config) map[string]interface{} {
 		})
 	}
 
-	if len(customDirectCIDRs) > 0 {
-		rules = append(rules, map[string]interface{}{
-			"ip_cidr": customDirectCIDRs,
-			"server":  "direct-dns",
-		})
-	}
-
 	// Custom blocked domains use block DNS.
 	if len(customBlockDomains) > 0 {
 		rules = append(rules, map[string]interface{}{
 			"domain": customBlockDomains,
-			"server": "block-dns",
-		})
-	}
-
-	if len(customBlockCIDRs) > 0 {
-		rules = append(rules, map[string]interface{}{
-			"ip_cidr": customBlockCIDRs,
-			"server":  "block-dns",
+			"action": "predefined",
+			"rcode":  "NOERROR",
 		})
 	}
 
 	dns := map[string]interface{}{
-		"servers":           servers,
-		"rules":             rules,
-		"final":             "remote-dns",
-		"independent_cache": true,
+		"servers": servers,
+		"rules":   rules,
+		"final":   "remote-dns",
 	}
 
 	if cfg.DNS.FakeIP {
-		dns["fakeip"] = map[string]interface{}{
-			"enabled":     true,
+		servers = append(servers, map[string]interface{}{
+			"type":        "fakeip",
+			"tag":         "fakeip",
 			"inet4_range": "198.18.0.0/15",
 			"inet6_range": "fc00::/18",
-		}
+		})
+		dns["servers"] = servers
+		dns["rules"] = append(rules, map[string]interface{}{
+			"query_type": []string{"A", "AAAA"},
+			"server":     "fakeip",
+		})
 	}
 
 	return dns
+}
+
+func buildDNSServer(tag, address, detour string) map[string]interface{} {
+	server := map[string]interface{}{
+		"tag":    tag,
+		"detour": detour,
+	}
+
+	parsed, err := url.Parse(address)
+	if err != nil || parsed.Scheme == "" {
+		server["type"] = "udp"
+		server["server"] = address
+		return server
+	}
+
+	switch parsed.Scheme {
+	case "https", "h3":
+		server["type"] = parsed.Scheme
+		host := parsed.Hostname()
+		if host == "" {
+			host = parsed.Host
+		}
+		server["server"] = host
+		if port := parsed.Port(); port != "" {
+			if parsedPort, err := strconv.Atoi(port); err == nil {
+				server["server_port"] = parsedPort
+			}
+		}
+		if parsed.Path != "" && parsed.Path != "/dns-query" {
+			server["path"] = parsed.Path
+		}
+		if net.ParseIP(host) == nil {
+			server["domain_resolver"] = "bootstrap-dns"
+		}
+	case "tls", "quic":
+		server["type"] = parsed.Scheme
+		host := parsed.Hostname()
+		if host == "" {
+			host = parsed.Host
+		}
+		server["server"] = host
+		if port := parsed.Port(); port != "" {
+			if parsedPort, err := strconv.Atoi(port); err == nil {
+				server["server_port"] = parsedPort
+			}
+		}
+		if net.ParseIP(host) == nil {
+			server["domain_resolver"] = "bootstrap-dns"
+		}
+	case "tcp", "udp":
+		server["type"] = parsed.Scheme
+		server["server"] = parsed.Hostname()
+		if server["server"] == "" {
+			server["server"] = parsed.Host
+		}
+		if port := parsed.Port(); port != "" {
+			if parsedPort, err := strconv.Atoi(port); err == nil {
+				server["server_port"] = parsedPort
+			}
+		}
+	default:
+		server["type"] = "udp"
+		server["server"] = address
+	}
+
+	return server
 }
 
 func buildInbounds(cfg *Config) []map[string]interface{} {
