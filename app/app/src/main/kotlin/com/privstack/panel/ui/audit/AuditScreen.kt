@@ -25,7 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -187,7 +187,10 @@ private fun AuditTab(viewModel: AuditViewModel) {
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
-            items(findings, key = { it.checkId.name }) { finding ->
+            itemsIndexed(
+                findings,
+                key = { index, finding -> "${category}_${finding.checkId.name}_${finding.title}_$index" },
+            ) { _, finding ->
                 FindingCard(finding = finding)
             }
         }

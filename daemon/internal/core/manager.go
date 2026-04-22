@@ -5,10 +5,12 @@ package core
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -137,8 +139,13 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	// 2. Spawn sing-box.
 	binPath := filepath.Join(m.dataDir, "bin", "sing-box")
 	cmd := exec.Command(binPath, "run", "-c", configPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	logFile, logPath, err := m.openSingBoxLog()
+	if err != nil {
+		m.state = StateStopped
+		return fmt.Errorf("core: open sing-box log: %w", err)
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{
 			Gid: m.coreGID(),
@@ -146,9 +153,11 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	}
 
 	if err := cmd.Start(); err != nil {
+		logFile.Close()
 		m.state = StateStopped
 		return fmt.Errorf("core: spawn sing-box: %w", err)
 	}
+	logFile.Close()
 	m.process = cmd.Process
 	m.pid = cmd.Process.Pid
 
@@ -159,8 +168,9 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	m.logger.Printf("sing-box spawned, pid=%d", m.pid)
 
 	// 3. Start a goroutine to reap the child so we don't leak zombies.
+	exitCh := make(chan error, 1)
 	go func() {
-		_ = cmd.Wait()
+		exitCh <- cmd.Wait()
 	}()
 
 	// 4. Wait for tproxy port.
@@ -168,7 +178,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	if tproxyPort == 0 {
 		tproxyPort = 10853
 	}
-	if err := WaitForPort("127.0.0.1", tproxyPort, 30*time.Second); err != nil {
+	if err := m.waitForPortOrExit(tproxyPort, 30*time.Second, exitCh, logPath); err != nil {
 		m.logger.Printf("port %d did not open in time, killing pid %d", tproxyPort, m.pid)
 		_ = m.process.Signal(syscall.SIGKILL)
 		m.process = nil
@@ -300,8 +310,13 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	// 3. Spawn new sing-box with the fresh config.
 	binPath := filepath.Join(m.dataDir, "bin", "sing-box")
 	cmd := exec.Command(binPath, "run", "-c", configPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	logFile, logPath, err := m.openSingBoxLog()
+	if err != nil {
+		m.state = StateDegraded
+		return fmt.Errorf("core: hot-swap open sing-box log: %w", err)
+	}
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{
 			Gid: m.coreGID(),
@@ -309,17 +324,20 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	}
 
 	if err := cmd.Start(); err != nil {
+		logFile.Close()
 		m.state = StateDegraded
 		return fmt.Errorf("core: hot-swap spawn: %w", err)
 	}
+	logFile.Close()
 	m.process = cmd.Process
 	m.pid = cmd.Process.Pid
 
 	pidPath := filepath.Join(m.dataDir, "run", "singbox.pid")
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
 
+	exitCh := make(chan error, 1)
 	go func() {
-		_ = cmd.Wait()
+		exitCh <- cmd.Wait()
 	}()
 
 	// 4. Wait for port.
@@ -327,7 +345,7 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	if tproxyPort == 0 {
 		tproxyPort = 10853
 	}
-	if err := WaitForPort("127.0.0.1", tproxyPort, 30*time.Second); err != nil {
+	if err := m.waitForPortOrExit(tproxyPort, 30*time.Second, exitCh, logPath); err != nil {
 		_ = m.process.Signal(syscall.SIGKILL)
 		m.state = StateDegraded
 		return fmt.Errorf("core: hot-swap port wait: %w", err)
@@ -339,6 +357,63 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.state = StateRunning
 	m.logger.Printf("hot-swap complete (pid=%d)", m.pid)
 	return nil
+}
+
+func (m *CoreManager) openSingBoxLog() (*os.File, string, error) {
+	logDir := filepath.Join(m.dataDir, "logs")
+	if err := os.MkdirAll(logDir, 0750); err != nil {
+		return nil, "", err
+	}
+	logPath := filepath.Join(logDir, "sing-box.log")
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0640)
+	if err != nil {
+		return nil, "", err
+	}
+	_, _ = fmt.Fprintf(file, "\n--- sing-box start %s ---\n", time.Now().Format(time.RFC3339))
+	return file, logPath, nil
+}
+
+func (m *CoreManager) waitForPortOrExit(port int, timeout time.Duration, exitCh <-chan error, logPath string) error {
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+
+		select {
+		case exitErr := <-exitCh:
+			tail := tailFile(logPath, 4096)
+			if tail != "" {
+				return fmt.Errorf("sing-box exited before listening on %s: %v; log tail: %s", addr, exitErr, tail)
+			}
+			return fmt.Errorf("sing-box exited before listening on %s: %v", addr, exitErr)
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				tail := tailFile(logPath, 4096)
+				if tail != "" {
+					return fmt.Errorf("port %s not listening after %s; sing-box log tail: %s", addr, timeout, tail)
+				}
+				return fmt.Errorf("port %s not listening after %s", addr, timeout)
+			}
+		}
+	}
+}
+
+func tailFile(path string, maxBytes int) string {
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	if len(data) > maxBytes {
+		data = data[len(data)-maxBytes:]
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // --------------------------------------------------------------------------
@@ -442,19 +517,19 @@ func (m *CoreManager) scriptEnv() map[string]string {
 	appUIDs := ResolvePackageUIDs(m.config.Apps.Packages)
 
 	return map[string]string{
-		"PRIVSTACK_DIR": m.dataDir,
-		"CORE_GID":      strconv.Itoa(gid),
-		"TPROXY_PORT":   strconv.Itoa(tproxyPort),
-		"DNS_PORT":      strconv.Itoa(dnsPort),
-		"API_PORT":      strconv.Itoa(apiPort),
-		"FWMARK":        fmt.Sprintf("0x%x", mark),
-		"ROUTE_TABLE":   "2023",
+		"PRIVSTACK_DIR":  m.dataDir,
+		"CORE_GID":       strconv.Itoa(gid),
+		"TPROXY_PORT":    strconv.Itoa(tproxyPort),
+		"DNS_PORT":       strconv.Itoa(dnsPort),
+		"API_PORT":       strconv.Itoa(apiPort),
+		"FWMARK":         fmt.Sprintf("0x%x", mark),
+		"ROUTE_TABLE":    "2023",
 		"ROUTE_TABLE_V6": "2024",
-		"APP_MODE":      appMode,
-		"APP_UIDS":      appUIDs,
-		"BYPASS_UIDS":   "1073",
-		"DNS_MODE":      dnsMode,
-		"PROXY_MODE":    "tproxy",
+		"APP_MODE":       appMode,
+		"APP_UIDS":       appUIDs,
+		"BYPASS_UIDS":    "1073",
+		"DNS_MODE":       dnsMode,
+		"PROXY_MODE":     "tproxy",
 	}
 }
 

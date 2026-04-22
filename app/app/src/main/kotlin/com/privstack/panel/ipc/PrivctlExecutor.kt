@@ -14,7 +14,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.BufferedReader
+import java.io.IOException
+import java.io.InputStream
 import java.io.InputStreamReader
+import java.io.InterruptedIOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.concurrent.thread
@@ -99,12 +102,10 @@ class PrivctlExecutor @Inject constructor() {
             var stdout = ""
             var stderr = ""
             val stdoutReader = thread(start = true, name = "privctl-stdout") {
-                stdout = BufferedReader(InputStreamReader(process.inputStream))
-                    .use { it.readText().trim() }
+                stdout = readStreamSafely(process.inputStream, "stdout")
             }
             val stderrReader = thread(start = true, name = "privctl-stderr") {
-                stderr = BufferedReader(InputStreamReader(process.errorStream))
-                    .use { it.readText().trim() }
+                stderr = readStreamSafely(process.errorStream, "stderr")
             }
 
             val exitCode = process.waitFor()
@@ -118,6 +119,18 @@ class PrivctlExecutor @Inject constructor() {
         } catch (e: Exception) {
             process?.destroy()
             cont.resume(PrivctlResult.UnexpectedError(e))
+        }
+    }
+
+    private fun readStreamSafely(stream: InputStream, streamName: String): String {
+        return try {
+            BufferedReader(InputStreamReader(stream)).use { it.readText().trim() }
+        } catch (e: InterruptedIOException) {
+            Log.d(TAG, "privctl $streamName reader interrupted")
+            ""
+        } catch (e: IOException) {
+            Log.d(TAG, "privctl $streamName reader closed: ${e.message}")
+            ""
         }
     }
 
