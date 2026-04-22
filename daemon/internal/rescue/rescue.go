@@ -279,6 +279,7 @@ func (r *RescueManager) scriptEnv() map[string]string {
 	}
 
 	appMode := core.MapAppMode(r.cfg.Apps.Mode)
+	panelInbounds := r.cfg.ResolvePanelInbounds()
 
 	dnsMode := "all"
 	if appMode == "off" {
@@ -296,6 +297,7 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		"TPROXY_PORT":    fmt.Sprintf("%d", tproxyPort),
 		"DNS_PORT":       fmt.Sprintf("%d", dnsPort),
 		"API_PORT":       fmt.Sprintf("%d", apiPort),
+		"HTTP_PORT":      fmt.Sprintf("%d", panelInbounds.HTTPPort),
 		"FWMARK":         fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":    "2023",
 		"ROUTE_TABLE_V6": "2024",

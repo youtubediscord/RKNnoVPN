@@ -116,6 +116,7 @@ validate_env() {
     # APP_UIDS and BYPASS_UIDS can be empty
     APP_UIDS="${APP_UIDS:-}"
     BYPASS_UIDS="${BYPASS_UIDS:-}"
+    HTTP_PORT="${HTTP_PORT:-10809}"
 }
 
 # ============================================================================
@@ -131,6 +132,7 @@ save_snapshot() {
 TPROXY_PORT=${TPROXY_PORT}
 DNS_PORT=${DNS_PORT}
 API_PORT=${API_PORT}
+HTTP_PORT=${HTTP_PORT}
 FWMARK=${FWMARK}
 ROUTE_TABLE=${ROUTE_TABLE}
 ROUTE_TABLE_V6=${ROUTE_TABLE_V6}
@@ -234,11 +236,13 @@ fi)
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -j RETURN
+-A ${CHAIN_OUT} -p tcp --dport ${HTTP_PORT} -j RETURN
 
 # 6. Bypass UIDs: specific UIDs that must always go direct.
 #    UID 1073 = NetworkStack — needed for captive portal detection.
@@ -341,11 +345,13 @@ fi)
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
+-A ${CHAIN_OUT} -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -j RETURN
+-A ${CHAIN_OUT} -p tcp --dport ${HTTP_PORT} -j RETURN
 
 # 6. Bypass UIDs
 $(for uid in ${BYPASS_UIDS}; do
@@ -592,6 +598,7 @@ do_start() {
     log_info "  TPROXY_PORT=${TPROXY_PORT}"
     log_info "  DNS_PORT=${DNS_PORT}"
     log_info "  API_PORT=${API_PORT}"
+    log_info "  HTTP_PORT=${HTTP_PORT}"
     log_info "  FWMARK=${FWMARK}"
     log_info "  CORE_GID=${CORE_GID}"
     log_info "  APP_UIDS=${APP_UIDS:-<none>}"

@@ -86,6 +86,14 @@ type PanelConfig struct {
 	Extra        json.RawMessage   `json:"extra,omitempty"`
 }
 
+// PanelInboundsConfig stores APK-owned local inbound settings that the daemon
+// may use for localhost-only helper ports.
+type PanelInboundsConfig struct {
+	SocksPort int  `json:"socksPort"`
+	HTTPPort  int  `json:"httpPort"`
+	AllowLAN  bool `json:"allowLan"`
+}
+
 // RoutingConfig controls traffic routing rules.
 type RoutingConfig struct {
 	Mode             string   `json:"mode"` // "all", "whitelist", "blacklist", "rules", "direct"
@@ -226,6 +234,31 @@ func DefaultConfig() *Config {
 		},
 		Autostart: true,
 	}
+}
+
+// ResolvePanelInbounds returns the effective panel inbound settings with
+// defaults applied even when the APK-facing panel section is absent.
+func (c *Config) ResolvePanelInbounds() PanelInboundsConfig {
+	result := PanelInboundsConfig{
+		SocksPort: 10808,
+		HTTPPort:  10809,
+		AllowLAN:  false,
+	}
+	if len(c.Panel.Inbounds) == 0 {
+		return result
+	}
+	var decoded PanelInboundsConfig
+	if err := json.Unmarshal(c.Panel.Inbounds, &decoded); err != nil {
+		return result
+	}
+	if decoded.SocksPort > 0 {
+		result.SocksPort = decoded.SocksPort
+	}
+	if decoded.HTTPPort > 0 {
+		result.HTTPPort = decoded.HTTPPort
+	}
+	result.AllowLAN = decoded.AllowLAN
+	return result
 }
 
 // Load reads a Config from the given JSON file path.

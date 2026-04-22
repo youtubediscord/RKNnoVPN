@@ -394,7 +394,7 @@ class DaemonClient @Inject constructor(
             } catch (e: Exception) {
                 DaemonClientResult.ParseError(raw.data.toString(), e)
             }
-            is PrivctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message)
+            is PrivctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details)
             is PrivctlResult.RootDenied -> DaemonClientResult.RootDenied(raw.reason)
             is PrivctlResult.Timeout -> DaemonClientResult.Timeout(raw.method)
             is PrivctlResult.DaemonNotFound -> DaemonClientResult.DaemonNotFound(raw.path)
@@ -533,7 +533,11 @@ class DaemonClient @Inject constructor(
 
 sealed class DaemonClientResult<out T> {
     data class Ok<T>(val data: T) : DaemonClientResult<T>()
-    data class DaemonError(val code: Int, val message: String) : DaemonClientResult<Nothing>()
+    data class DaemonError(
+        val code: Int,
+        val message: String,
+        val details: JsonElement? = null,
+    ) : DaemonClientResult<Nothing>()
     data class RootDenied(val reason: String) : DaemonClientResult<Nothing>()
     data class Timeout(val method: String) : DaemonClientResult<Nothing>()
     data class DaemonNotFound(val path: String) : DaemonClientResult<Nothing>()

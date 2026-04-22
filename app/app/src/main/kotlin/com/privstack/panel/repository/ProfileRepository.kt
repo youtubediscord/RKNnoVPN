@@ -14,6 +14,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -152,7 +155,7 @@ class ProfileRepository @Inject constructor(
                 else -> {
                     val msg = describeFailure(result)
                     Log.w(TAG, "setProfile failed: $msg")
-                    if (msg.contains("config saved", ignoreCase = true)) {
+                    if (result.configWasSaved()) {
                         _error.value = msg
                         return@withLock refreshUnlockedWithStatus("setProfile")
                     }
@@ -193,7 +196,7 @@ class ProfileRepository @Inject constructor(
                 else -> {
                     val msg = describeFailure(result)
                     Log.w(TAG, "$tag failed: $msg")
-                    if (msg.contains("config saved", ignoreCase = true)) {
+                    if (result.configWasSaved()) {
                         _error.value = msg
                         return refreshUnlockedWithStatus(tag)
                     }
@@ -315,7 +318,7 @@ class ProfileRepository @Inject constructor(
             else -> {
                 val msg = describeFailure(result)
                 Log.w(TAG, "persistProfileUnlocked failed: $msg")
-                if (msg.contains("config saved", ignoreCase = true)) {
+                if (result.configWasSaved()) {
                     _error.value = msg
                     return refreshUnlockedWithStatus("persistProfileUnlocked")
                 }
@@ -360,5 +363,11 @@ class ProfileRepository @Inject constructor(
         is DaemonClientResult.ParseError -> "Invalid response from daemon"
         is DaemonClientResult.Failure -> "Unexpected error: ${result.throwable.message}"
         is DaemonClientResult.Ok -> "OK" // unreachable in failure context
+    }
+
+    private fun <T> DaemonClientResult<T>.configWasSaved(): Boolean {
+        val error = this as? DaemonClientResult.DaemonError ?: return false
+        val details = error.details?.jsonObject ?: return false
+        return details["config_saved"]?.jsonPrimitive?.booleanOrNull == true
     }
 }

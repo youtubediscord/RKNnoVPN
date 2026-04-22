@@ -45,6 +45,7 @@ type daemon struct {
 	metricsMu sync.Mutex
 	traffic   trafficSnapshot
 	latency   latencySnapshot
+	egress    egressSnapshot
 }
 
 type trafficSnapshot struct {
@@ -55,6 +56,12 @@ type trafficSnapshot struct {
 
 type latencySnapshot struct {
 	Ms        int64
+	Valid     bool
+	CheckedAt time.Time
+}
+
+type egressSnapshot struct {
+	IP        string
 	Valid     bool
 	CheckedAt time.Time
 }
@@ -818,10 +825,7 @@ func (d *daemon) handleConfigSet(params *json.RawMessage) (interface{}, *ipc.RPC
 	}
 
 	if err := d.applyConfig(newCfg, false); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInternalError,
-			Message: err.Error(),
-		}
+		return nil, d.configApplyRPCError(err)
 	}
 	return map[string]string{"status": "ok"}, nil
 }
@@ -867,10 +871,7 @@ func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc
 	}
 
 	if err := d.applyConfig(newCfg, p.Reload); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInternalError,
-			Message: err.Error(),
-		}
+		return nil, d.configApplyRPCError(err)
 	}
 
 	return map[string]interface{}{
@@ -922,10 +923,7 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 	}
 
 	if err := d.applyConfig(newCfg, true); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInternalError,
-			Message: err.Error(),
-		}
+		return nil, d.configApplyRPCError(err)
 	}
 
 	return map[string]string{"status": "imported"}, nil
@@ -953,6 +951,19 @@ func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Co
 	}
 
 	return newCfg, nil
+}
+
+func (d *daemon) configApplyRPCError(err error) *ipc.RPCError {
+	rpcErr := &ipc.RPCError{
+		Code:    ipc.CodeInternalError,
+		Message: err.Error(),
+	}
+	if strings.Contains(err.Error(), "config saved") {
+		rpcErr.Data = map[string]interface{}{
+			"config_saved": true,
+		}
+	}
+	return rpcErr
 }
 
 func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
@@ -1075,6 +1086,7 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 	if apiPort == 0 {
 		apiPort = 9090
 	}
+	panelInbounds := cfg.ResolvePanelInbounds()
 	appMode := core.MapAppMode(cfg.Apps.Mode)
 	dnsMode := "all"
 	if appMode == "off" {
@@ -1091,6 +1103,7 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"TPROXY_PORT":    strconv.Itoa(tproxyPort),
 		"DNS_PORT":       strconv.Itoa(dnsPort),
 		"API_PORT":       strconv.Itoa(apiPort),
+		"HTTP_PORT":      strconv.Itoa(panelInbounds.HTTPPort),
 		"FWMARK":         fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":    "2023",
 		"ROUTE_TABLE_V6": "2024",
@@ -1111,7 +1124,8 @@ func pathHasGroupOrWorldBits(path string) bool {
 }
 
 func localPortProtectionPresent(cfg *config.Config) bool {
-	ports := []int{cfg.Proxy.TProxyPort, cfg.Proxy.DNSPort, cfg.Proxy.APIPort}
+	panelInbounds := cfg.ResolvePanelInbounds()
+	ports := []int{cfg.Proxy.TProxyPort, cfg.Proxy.DNSPort, cfg.Proxy.APIPort, panelInbounds.HTTPPort}
 	if ports[0] == 0 {
 		ports[0] = 10853
 	}
@@ -1120,6 +1134,9 @@ func localPortProtectionPresent(cfg *config.Config) bool {
 	}
 	if ports[2] == 0 {
 		ports[2] = 9090
+	}
+	if ports[3] == 0 {
+		ports[3] = 10809
 	}
 
 	v4, err4 := core.ExecCommand("iptables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
@@ -1707,15 +1724,17 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 	if apiPort == 0 {
 		apiPort = 9090
 	}
+	panelInbounds := cfg.ResolvePanelInbounds()
 	traffic := d.buildTrafficPayload(state, apiPort)
 	latencyMs := d.cachedLatencyMs(state, cfg, apiPort)
+	egressIP := d.cachedEgressIP(state, panelInbounds.HTTPPort)
 
 	return map[string]interface{}{
 		"state":                mapCoreStateToConnectionState(status.State),
 		"active_node_id":       activeNodeID,
 		"active_node_name":     activeNodeName,
 		"active_node_protocol": activeNodeProtocol,
-		"egress_ip":            nil,
+		"egress_ip":            egressIP,
 		"country_flag":         nil,
 		"uptime":               uptimeSeconds(status.StartedAt),
 		"traffic":              traffic,
@@ -1847,11 +1866,46 @@ func (d *daemon) cachedLatencyMs(state core.State, cfg *config.Config, apiPort i
 	return &value
 }
 
+func (d *daemon) cachedEgressIP(state core.State, httpPort int) *string {
+	if state != core.StateRunning && state != core.StateDegraded {
+		return nil
+	}
+
+	now := time.Now()
+	d.metricsMu.Lock()
+	if d.egress.Valid && now.Sub(d.egress.CheckedAt) < 30*time.Second {
+		value := d.egress.IP
+		d.metricsMu.Unlock()
+		return &value
+	}
+	if !d.egress.Valid && !d.egress.CheckedAt.IsZero() && now.Sub(d.egress.CheckedAt) < 10*time.Second {
+		d.metricsMu.Unlock()
+		return nil
+	}
+	d.metricsMu.Unlock()
+
+	ip, err := fetchProxyEgressIP(httpPort, 4*time.Second)
+
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+	d.egress.CheckedAt = now
+	if err != nil {
+		d.egress.Valid = false
+		d.egress.IP = ""
+		return nil
+	}
+	d.egress.Valid = true
+	d.egress.IP = ip
+	value := ip
+	return &value
+}
+
 func (d *daemon) resetRuntimeMetrics() {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
 	d.traffic = trafficSnapshot{}
 	d.latency = latencySnapshot{}
+	d.egress = egressSnapshot{}
 }
 
 func queryClashTraffic(apiPort int, timeout time.Duration) (int64, int64, error) {
@@ -1878,6 +1932,65 @@ func queryClashTraffic(apiPort int, timeout time.Duration) (int64, int64, error)
 		return 0, 0, err
 	}
 	return parsed.UploadTotal, parsed.DownloadTotal, nil
+}
+
+func fetchProxyEgressIP(httpPort int, timeout time.Duration) (string, error) {
+	if httpPort == 0 {
+		httpPort = 10809
+	}
+	proxyURL, err := neturl.Parse(fmt.Sprintf("http://127.0.0.1:%d", httpPort))
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+	}
+
+	endpoints := []string{
+		"https://api.ipify.org",
+		"https://ifconfig.me/ip",
+		"https://cloudflare.com/cdn-cgi/trace",
+	}
+
+	for _, endpoint := range endpoints {
+		ip, endpointErr := fetchIPFromEndpoint(client, endpoint)
+		if endpointErr == nil {
+			return ip, nil
+		}
+		err = endpointErr
+	}
+	if err == nil {
+		err = fmt.Errorf("no egress ip endpoint succeeded")
+	}
+	return "", err
+}
+
+func fetchIPFromEndpoint(client *http.Client, endpoint string) (string, error) {
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("%s HTTP %d", endpoint, resp.StatusCode)
+	}
+	text := strings.TrimSpace(string(body))
+	if endpoint == "https://cloudflare.com/cdn-cgi/trace" {
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, "ip=") {
+				text = strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+				break
+			}
+		}
+	}
+	if ip := net.ParseIP(text); ip != nil {
+		return text, nil
+	}
+	return "", fmt.Errorf("%s returned invalid ip %q", endpoint, text)
 }
 
 func mapCoreStateToConnectionState(state string) string {

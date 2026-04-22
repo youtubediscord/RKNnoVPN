@@ -506,6 +506,7 @@ func (m *CoreManager) scriptEnv() map[string]string {
 	}
 
 	appMode := MapAppMode(m.config.Apps.Mode)
+	panelInbounds := m.config.ResolvePanelInbounds()
 
 	dnsMode := "all"
 	if appMode == "off" {
@@ -523,6 +524,7 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		"TPROXY_PORT":    strconv.Itoa(tproxyPort),
 		"DNS_PORT":       strconv.Itoa(dnsPort),
 		"API_PORT":       strconv.Itoa(apiPort),
+		"HTTP_PORT":      strconv.Itoa(panelInbounds.HTTPPort),
 		"FWMARK":         fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":    "2023",
 		"ROUTE_TABLE_V6": "2024",

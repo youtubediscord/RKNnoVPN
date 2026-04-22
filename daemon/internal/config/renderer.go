@@ -196,6 +196,7 @@ func buildDNSServer(tag, address, detour string) map[string]interface{} {
 }
 
 func buildInbounds(cfg *Config) []map[string]interface{} {
+	panelInbounds := cfg.ResolvePanelInbounds()
 	inbounds := []map[string]interface{}{
 		{
 			"type":        "tproxy",
@@ -211,6 +212,14 @@ func buildInbounds(cfg *Config) []map[string]interface{} {
 			"override_address": "1.1.1.1",
 			"override_port":    53,
 		},
+	}
+	if panelInbounds.HTTPPort > 0 {
+		inbounds = append(inbounds, map[string]interface{}{
+			"type":        "http",
+			"tag":         "status-http-in",
+			"listen":      "127.0.0.1",
+			"listen_port": panelInbounds.HTTPPort,
+		})
 	}
 	return inbounds
 }
