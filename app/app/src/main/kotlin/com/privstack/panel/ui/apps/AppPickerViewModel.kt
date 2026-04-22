@@ -127,6 +127,25 @@ class AppPickerViewModel @Inject constructor(
         }
     }
 
+    fun selectAllVisible() {
+        if (!_uiState.value.supportsPerAppSelection) return
+        _uiState.update { state ->
+            val visiblePackages = state.filteredApps.map { it.packageName }.toSet()
+            state.copy(
+                apps = state.apps.map { app ->
+                    if (app.packageName in visiblePackages) app.copy(isProxied = true) else app
+                },
+            )
+        }
+    }
+
+    fun clearSelection() {
+        if (!_uiState.value.supportsPerAppSelection) return
+        _uiState.update { state ->
+            state.copy(apps = state.apps.map { it.copy(isProxied = false) })
+        }
+    }
+
     fun applyTemplate(template: AppTemplate) {
         if (!_uiState.value.supportsPerAppSelection) return
         _uiState.update { state ->

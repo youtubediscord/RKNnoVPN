@@ -1,13 +1,14 @@
 # PrivStack — Local Build Commands
 # Requires: Go 1.22+, Android SDK, JDK 17
 
-SINGBOX_VERSION := 1.14.0-alpha.16
+SINGBOX_VERSION ?= latest
+SINGBOX_RESOLVED_VERSION := $(shell if [ "$(SINGBOX_VERSION)" = "latest" ]; then gh release list --repo SagerNet/sing-box --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null | sed 's/^v//'; else echo "$(SINGBOX_VERSION)" | sed 's/^v//'; fi)
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 OUT_DIR := out
 MODULE_DIR := module
-SINGBOX_SRC_DIR := /tmp/sing-box-$(SINGBOX_VERSION)
+SINGBOX_SRC_DIR := /tmp/sing-box-$(SINGBOX_RESOLVED_VERSION)
 SINGBOX_TAGS := with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0
-SINGBOX_LDFLAGS := -X 'github.com/sagernet/sing-box/constant.Version=$(SINGBOX_VERSION)' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0 -s -w -buildid=
+SINGBOX_LDFLAGS := -X 'github.com/sagernet/sing-box/constant.Version=$(SINGBOX_RESOLVED_VERSION)' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0 -s -w -buildid=
 
 .PHONY: all daemon daemon-arm64 daemon-armv7 singbox singbox-src singbox-arm64 singbox-armv7 apk module clean
 
@@ -45,14 +46,18 @@ singbox: singbox-arm64 singbox-armv7
 	@echo "  -> $(OUT_DIR)/armv7/sing-box"
 
 singbox-src:
+	@if [ -z "$(SINGBOX_RESOLVED_VERSION)" ]; then \
+		echo "Failed to resolve sing-box release. Set SINGBOX_VERSION explicitly, e.g. make singbox SINGBOX_VERSION=1.14.0-alpha.16"; \
+		exit 1; \
+	fi
 	@if [ ! -d "$(SINGBOX_SRC_DIR)/.git" ]; then \
-		echo "=== Fetching sing-box v$(SINGBOX_VERSION) source ==="; \
+		echo "=== Fetching sing-box v$(SINGBOX_RESOLVED_VERSION) source ==="; \
 		rm -rf "$(SINGBOX_SRC_DIR)"; \
-		git clone --depth 1 --branch "v$(SINGBOX_VERSION)" https://github.com/SagerNet/sing-box.git "$(SINGBOX_SRC_DIR)"; \
+		git clone --depth 1 --branch "v$(SINGBOX_RESOLVED_VERSION)" https://github.com/SagerNet/sing-box.git "$(SINGBOX_SRC_DIR)"; \
 	fi
 
 singbox-arm64: singbox-src
-	@echo "=== Building static sing-box v$(SINGBOX_VERSION) (arm64) ==="
+	@echo "=== Building static sing-box v$(SINGBOX_RESOLVED_VERSION) (arm64) ==="
 	@mkdir -p $(OUT_DIR)/arm64
 	cd $(SINGBOX_SRC_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
 		-trimpath -tags "$(SINGBOX_TAGS)" \
@@ -64,7 +69,7 @@ singbox-arm64: singbox-src
 	fi
 
 singbox-armv7: singbox-src
-	@echo "=== Building static sing-box v$(SINGBOX_VERSION) (armv7 / armeabi-v7a) ==="
+	@echo "=== Building static sing-box v$(SINGBOX_RESOLVED_VERSION) (armv7 / armeabi-v7a) ==="
 	@mkdir -p $(OUT_DIR)/armv7
 	cd $(SINGBOX_SRC_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build \
 		-trimpath -tags "$(SINGBOX_TAGS)" \

@@ -142,6 +142,16 @@ fun AppPickerScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             ) {
                 TemplateChip(
+                    label = stringResource(R.string.select_all_apps),
+                    onClick = viewModel::selectAllVisible,
+                    enabled = state.supportsPerAppSelection,
+                )
+                TemplateChip(
+                    label = stringResource(R.string.clear_app_selection),
+                    onClick = viewModel::clearSelection,
+                    enabled = state.supportsPerAppSelection,
+                )
+                TemplateChip(
                     label = stringResource(R.string.template_browsers),
                     onClick = { viewModel.applyTemplate(AppTemplate.BROWSERS) },
                     enabled = state.supportsPerAppSelection,

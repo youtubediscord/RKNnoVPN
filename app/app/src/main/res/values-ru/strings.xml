@@ -92,6 +92,8 @@
     <string name="template_social">Соцсети</string>
     <string name="template_streaming">Стриминг</string>
     <string name="template_all_except_banks">Все кроме банков</string>
+    <string name="select_all_apps">Выбрать все</string>
+    <string name="clear_app_selection">Снять весь выбор</string>
     <string name="search_apps">Поиск приложений…</string>
     <string name="show_system_apps">Системные приложения</string>
     <string name="proxied_count">Через прокси: %d</string>

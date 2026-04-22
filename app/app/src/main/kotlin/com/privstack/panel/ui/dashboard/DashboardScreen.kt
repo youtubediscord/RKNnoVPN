@@ -87,6 +87,7 @@ fun DashboardScreen(
             // -- Connect / Disconnect button --
             ConnectButton(
                 connectionState = state.connectionState,
+                hasActiveNode = !state.activeNodeName.isNullOrBlank(),
                 onClick = viewModel::toggleConnection,
             )
 
@@ -165,6 +166,7 @@ private fun StatusMessageCard(
 @Composable
 private fun ConnectButton(
     connectionState: ConnectionState,
+    hasActiveNode: Boolean,
     onClick: () -> Unit,
 ) {
     val isConnected = connectionState == ConnectionState.CONNECTED
@@ -184,12 +186,13 @@ private fun ConnectButton(
     val label = when {
         isConnected -> stringResource(R.string.disconnect)
         isConnecting -> stringResource(R.string.state_connecting)
+        !hasActiveNode -> stringResource(R.string.no_node_selected)
         else -> stringResource(R.string.connect)
     }
 
     FilledTonalButton(
         onClick = onClick,
-        enabled = !isConnecting,
+        enabled = !isConnecting && (isConnected || hasActiveNode),
         colors = ButtonDefaults.filledTonalButtonColors(
             containerColor = containerColor,
             contentColor = contentColor,
