@@ -39,6 +39,9 @@ class StatusRepository @Inject constructor(
     /** Connectivity state between Panel and the daemon process. */
     val connectionState: StateFlow<DaemonConnectionState> = poller.connectionState
 
+    /** Last human-readable poll failure from the daemon status loop. */
+    val lastPollError: StateFlow<String?> = poller.lastError
+
     // ---- Polling lifecycle ----
 
     /** Start adaptive polling. Safe to call repeatedly. */

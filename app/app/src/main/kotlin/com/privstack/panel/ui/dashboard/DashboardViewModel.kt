@@ -61,6 +61,7 @@ class DashboardViewModel @Inject constructor(
     init {
         observeDaemonStatus()
         observeDaemonConnectionState()
+        observePollErrors()
         statusRepository.startPolling()
     }
 
@@ -161,10 +162,23 @@ class DashboardViewModel @Inject constructor(
                 val unreachable = connState == DaemonConnectionState.UNREACHABLE
                 _uiState.update { it.copy(daemonUnreachable = unreachable) }
 
-                // If daemon becomes unreachable and we were connected,
-                // show UNKNOWN so the UI reflects the loss of contact.
-                if (unreachable && _uiState.value.connectionState == ConnectionState.CONNECTED) {
+                // If daemon becomes unreachable while we are waiting for status
+                // or already connected, stop showing a stale spinner/state.
+                if (unreachable &&
+                    (_uiState.value.connectionState == ConnectionState.CONNECTED ||
+                        _uiState.value.connectionState == ConnectionState.CONNECTING)
+                ) {
                     _uiState.update { it.copy(connectionState = ConnectionState.UNKNOWN) }
+                }
+            }
+        }
+    }
+
+    private fun observePollErrors() {
+        viewModelScope.launch {
+            statusRepository.lastPollError.collect { pollError ->
+                if (pollError != null) {
+                    _uiState.update { it.copy(errorMessage = pollError) }
                 }
             }
         }

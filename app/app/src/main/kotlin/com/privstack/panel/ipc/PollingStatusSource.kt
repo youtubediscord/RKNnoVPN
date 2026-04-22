@@ -52,6 +52,10 @@ class PollingStatusSource @Inject constructor(
     /** Connectivity state between this app and the daemon process. */
     val connectionState: StateFlow<DaemonConnectionState> = _connectionState.asStateFlow()
 
+    private val _lastError = MutableStateFlow<String?>(null)
+    /** Last human-readable reason why polling failed, or null on success. */
+    val lastError: StateFlow<String?> = _lastError.asStateFlow()
+
     private var consecutiveFailures = 0
 
     // ---- Lifecycle ----
@@ -64,6 +68,7 @@ class PollingStatusSource @Inject constructor(
         if (pollingJob?.isActive == true) return
         Log.d(TAG, "Starting status polling")
         consecutiveFailures = 0
+        _lastError.value = null
         pollingJob = scope.launch { pollLoop() }
     }
 
@@ -76,6 +81,7 @@ class PollingStatusSource @Inject constructor(
         pollingJob?.cancel()
         pollingJob = null
         _connectionState.value = DaemonConnectionState.IDLE
+        _lastError.value = null
     }
 
     /**
@@ -104,35 +110,42 @@ class PollingStatusSource @Inject constructor(
                 consecutiveFailures = 0
                 _status.value = result.data
                 _connectionState.value = DaemonConnectionState.REACHABLE
+                _lastError.value = null
             }
             is DaemonClientResult.RootDenied -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
+                _lastError.value = "Нет root-доступа к daemon"
                 Log.w(TAG, "Root denied during status poll")
             }
             is DaemonClientResult.Timeout -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
+                _lastError.value = "Daemon не ответил вовремя на status"
                 Log.w(TAG, "Status poll timed out")
             }
             is DaemonClientResult.DaemonNotFound -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
+                _lastError.value = "Daemon не найден"
                 Log.w(TAG, "Daemon binary not found")
             }
             is DaemonClientResult.DaemonError -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
+                _lastError.value = "Daemon error ${result.code}: ${result.message}"
                 Log.w(TAG, "Daemon error: ${result.code} ${result.message}")
             }
             is DaemonClientResult.ParseError -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
+                _lastError.value = "Неверный ответ daemon"
                 Log.w(TAG, "Failed to parse status response", result.cause)
             }
             is DaemonClientResult.Failure -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
+                _lastError.value = result.throwable.message ?: "Неожиданная ошибка polling"
                 Log.e(TAG, "Unexpected failure during poll", result.throwable)
             }
         }

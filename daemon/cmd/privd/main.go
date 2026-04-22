@@ -41,11 +41,12 @@ type daemon struct {
 	netWatcher *watcher.NetworkWatcher
 	ipcServer  *ipc.Server
 
-	mu        sync.Mutex // protects cfg
-	metricsMu sync.Mutex
-	traffic   trafficSnapshot
-	latency   latencySnapshot
-	egress    egressSnapshot
+	mu         sync.Mutex // protects cfg
+	metricsMu  sync.Mutex
+	traffic    trafficSnapshot
+	latency    latencySnapshot
+	egress     egressSnapshot
+	healthKick time.Time
 }
 
 type trafficSnapshot struct {
@@ -378,11 +379,29 @@ func (d *daemon) handleStatus(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	healthResult := d.healthMon.LastResult()
 	state := d.coreMgr.GetState()
 	if state == core.StateRunning || state == core.StateDegraded {
-		if healthResult == nil || time.Since(healthResult.Timestamp) > 10*time.Second {
-			healthResult = d.healthMon.RunOnce()
+		if d.shouldKickAsyncHealth(state, healthResult) {
+			go d.healthMon.RunOnce()
 		}
 	}
 	return d.buildStatusPayload(status, healthResult), nil
+}
+
+func (d *daemon) shouldKickAsyncHealth(state core.State, healthResult *health.HealthResult) bool {
+	if state != core.StateRunning && state != core.StateDegraded {
+		return false
+	}
+	now := time.Now()
+	d.metricsMu.Lock()
+	defer d.metricsMu.Unlock()
+
+	if healthResult != nil && now.Sub(healthResult.Timestamp) <= 10*time.Second {
+		return false
+	}
+	if !d.healthKick.IsZero() && now.Sub(d.healthKick) < 10*time.Second {
+		return false
+	}
+	d.healthKick = now
+	return true
 }
 
 func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1906,6 +1925,7 @@ func (d *daemon) resetRuntimeMetrics() {
 	d.traffic = trafficSnapshot{}
 	d.latency = latencySnapshot{}
 	d.egress = egressSnapshot{}
+	d.healthKick = time.Time{}
 }
 
 func queryClashTraffic(apiPort int, timeout time.Duration) (int64, int64, error) {
