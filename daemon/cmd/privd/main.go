@@ -1047,59 +1047,6 @@ func (d *daemon) reapplyRuntimeRules(cfg *config.Config) error {
 	return nil
 }
 
-func (d *daemon) rollbackConfig(oldCfg *config.Config, wasRunning bool) error {
-	if oldCfg == nil {
-		return fmt.Errorf("previous config is nil")
-	}
-
-	d.mu.Lock()
-	d.cfg = oldCfg
-	d.mu.Unlock()
-	d.coreMgr.SetConfig(oldCfg)
-	d.rescueMgr.SetConfig(oldCfg)
-	oldHealthInterval := time.Duration(oldCfg.Health.IntervalSec) * time.Second
-	if oldHealthInterval <= 0 {
-		oldHealthInterval = 30 * time.Second
-	}
-	oldHealthTimeout := time.Duration(oldCfg.Health.TimeoutSec) * time.Second
-	if oldHealthTimeout <= 0 {
-		oldHealthTimeout = 5 * time.Second
-	}
-	oldHealthThreshold := oldCfg.Health.Threshold
-	if oldHealthThreshold < 1 {
-		oldHealthThreshold = 3
-	}
-	oldTProxyPort := oldCfg.Proxy.TProxyPort
-	if oldTProxyPort == 0 {
-		oldTProxyPort = 10853
-	}
-	oldDNSPort := oldCfg.Proxy.DNSPort
-	if oldDNSPort == 0 {
-		oldDNSPort = 10856
-	}
-	oldRouteMark := oldCfg.Proxy.Mark
-	if oldRouteMark == 0 {
-		oldRouteMark = 0x2023
-	}
-	d.healthMon.SetConfig(oldHealthInterval, oldHealthThreshold, oldTProxyPort, oldDNSPort, oldRouteMark, oldCfg.Health.URL, oldHealthTimeout)
-	d.netWatcher.SetEnv(buildScriptEnv(oldCfg, d.dataDir))
-
-	if wasRunning {
-		profile := oldCfg.ResolveProfile()
-		if err := d.coreMgr.HotSwap(profile); err != nil {
-			return fmt.Errorf("restore old runtime: %w", err)
-		}
-		d.rescueMgr.Reset()
-		d.startSubsystems()
-	}
-
-	if err := oldCfg.Save(d.cfgPath); err != nil {
-		return fmt.Errorf("restore old config file: %w", err)
-	}
-
-	return nil
-}
-
 func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 	gid := cfg.Proxy.GID
 	if gid == 0 {

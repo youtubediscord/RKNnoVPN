@@ -152,6 +152,10 @@ class ProfileRepository @Inject constructor(
                 else -> {
                     val msg = describeFailure(result)
                     Log.w(TAG, "setProfile failed: $msg")
+                    if (msg.contains("config saved", ignoreCase = true)) {
+                        _error.value = msg
+                        return@withLock refreshUnlockedWithStatus("setProfile")
+                    }
                     _error.value = msg
                     false
                 }
@@ -189,6 +193,10 @@ class ProfileRepository @Inject constructor(
                 else -> {
                     val msg = describeFailure(result)
                     Log.w(TAG, "$tag failed: $msg")
+                    if (msg.contains("config saved", ignoreCase = true)) {
+                        _error.value = msg
+                        return refreshUnlockedWithStatus(tag)
+                    }
                     _error.value = msg
                     false
                 }
@@ -307,6 +315,10 @@ class ProfileRepository @Inject constructor(
             else -> {
                 val msg = describeFailure(result)
                 Log.w(TAG, "persistProfileUnlocked failed: $msg")
+                if (msg.contains("config saved", ignoreCase = true)) {
+                    _error.value = msg
+                    return refreshUnlockedWithStatus("persistProfileUnlocked")
+                }
                 _error.value = msg
                 false
             }
