@@ -14,25 +14,26 @@ const defaultSocket = "/data/adb/privstack/run/daemon.sock"
 var Version = "0.2.0"
 
 var commands = map[string]string{
-	"status":          "Get proxy status",
-	"start":           "Start proxy",
-	"stop":            "Stop proxy",
-	"reload":          "Reload config and restart proxy",
-	"health":          "Get health check status",
-	"audit":           "Run privacy/security audit",
-	"app.list":        "List installed apps known to the daemon",
-	"app.resolveUid":  "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
-	"config-get":      "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
-	"config-set":      "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
-	"config-set-many": "Set multiple config values atomically: privctl config-set-many '{\"values\":{...},\"reload\":true}'",
-	"config-list":     "List config sections",
-	"config-import":   "Import full config: privctl config-import '{...}'",
+	"status":             "Get proxy status",
+	"start":              "Start proxy",
+	"stop":               "Stop proxy",
+	"reload":             "Reload config and restart proxy",
+	"health":             "Get health check status",
+	"audit":              "Run privacy/security audit",
+	"app.list":           "List installed apps known to the daemon",
+	"app.resolveUid":     "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
+	"config-get":         "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
+	"config-set":         "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
+	"config-set-many":    "Set multiple config values atomically: privctl config-set-many '{\"values\":{...},\"reload\":true}'",
+	"config-list":        "List config sections",
+	"config-import":      "Import full config: privctl config-import '{...}'",
 	"subscription-fetch": "Fetch subscription URL via daemon network access",
-	"logs":            "Get recent log lines: privctl logs '{\"lines\":100}'",
-	"version":         "Get daemon version",
-	"update-check":    "Check for updates from GitHub Releases",
-	"update-download": "Download latest module + APK",
-	"update-install":  "Install previously downloaded update",
+	"node-test":          "Test saved nodes: TCP connect + URL delay via sing-box",
+	"logs":               "Get recent log lines: privctl logs '{\"lines\":100}'",
+	"version":            "Get daemon version",
+	"update-check":       "Check for updates from GitHub Releases",
+	"update-download":    "Download latest module + APK",
+	"update-install":     "Install previously downloaded update",
 }
 
 func main() {
@@ -182,7 +183,7 @@ func printUsage() {
 	order := []string{
 		"status", "start", "stop", "reload", "health", "audit",
 		"app.list", "app.resolveUid",
-		"config-get", "config-set", "config-set-many", "config-list", "config-import", "subscription-fetch",
+		"config-get", "config-set", "config-set-many", "config-list", "config-import", "subscription-fetch", "node-test",
 		"logs", "version",
 		"update-check", "update-download", "update-install",
 	}
@@ -202,5 +203,6 @@ func printUsage() {
 	fmt.Println("  privctl app.resolveUid '{\"uid\":10123}'")
 	fmt.Println("  privctl config-get '{\"key\":\"proxy\"}'")
 	fmt.Println("  privctl config-set '{\"key\":\"autostart\",\"value\":false}'")
+	fmt.Println("  privctl node-test '{\"url\":\"https://www.gstatic.com/generate_204\"}'")
 	fmt.Println("  privctl logs '{\"lines\":100}'")
 }

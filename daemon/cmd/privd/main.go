@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -290,16 +292,16 @@ func (d *daemon) dumpState() {
 	d.mu.Unlock()
 
 	state := map[string]interface{}{
-		"version":        Version,
-		"config_path":    cfgPath,
-		"data_dir":       dataDir,
-		"core_state":     status.State,
-		"core_pid":       status.PID,
-		"uptime":         status.Uptime,
-		"active_profile": status.ActiveProfile,
-		"health_fails":   d.healthMon.Failures(),
+		"version":         Version,
+		"config_path":     cfgPath,
+		"data_dir":        dataDir,
+		"core_state":      status.State,
+		"core_pid":        status.PID,
+		"uptime":          status.Uptime,
+		"active_profile":  status.ActiveProfile,
+		"health_fails":    d.healthMon.Failures(),
 		"rescue_attempts": d.rescueMgr.Attempts(),
-		"rescue_enabled": rescueEnabled,
+		"rescue_enabled":  rescueEnabled,
 	}
 
 	data, _ := json.MarshalIndent(state, "", "  ")
@@ -336,6 +338,7 @@ func (d *daemon) registerHandlers() {
 	d.ipcServer.Register("config-list", d.handleConfigList)
 	d.ipcServer.Register("config-import", d.handleConfigImport)
 	d.ipcServer.Register("subscription-fetch", d.handleSubscriptionFetch)
+	d.ipcServer.Register("node-test", d.handleNodeTest)
 	d.ipcServer.Register("logs", d.handleLogs)
 	d.ipcServer.Register("version", d.handleVersion)
 	d.ipcServer.Register("update-check", d.handleUpdateCheck)
@@ -363,9 +366,10 @@ func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCErro
 
 	d.mu.Lock()
 	profile := d.cfg.ResolveProfile()
+	hasPanelNodes := len(d.cfg.Panel.Nodes) > 0
 	d.mu.Unlock()
 
-	if profile.Address == "" {
+	if profile.Address == "" && !hasPanelNodes {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeConfigError,
 			Message: "no node configured (address is empty)",
@@ -1093,6 +1097,136 @@ func (d *daemon) handleSubscriptionFetch(params *json.RawMessage) (interface{}, 
 	}, nil
 }
 
+func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	var p struct {
+		NodeIDs   []string `json:"node_ids"`
+		URL       string   `json:"url"`
+		TimeoutMS int      `json:"timeout_ms"`
+	}
+	if params != nil {
+		if err := json.Unmarshal(*params, &p); err != nil {
+			return nil, &ipc.RPCError{
+				Code:    ipc.CodeInvalidParams,
+				Message: "invalid params: " + err.Error(),
+			}
+		}
+	}
+	if p.URL == "" {
+		p.URL = "https://www.gstatic.com/generate_204"
+	}
+	if p.TimeoutMS <= 0 {
+		p.TimeoutMS = 5000
+	}
+	timeout := time.Duration(p.TimeoutMS) * time.Millisecond
+	requested := make(map[string]bool, len(p.NodeIDs))
+	for _, id := range p.NodeIDs {
+		requested[id] = true
+	}
+
+	d.mu.Lock()
+	cfg := d.cfg
+	profiles := config.ProfilesFromPanelNodes(cfg)
+	if len(profiles) == 0 {
+		profile := cfg.ResolveProfile()
+		if profile.Address != "" {
+			profile.Tag = "proxy"
+			profiles = []*config.NodeProfile{profile}
+		}
+	}
+	apiPort := cfg.Proxy.APIPort
+	if apiPort == 0 {
+		apiPort = 9090
+	}
+	d.mu.Unlock()
+
+	results := make([]map[string]interface{}, 0, len(profiles))
+	for _, profile := range profiles {
+		if len(requested) > 0 && !requested[profile.ID] {
+			continue
+		}
+		result := map[string]interface{}{
+			"id":       profile.ID,
+			"name":     firstNonEmpty(profile.Name, profile.Tag, profile.Address),
+			"tag":      profile.Tag,
+			"server":   profile.Address,
+			"port":     profile.Port,
+			"protocol": profile.Protocol,
+		}
+
+		tcpMS, tcpErr := testTCPConnect(profile.Address, profile.Port, timeout)
+		if tcpErr != nil {
+			result["tcp_error"] = tcpErr.Error()
+		} else {
+			result["tcp_ms"] = tcpMS
+		}
+
+		urlMS, statusCode, urlErr := testClashDelay(apiPort, profile.Tag, p.URL, p.TimeoutMS)
+		if urlErr != nil {
+			result["url_error"] = urlErr.Error()
+		} else {
+			result["url_ms"] = urlMS
+			result["status"] = statusCode
+		}
+		results = append(results, result)
+	}
+
+	return map[string]interface{}{
+		"url":     p.URL,
+		"results": results,
+	}, nil
+}
+
+func testTCPConnect(host string, port int, timeout time.Duration) (int64, error) {
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), timeout)
+	if err != nil {
+		return 0, err
+	}
+	_ = conn.Close()
+	return time.Since(start).Milliseconds(), nil
+}
+
+func testClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
+	if outboundTag == "" {
+		return 0, 0, fmt.Errorf("outbound tag is empty")
+	}
+	values := neturl.Values{}
+	values.Set("timeout", strconv.Itoa(timeoutMS))
+	values.Set("url", testURL)
+	endpoint := fmt.Sprintf(
+		"http://127.0.0.1:%d/proxies/%s/delay?%s",
+		apiPort,
+		neturl.PathEscape(outboundTag),
+		values.Encode(),
+	)
+	client := &http.Client{Timeout: time.Duration(timeoutMS+1000) * time.Millisecond}
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, resp.StatusCode, fmt.Errorf("clash delay HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var parsed struct {
+		Delay int64 `json:"delay"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return 0, resp.StatusCode, fmt.Errorf("parse clash delay response: %w", err)
+	}
+	return parsed.Delay, resp.StatusCode, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 type daemonAppInfo struct {
 	PackageName string  `json:"packageName"`
 	AppName     string  `json:"appName"`
@@ -1436,11 +1570,11 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 	}
 
 	return map[string]interface{}{
-		"state":            mapCoreStateToConnectionState(status.State),
-		"active_node_id":   activeNodeID,
-		"active_node_name": activeNodeName,
+		"state":                mapCoreStateToConnectionState(status.State),
+		"active_node_id":       activeNodeID,
+		"active_node_name":     activeNodeName,
 		"active_node_protocol": activeNodeProtocol,
-		"uptime":           uptimeSeconds(status.StartedAt),
+		"uptime":               uptimeSeconds(status.StartedAt),
 		"traffic": map[string]interface{}{
 			"txBytes": 0,
 			"rxBytes": 0,

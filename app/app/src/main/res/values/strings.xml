@@ -58,6 +58,8 @@
     <string name="save">Save</string>
     <string name="copy_link">Copy link</string>
     <string name="test_latency">Test latency</string>
+    <string name="test_all_nodes">Test all</string>
+    <string name="testing_nodes">Testing…</string>
     <string name="delete">Delete</string>
     <string name="delete_node_confirm">Delete node \"%s\"?</string>
     <string name="cancel">Cancel</string>

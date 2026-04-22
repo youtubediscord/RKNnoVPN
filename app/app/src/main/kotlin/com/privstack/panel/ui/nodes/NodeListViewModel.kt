@@ -34,6 +34,7 @@ data class NodeListUiState(
     /** Nodes parsed from import input, waiting for user selection. */
     val importCandidates: List<ImportCandidate> = emptyList(),
     val isLoading: Boolean = false,
+    val isTestingNodes: Boolean = false,
     /** Error message from the last operation, or null. */
     val errorMessage: String? = null,
 )
@@ -175,32 +176,50 @@ class NodeListViewModel @Inject constructor(
 
     fun testLatency(nodeId: String) {
         viewModelScope.launch {
-            // Use daemon health/status to measure latency for the specific node.
-            // The daemon does not expose a per-node ping command yet, so we use
-            // a simple timing wrapper around a status call as a proxy.
-            val startMs = System.currentTimeMillis()
-            when (val result = daemonClient.status()) {
+            runNodeTests(listOf(nodeId))
+        }
+    }
+
+    fun testAllNodes() {
+        viewModelScope.launch {
+            val ids = _uiState.value.nodes.map { it.id }
+            runNodeTests(ids)
+        }
+    }
+
+    private suspend fun runNodeTests(nodeIds: List<String>) {
+        if (nodeIds.isEmpty() || _uiState.value.isTestingNodes) return
+        _uiState.update { it.copy(isTestingNodes = true, errorMessage = null) }
+        try {
+            when (val result = daemonClient.nodeTest(nodeIds)) {
                 is DaemonClientResult.Ok -> {
-                    val elapsed = (System.currentTimeMillis() - startMs).toInt()
+                    val byId = result.data.results.associateBy { it.id }
                     _uiState.update { state ->
                         state.copy(
                             nodes = state.nodes.map { node ->
-                                if (node.id == nodeId) node.copy(latencyMs = elapsed) else node
+                                val test = byId[node.id] ?: return@map node
+                                node.copy(
+                                    latencyMs = test.tcpMs ?: -1,
+                                    responseMs = test.urlMs,
+                                    testStatus = when {
+                                        test.tcpError != null -> "TCP: ${test.tcpError}"
+                                        test.urlError != null -> "URL: ${test.urlError}"
+                                        test.urlMs != null -> "OK"
+                                        else -> "TCP OK"
+                                    },
+                                )
                             },
                         )
                     }
                 }
                 else -> {
-                    Log.w(TAG, "Latency test failed for $nodeId: ${describeError(result)}")
-                    _uiState.update { state ->
-                        state.copy(
-                            nodes = state.nodes.map { node ->
-                                if (node.id == nodeId) node.copy(latencyMs = -1) else node
-                            },
-                        )
-                    }
+                    val msg = describeError(result)
+                    Log.w(TAG, "Node test failed: $msg")
+                    _uiState.update { it.copy(errorMessage = msg) }
                 }
             }
+        } finally {
+            _uiState.update { it.copy(isTestingNodes = false) }
         }
     }
 

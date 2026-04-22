@@ -232,6 +232,42 @@ class DaemonClient @Inject constructor(
         }
     }
 
+    suspend fun nodeTest(
+        nodeIds: List<String> = emptyList(),
+        url: String = "https://www.gstatic.com/generate_204",
+        timeoutMs: Int = 5_000,
+    ): DaemonClientResult<NodeTestInfo> {
+        val params = buildJsonObject {
+            putJsonArray("node_ids") {
+                nodeIds.forEach { add(it) }
+            }
+            put("url", url)
+            put("timeout_ms", timeoutMs)
+        }
+        return call("node-test", params, timeoutMs = timeoutMs.toLong() + 5_000L) { element ->
+            val obj = element.jsonObject
+            NodeTestInfo(
+                url = obj["url"]?.jsonPrimitive?.content.orEmpty(),
+                results = obj["results"]?.jsonArray?.map { item ->
+                    val result = item.jsonObject
+                    NodeTestResult(
+                        id = result["id"]?.jsonPrimitive?.content.orEmpty(),
+                        name = result["name"]?.jsonPrimitive?.content.orEmpty(),
+                        tag = result["tag"]?.jsonPrimitive?.content.orEmpty(),
+                        server = result["server"]?.jsonPrimitive?.content.orEmpty(),
+                        port = result["port"]?.jsonPrimitive?.intOrNull ?: 0,
+                        protocol = result["protocol"]?.jsonPrimitive?.content.orEmpty(),
+                        tcpMs = result["tcp_ms"]?.jsonPrimitive?.intOrNull,
+                        urlMs = result["url_ms"]?.jsonPrimitive?.intOrNull,
+                        status = result["status"]?.jsonPrimitive?.intOrNull,
+                        tcpError = result["tcp_error"]?.jsonPrimitive?.contentOrNull,
+                        urlError = result["url_error"]?.jsonPrimitive?.contentOrNull,
+                    )
+                }.orEmpty(),
+            )
+        }
+    }
+
     // ---- Logs ----
 
     suspend fun logs(
@@ -535,6 +571,25 @@ data class SubscriptionFetchInfo(
     val body: String,
     val headers: Map<String, String>,
     val status: Int,
+)
+
+data class NodeTestInfo(
+    val url: String,
+    val results: List<NodeTestResult>,
+)
+
+data class NodeTestResult(
+    val id: String,
+    val name: String,
+    val tag: String,
+    val server: String,
+    val port: Int,
+    val protocol: String,
+    val tcpMs: Int?,
+    val urlMs: Int?,
+    val status: Int?,
+    val tcpError: String?,
+    val urlError: String?,
 )
 
 @Serializable

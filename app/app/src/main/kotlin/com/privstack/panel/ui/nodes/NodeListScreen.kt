@@ -130,6 +130,25 @@ fun NodeListScreen(
                 onSortChange = viewModel::setSortMode,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
+            Row(
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            ) {
+                TextButton(
+                    onClick = viewModel::testAllNodes,
+                    enabled = state.nodes.isNotEmpty() && !state.isTestingNodes,
+                ) {
+                    Icon(Icons.Filled.Speed, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(
+                            if (state.isTestingNodes) R.string.testing_nodes else R.string.test_all_nodes
+                        ),
+                    )
+                }
+            }
 
             val filteredNodes = state.nodes.filter { it.group == state.selectedGroup }
             if (filteredNodes.isEmpty()) {
@@ -308,6 +327,25 @@ private fun NodeCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (node.responseMs != null || node.testStatus != null) {
+                    Text(
+                        text = buildString {
+                            node.latencyMs?.takeIf { it >= 0 }?.let { append("TCP ${it}ms") }
+                            node.responseMs?.let {
+                                if (isNotEmpty()) append(" | ")
+                                append("URL ${it}ms")
+                            }
+                            node.testStatus?.takeIf { it != "OK" && it != "TCP OK" }?.let {
+                                if (isNotEmpty()) append(" | ")
+                                append(it)
+                            }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))

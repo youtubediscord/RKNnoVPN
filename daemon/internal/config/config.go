@@ -140,6 +140,9 @@ type RescueConfig struct {
 // NodeProfile is a resolved node profile ready for sing-box config rendering.
 // It merges NodeConfig + TransportConfig into a flat structure.
 type NodeProfile struct {
+	ID             string            `json:"id,omitempty"`
+	Name           string            `json:"name,omitempty"`
+	Tag            string            `json:"tag,omitempty"`
 	Protocol       string            `json:"protocol"`
 	Address        string            `json:"address"`
 	Port           int               `json:"port"`

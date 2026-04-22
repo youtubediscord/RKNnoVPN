@@ -22,8 +22,11 @@ data class Node(
     /** Protocol-specific outbound config in daemon's canonical schema. */
     val outbound: JsonObject,
     val group: String = "Default",
-    /** Round-trip latency in milliseconds, null if never tested. */
+    /** TCP connect latency in milliseconds, null if never tested. */
     val latencyMs: Int? = null,
+    /** URL response delay through the outbound, null if never tested or core is stopped. */
+    val responseMs: Int? = null,
+    val testStatus: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 ) {
     /** Human-readable label: "name (server:port)" */

@@ -29,6 +29,9 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 		case "dns", "block":
 			t.Fatalf("removed sing-box 1.13 outbound rendered: %v", outbound["type"])
 		}
+		if outbound["tag"] == "proxy" && outbound["domain_resolver"] != "direct-dns" {
+			t.Fatalf("proxy outbound with domain server must set domain_resolver: %#v", outbound)
+		}
 	}
 
 	dns := rendered["dns"].(map[string]any)
@@ -99,5 +102,90 @@ func TestRenderSocksOutboundDoesNotInheritTransport(t *testing.T) {
 	}
 	if _, ok := outbound["transport"]; ok {
 		t.Fatalf("socks outbound must not inherit V2Ray transport: %#v", outbound)
+	}
+}
+
+func TestRenderPanelNodesAsURLTestOutbounds(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"first-node",
+			"name":"First",
+			"protocol":"VLESS",
+			"server":"one.example",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"one.example",
+						"port":443,
+						"users":[{
+							"id":"00000000-0000-0000-0000-000000000001",
+							"encryption":"none"
+						}]
+					}]
+				},
+				"streamSettings":{
+					"network":"tcp",
+					"security":"tls",
+					"tlsSettings":{"serverName":"one.example","fingerprint":"chrome"}
+				}
+			}
+		}`),
+		json.RawMessage(`{
+			"id":"second-node",
+			"name":"Second",
+			"protocol":"SOCKS",
+			"server":"127.0.0.1",
+			"port":1080,
+			"outbound":{
+				"protocol":"socks",
+				"settings":{
+					"address":"127.0.0.1",
+					"port":1080,
+					"version":"5"
+				}
+			}
+		}`),
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	outbounds := rendered["outbounds"].([]any)
+	if len(outbounds) != 4 {
+		t.Fatalf("expected two nodes + urltest + direct, got %#v", outbounds)
+	}
+
+	firstNode := outbounds[0].(map[string]any)
+	if firstNode["domain_resolver"] != "direct-dns" {
+		t.Fatalf("domain node should use direct-dns resolver: %#v", firstNode)
+	}
+	secondNode := outbounds[1].(map[string]any)
+	if _, ok := secondNode["domain_resolver"]; ok {
+		t.Fatalf("IP node should not set domain_resolver: %#v", secondNode)
+	}
+
+	urltest := outbounds[2].(map[string]any)
+	if urltest["type"] != "urltest" || urltest["tag"] != "proxy" {
+		t.Fatalf("expected proxy urltest outbound, got %#v", urltest)
+	}
+	tags := urltest["outbounds"].([]any)
+	if len(tags) != 2 || tags[0] != "node-first-node" || tags[1] != "node-second-node" {
+		t.Fatalf("unexpected urltest outbounds: %#v", tags)
+	}
+
+	route := rendered["route"].(map[string]any)
+	if route["final"] != "proxy" {
+		t.Fatalf("route final should target urltest proxy, got %#v", route["final"])
 	}
 }

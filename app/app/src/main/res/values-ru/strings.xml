@@ -58,6 +58,8 @@
     <string name="save">Сохранить</string>
     <string name="copy_link">Копировать ссылку</string>
     <string name="test_latency">Проверить задержку</string>
+    <string name="test_all_nodes">Проверить все</string>
+    <string name="testing_nodes">Проверка…</string>
     <string name="delete">Удалить</string>
     <string name="delete_node_confirm">Удалить сервер \"%s\"?</string>
     <string name="cancel">Отмена</string>
