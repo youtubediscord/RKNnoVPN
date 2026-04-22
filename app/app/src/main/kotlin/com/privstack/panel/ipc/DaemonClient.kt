@@ -797,6 +797,8 @@ private data class DaemonRoutingSection(
     val customProxy: List<String> = emptyList(),
     @SerialName("custom_block")
     val customBlock: List<String> = emptyList(),
+    @SerialName("always_direct_apps")
+    val alwaysDirectApps: List<String> = emptyList(),
     @SerialName("geoip_path")
     val geoipPath: String = "",
     @SerialName("geosite_path")
@@ -807,6 +809,7 @@ private data class DaemonRoutingSection(
             "all" -> com.privstack.panel.model.RoutingMode.PROXY_ALL
             "whitelist", "include" -> com.privstack.panel.model.RoutingMode.PER_APP
             "blacklist", "exclude" -> com.privstack.panel.model.RoutingMode.PER_APP_BYPASS
+            "direct" -> com.privstack.panel.model.RoutingMode.DIRECT
             "rules" -> com.privstack.panel.model.RoutingMode.RULES
             else -> if (customDirect.isNotEmpty() || customProxy.isNotEmpty() || customBlock.isNotEmpty()) {
                 com.privstack.panel.model.RoutingMode.RULES
@@ -825,6 +828,7 @@ private data class DaemonRoutingSection(
             directIps = customDirect.filter { it.contains("/") },
             proxyIps = customProxy.filter { it.contains("/") },
             blockIps = customBlock.filter { it.contains("/") },
+            alwaysDirectAppList = alwaysDirectApps,
         )
     }
 }
@@ -904,11 +908,16 @@ private fun com.privstack.panel.model.RoutingConfig.toDaemonRoutingSection(base:
             com.privstack.panel.model.RoutingMode.PROXY_ALL -> "all"
             com.privstack.panel.model.RoutingMode.PER_APP -> "whitelist"
             com.privstack.panel.model.RoutingMode.PER_APP_BYPASS -> "blacklist"
+            com.privstack.panel.model.RoutingMode.DIRECT -> "direct"
             com.privstack.panel.model.RoutingMode.RULES -> "rules"
         })
         put("custom_direct", bridgeJson.encodeToJsonElement(ListSerializer(String.serializer()), direct))
         put("custom_proxy", bridgeJson.encodeToJsonElement(ListSerializer(String.serializer()), proxy))
         put("custom_block", bridgeJson.encodeToJsonElement(ListSerializer(String.serializer()), block))
+        put(
+            "always_direct_apps",
+            bridgeJson.encodeToJsonElement(ListSerializer(String.serializer()), alwaysDirectAppList)
+        )
     }
     return bridgeJson.decodeFromJsonElement(DaemonRoutingSection.serializer(), merged)
 }
@@ -923,6 +932,7 @@ private fun com.privstack.panel.model.RoutingConfig.toDaemonAppsSection(): Daemo
             mode = "blacklist",
             packages = appBypassList,
         )
+        com.privstack.panel.model.RoutingMode.DIRECT -> DaemonAppsSection(mode = "off")
         else -> DaemonAppsSection(mode = "all")
     }
 

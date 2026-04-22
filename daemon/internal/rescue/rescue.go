@@ -28,9 +28,9 @@ import (
 type Strategy int
 
 const (
-	StrategyRestartCore   Strategy = iota // kill + restart sing-box
-	StrategyReapplyRules                  // re-run iptables/DNS scripts
-	StrategyFullRestart                   // full stop + start
+	StrategyRestartCore  Strategy = iota // kill + restart sing-box
+	StrategyReapplyRules                 // re-run iptables/DNS scripts
+	StrategyFullRestart                  // full stop + start
 )
 
 // String returns a human-readable label.
@@ -281,11 +281,14 @@ func (r *RescueManager) scriptEnv() map[string]string {
 	appMode := core.MapAppMode(r.cfg.Apps.Mode)
 
 	dnsMode := "all"
-	if appMode == "whitelist" {
+	if appMode == "off" {
+		dnsMode = "off"
+	} else if appMode == "whitelist" || appMode == "blacklist" {
 		dnsMode = "per_uid"
 	}
 
 	appUIDs := core.ResolvePackageUIDs(r.cfg.Apps.Packages)
+	bypassUIDs := core.BuildBypassUIDs(r.cfg.Routing.AlwaysDirectApps)
 
 	return map[string]string{
 		"PRIVSTACK_DIR":  r.dataDir,
@@ -298,7 +301,7 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		"ROUTE_TABLE_V6": "2024",
 		"APP_MODE":       appMode,
 		"APP_UIDS":       appUIDs,
-		"BYPASS_UIDS":    "1073",
+		"BYPASS_UIDS":    bypassUIDs,
 		"DNS_MODE":       dnsMode,
 		"PROXY_MODE":     "tproxy",
 	}

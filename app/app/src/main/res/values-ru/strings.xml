@@ -103,6 +103,7 @@
     <string name="apply">Применить</string>
     <string name="loading_apps">Загрузка приложений…</string>
     <string name="app_picker_mode_disabled">Выбор приложений недоступен в текущем режиме маршрутизации.</string>
+    <string name="always_direct_app_label">Всегда напрямую</string>
 
     <!-- Settings -->
     <string name="settings_routing">Маршрутизация</string>
@@ -119,6 +120,8 @@
     <string name="settings_advanced">Расширенные</string>
     <string name="log_level">Уровень лога</string>
     <string name="urltest_url">URL для проверки</string>
+    <string name="always_direct_apps">Всегда напрямую</string>
+    <string name="always_direct_apps_desc">Имена пакетов, по одному в строке. Эти приложения обходят TPROXY и DNS-перехват до маршрутизации.</string>
     <string name="settings_module">Модуль</string>
     <string name="module_version">Версия</string>
     <string name="daemon_status">Статус демона</string>

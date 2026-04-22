@@ -5,10 +5,114 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const networkStackUID = "1073"
+
+var builtInAlwaysDirectExact = map[string]bool{
+	// Sensitive Russian apps that should never be routed through PrivStack.
+	"ru.oneme.app":                   true, // MAX
+	"ru.vtb24.mobilebanking.android": true,
+	"com.avito.android":              true,
+	"ru.ozon.app.android":            true,
+	"com.wildberries.ru":             true,
+	"ru.beru.android":                true,
+	"ru.yandex.taxi":                 true,
+	"ru.yandex.yandexmaps":           true,
+	"ru.yandex.searchplugin":         true,
+	"ru.yandex.browser":              true,
+	"ru.yandex.browser.lite":         true,
+	"ru.yandex.music":                true,
+	"ru.yandex.disk":                 true,
+	"ru.yandex.mail":                 true,
+	"ru.yandex.market":               true,
+	"ru.yandex.metro":                true,
+	"ru.yandex.weatherplugin":        true,
+	"ru.yandex.mobile.auth":          true,
+	"ru.sberbankmobile":              true,
+	"ru.sberbankmobile.arm":          true,
+	"ru.alfabank.mobile.android":     true,
+	"ru.tinkoff.android":             true,
+	"ru.tinkoff.investing":           true,
+	"com.idamob.tinkoff.android":     true,
+	"ru.raiffeisennews":              true,
+	"ru.rosbank.android":             true,
+	"ru.psbank.online":               true,
+	"ru.mts.bank":                    true,
+	"ru.gosuslugi.pos":               true,
+	"ru.fns.lkfl":                    true,
+	"ru.nalog.ibr":                   true,
+	"ru.mos.app":                     true,
+	"ru.mts.mymts":                   true,
+	"com.beeline.dc":                 true,
+	"ru.megafon.mlk":                 true,
+	"ru.tele2.mytele2":               true,
+
+	// VPN/proxy clients and network cores.
+	"com.wireguard.android":                true,
+	"org.torproject.android":               true,
+	"ch.protonvpn.android":                 true,
+	"net.mullvad.mullvadvpn":               true,
+	"com.cloudflare.onedotonedotonedotone": true,
+	"org.amnezia.vpn":                      true,
+	"app.hiddify.com":                      true,
+	"com.v2ray.ang":                        true,
+	"io.nekohasekai.sfa":                   true,
+	"io.nekohasekai.sagernet":              true,
+	"moe.nb4a":                             true,
+	"org.outline.android.client":           true,
+	"net.openvpn.openvpn":                  true,
+	"de.blinkt.openvpn":                    true,
+	"com.github.shadowsocks":               true,
+	"com.getsurfboard":                     true,
+	"com.github.kr328.clash":               true,
+	"com.github.metacubex.clash.meta":      true,
+}
+
+var builtInAlwaysDirectPrefixes = []string{
+	"ru.yandex.",
+	"com.yandex.",
+	"ru.vtb",
+	"ru.sber",
+	"ru.alfabank",
+	"ru.tinkoff",
+	"com.idamob.tinkoff",
+	"ru.raiffeisen",
+	"ru.rosbank",
+	"ru.psbank",
+	"ru.mts.bank",
+	"ru.gosuslugi",
+	"ru.fns",
+	"ru.nalog",
+	"ru.mos",
+	"com.avito",
+	"ru.ozon",
+	"com.wildberries",
+}
+
+var builtInAlwaysDirectKeywords = []string{
+	"vpn",
+	"proxy",
+	"v2ray",
+	"xray",
+	"hiddify",
+	"nekobox",
+	"nekoray",
+	"amnezia",
+	"wireguard",
+	"outline",
+	"openvpn",
+	"shadowsocks",
+	"clash",
+	"singbox",
+	"sing-box",
+	"sagernet",
+	"tun2socks",
+}
 
 // ExecScript runs a shell script with a single positional argument (typically
 // "start" or "stop") and optional environment variables injected from env.
@@ -113,9 +217,62 @@ func ResolvePackageUIDs(packages []string) string {
 	// Build a lookup set for O(1) matching.
 	wanted := make(map[string]bool, len(packages))
 	for _, pkg := range packages {
-		wanted[pkg] = true
+		pkg = strings.TrimSpace(pkg)
+		if pkg != "" {
+			wanted[pkg] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return ""
 	}
 
+	return resolvePackageUIDsMatching(func(pkgName string) bool {
+		return wanted[pkgName]
+	})
+}
+
+// ResolveAlwaysDirectUIDs resolves user-configured and built-in packages that
+// must bypass PrivStack before TPROXY/DNS interception.
+func ResolveAlwaysDirectUIDs(packages []string) string {
+	userPackages := make(map[string]bool, len(packages))
+	for _, pkg := range packages {
+		pkg = strings.TrimSpace(pkg)
+		if pkg != "" {
+			userPackages[pkg] = true
+		}
+	}
+
+	return resolvePackageUIDsMatching(func(pkgName string) bool {
+		return userPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
+	})
+}
+
+// BuildBypassUIDs returns the complete UID bypass list used by iptables/DNS.
+func BuildBypassUIDs(alwaysDirectPackages []string) string {
+	return joinUniqueFields(networkStackUID, ResolveAlwaysDirectUIDs(alwaysDirectPackages))
+}
+
+// IsBuiltInAlwaysDirectPackage reports whether a package is part of the
+// built-in hard-direct policy for sensitive apps and network clients.
+func IsBuiltInAlwaysDirectPackage(pkgName string) bool {
+	if builtInAlwaysDirectExact[pkgName] {
+		return true
+	}
+	for _, prefix := range builtInAlwaysDirectPrefixes {
+		if strings.HasPrefix(pkgName, prefix) {
+			return true
+		}
+	}
+	lower := strings.ToLower(pkgName)
+	for _, keyword := range builtInAlwaysDirectKeywords {
+		if strings.Contains(lower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func resolvePackageUIDsMatching(match func(string) bool) string {
 	data, err := os.ReadFile("/data/system/packages.list")
 	if err != nil {
 		return ""
@@ -149,7 +306,7 @@ func ResolvePackageUIDs(packages []string) string {
 			continue
 		}
 		pkgName := fields[0]
-		if !wanted[pkgName] {
+		if !match(pkgName) {
 			continue
 		}
 		appUID, parseErr := strconv.Atoi(fields[1])
@@ -168,7 +325,30 @@ func ResolvePackageUIDs(packages []string) string {
 		}
 	}
 
+	sort.Slice(uids, func(i, j int) bool {
+		left, leftErr := strconv.Atoi(uids[i])
+		right, rightErr := strconv.Atoi(uids[j])
+		if leftErr != nil || rightErr != nil {
+			return uids[i] < uids[j]
+		}
+		return left < right
+	})
+
 	return strings.Join(uids, " ")
+}
+
+func joinUniqueFields(values ...string) string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, value := range values {
+		for _, field := range strings.Fields(value) {
+			if !seen[field] {
+				seen[field] = true
+				result = append(result, field)
+			}
+		}
+	}
+	return strings.Join(result, " ")
 }
 
 // MapAppMode converts config apps.mode values to the shell-script APP_MODE
@@ -179,6 +359,8 @@ func MapAppMode(mode string) string {
 		return "whitelist"
 	case "blacklist", "exclude":
 		return "blacklist"
+	case "off", "direct", "disabled":
+		return "off"
 	case "all":
 		return "all"
 	default:

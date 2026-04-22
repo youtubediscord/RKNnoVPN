@@ -260,7 +260,8 @@ fun AppPickerScreen(
                     ) { app ->
                         AppRow(
                             app = app,
-                            enabled = state.supportsPerAppSelection,
+                            enabled = state.supportsPerAppSelection && !app.isAlwaysDirect,
+                            routingMode = state.routingMode,
                             onToggle = { viewModel.toggleApp(app.packageName) },
                         )
                     }
@@ -288,6 +289,7 @@ private fun TemplateChip(
 private fun AppRow(
     app: AppInfo,
     enabled: Boolean,
+    routingMode: RoutingMode,
     onToggle: () -> Unit,
 ) {
     Row(
@@ -321,10 +323,19 @@ private fun AppRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (app.isAlwaysDirect) {
+                Text(
+                    text = stringResource(R.string.always_direct_app_label),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         Checkbox(
-            checked = app.isProxied,
+            checked = if (app.isAlwaysDirect && routingMode == RoutingMode.PER_APP_BYPASS) true else app.isProxied,
             enabled = enabled,
             onCheckedChange = { onToggle() },
         )

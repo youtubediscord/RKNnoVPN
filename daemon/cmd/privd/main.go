@@ -57,7 +57,7 @@ func main() {
 		if err := os.MkdirAll(filepath.Dir(*logFile), 0750); err != nil {
 			log.Fatalf("mkdir log dir: %v", err)
 		}
-		f, err := os.OpenFile(*logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0640)
+		f, err := os.OpenFile(*logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
 			log.Fatalf("open log file: %v", err)
 		}
@@ -518,6 +518,53 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 		)
 	}
 
+	if cfg.Routing.Mode == "direct" && cfg.Apps.Mode != "off" {
+		appendFinding(
+			"DIRECT_MODE_NOT_HARD_BYPASS",
+			"Direct mode is not a hard bypass",
+			"Routing mode is direct, but apps.mode still allows marking traffic for interception.",
+			"HIGH",
+			"ROUTING",
+			"Set apps.mode to off for direct mode so iptables and DNS interception are disabled.",
+			"apps.mode",
+		)
+	}
+
+	for _, path := range []string{
+		d.cfgPath,
+		filepath.Join(d.dataDir, "config", "rendered", "singbox.json"),
+		filepath.Join(d.dataDir, "logs", "privd.log"),
+		filepath.Join(d.dataDir, "logs", "sing-box.log"),
+	} {
+		if pathHasGroupOrWorldBits(path) {
+			appendFinding(
+				"SENSITIVE_FILE_PERMISSIONS",
+				"Sensitive file is readable outside root",
+				"Config or log files may expose proxy endpoints, credentials, or runtime diagnostics.",
+				"MEDIUM",
+				"CONFIG",
+				"Set config and log files to 0600 and their directories to root-only permissions.",
+				path,
+			)
+			break
+		}
+	}
+
+	status := d.coreMgr.Status()
+	if status.State == core.StateRunning.String() || status.State == core.StateDegraded.String() {
+		if !localPortProtectionPresent(cfg) {
+			appendFinding(
+				"LOCAL_PORT_PROTECTION_MISSING",
+				"Local PrivStack ports are not fully protected",
+				"Ordinary apps may be able to connect to the TPROXY, DNS, or management listener ports.",
+				"HIGH",
+				"LEAK",
+				"Re-apply iptables rules and verify DROP rules for the TPROXY, DNS, and API ports.",
+				"iptables mangle PRIVSTACK_OUT",
+			)
+		}
+	}
+
 	for name, check := range healthResult.Checks {
 		if check.Pass {
 			continue
@@ -916,10 +963,38 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 			}
 			return fmt.Errorf("apply config hot-swap failed: %w", err)
 		}
+		if err := d.reapplyRuntimeRules(newCfg); err != nil {
+			rollbackErr := d.rollbackConfig(oldCfg, wasRunning)
+			if rollbackErr == nil {
+				_ = d.reapplyRuntimeRules(oldCfg)
+			}
+			if rollbackErr != nil {
+				return fmt.Errorf("apply config rules failed: %w; rollback failed: %v", err, rollbackErr)
+			}
+			return fmt.Errorf("apply config rules failed: %w", err)
+		}
 		d.rescueMgr.Reset()
 		d.startSubsystems()
 	}
 
+	return nil
+}
+
+func (d *daemon) reapplyRuntimeRules(cfg *config.Config) error {
+	env := buildScriptEnv(cfg, d.dataDir)
+	iptablesScript := filepath.Join(d.dataDir, "scripts", "iptables.sh")
+	dnsScript := filepath.Join(d.dataDir, "scripts", "dns.sh")
+
+	_ = core.ExecScript(dnsScript, "stop", env)
+	_ = core.ExecScript(iptablesScript, "stop", env)
+
+	if err := core.ExecScript(iptablesScript, "start", env); err != nil {
+		return fmt.Errorf("iptables start: %w", err)
+	}
+	if err := core.ExecScript(dnsScript, "start", env); err != nil {
+		_ = core.ExecScript(iptablesScript, "stop", env)
+		return fmt.Errorf("dns start: %w", err)
+	}
 	return nil
 }
 
@@ -999,10 +1074,13 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 	}
 	appMode := core.MapAppMode(cfg.Apps.Mode)
 	dnsMode := "all"
-	if appMode == "whitelist" || appMode == "blacklist" {
+	if appMode == "off" {
+		dnsMode = "off"
+	} else if appMode == "whitelist" || appMode == "blacklist" {
 		dnsMode = "per_uid"
 	}
 	appUIDs := core.ResolvePackageUIDs(cfg.Apps.Packages)
+	bypassUIDs := core.BuildBypassUIDs(cfg.Routing.AlwaysDirectApps)
 
 	return map[string]string{
 		"PRIVSTACK_DIR":  dataDir,
@@ -1015,10 +1093,56 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"ROUTE_TABLE_V6": "2024",
 		"APP_MODE":       appMode,
 		"APP_UIDS":       appUIDs,
-		"BYPASS_UIDS":    "1073",
+		"BYPASS_UIDS":    bypassUIDs,
 		"DNS_MODE":       dnsMode,
 		"PROXY_MODE":     "tproxy",
 	}
+}
+
+func pathHasGroupOrWorldBits(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Mode().Perm()&0077 != 0
+}
+
+func localPortProtectionPresent(cfg *config.Config) bool {
+	ports := []int{cfg.Proxy.TProxyPort, cfg.Proxy.DNSPort, cfg.Proxy.APIPort}
+	if ports[0] == 0 {
+		ports[0] = 10853
+	}
+	if ports[1] == 0 {
+		ports[1] = 10856
+	}
+	if ports[2] == 0 {
+		ports[2] = 9090
+	}
+
+	v4, err4 := core.ExecCommand("iptables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
+	v6, err6 := core.ExecCommand("ip6tables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
+	if err4 != nil || err6 != nil {
+		return false
+	}
+	for _, port := range ports {
+		if !portProtectionOutputContains(v4, port) || !portProtectionOutputContains(v6, port) {
+			return false
+		}
+	}
+	return true
+}
+
+func portProtectionOutputContains(output string, port int) bool {
+	portText := fmt.Sprintf("--dport %d", port)
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, portText) &&
+			strings.Contains(line, "--uid-owner 0") &&
+			strings.Contains(line, "--gid-owner") &&
+			strings.Contains(line, "-j DROP") {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *daemon) handleSubscriptionFetch(params *json.RawMessage) (interface{}, *ipc.RPCError) {

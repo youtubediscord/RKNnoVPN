@@ -103,6 +103,7 @@
     <string name="apply">Apply</string>
     <string name="loading_apps">Loading apps…</string>
     <string name="app_picker_mode_disabled">Per-app selection is unavailable in the current routing mode.</string>
+    <string name="always_direct_app_label">Always direct</string>
 
     <!-- Settings -->
     <string name="settings_routing">Routing</string>
@@ -119,6 +120,8 @@
     <string name="settings_advanced">Advanced</string>
     <string name="log_level">Log level</string>
     <string name="urltest_url">URL test endpoint</string>
+    <string name="always_direct_apps">Always-direct apps</string>
+    <string name="always_direct_apps_desc">Package names, one per line. These apps bypass TPROXY and DNS interception before routing.</string>
     <string name="settings_module">Module</string>
     <string name="module_version">Version</string>
     <string name="daemon_status">Daemon status</string>

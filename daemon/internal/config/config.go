@@ -88,21 +88,22 @@ type PanelConfig struct {
 
 // RoutingConfig controls traffic routing rules.
 type RoutingConfig struct {
-	Mode         string   `json:"mode"` // "whitelist" etc. (matches config.json routing.mode)
-	BypassLAN    bool     `json:"bypass_lan"`
-	BypassChina  bool     `json:"bypass_china"` // matches config.json routing.bypass_china
-	BypassRussia bool     `json:"bypass_russia"`
-	BlockAds     bool     `json:"block_ads"`
-	CustomDirect []string `json:"custom_direct"` // domains/IPs to route directly
-	CustomProxy  []string `json:"custom_proxy"`  // domains/IPs to force through proxy
-	CustomBlock  []string `json:"custom_block"`  // domains/IPs to block
-	GeoIPPath    string   `json:"geoip_path"`
-	GeoSitePath  string   `json:"geosite_path"`
+	Mode             string   `json:"mode"` // "all", "whitelist", "blacklist", "rules", "direct"
+	BypassLAN        bool     `json:"bypass_lan"`
+	BypassChina      bool     `json:"bypass_china"` // matches config.json routing.bypass_china
+	BypassRussia     bool     `json:"bypass_russia"`
+	BlockAds         bool     `json:"block_ads"`
+	CustomDirect     []string `json:"custom_direct"` // domains/IPs to route directly
+	CustomProxy      []string `json:"custom_proxy"`  // domains/IPs to force through proxy
+	CustomBlock      []string `json:"custom_block"`  // domains/IPs to block
+	AlwaysDirectApps []string `json:"always_direct_apps,omitempty"`
+	GeoIPPath        string   `json:"geoip_path"`
+	GeoSitePath      string   `json:"geosite_path"`
 }
 
 // AppsConfig controls per-app routing (Android split tunnel).
 type AppsConfig struct {
-	Mode     string   `json:"mode"` // "all", "whitelist", "blacklist"
+	Mode     string   `json:"mode"` // "all", "whitelist", "blacklist", "off"
 	Packages []string `json:"list"` // package names for whitelist/blacklist (matches config.json apps.list)
 }
 
@@ -293,7 +294,7 @@ func (c *Config) Save(path string) error {
 	}
 	data = append(data, '\n')
 
-	if err := os.WriteFile(path, data, 0640); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("config: write %s: %w", path, err)
 	}
 	return nil
@@ -350,10 +351,10 @@ func (c *Config) Validate() error {
 	}
 
 	validAppMode := map[string]bool{
-		"all": true, "whitelist": true, "blacklist": true,
+		"all": true, "whitelist": true, "blacklist": true, "off": true,
 	}
 	if !validAppMode[c.Apps.Mode] {
-		return fmt.Errorf("apps.mode must be all/whitelist/blacklist, got %q", c.Apps.Mode)
+		return fmt.Errorf("apps.mode must be all/whitelist/blacklist/off, got %q", c.Apps.Mode)
 	}
 
 	if c.Health.IntervalSec < 0 {

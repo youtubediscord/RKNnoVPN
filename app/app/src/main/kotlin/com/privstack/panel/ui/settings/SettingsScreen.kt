@@ -157,6 +157,25 @@ fun SettingsScreen(
             ) {
                 Text(stringResource(R.string.apply))
             }
+
+            OutlinedTextField(
+                value = state.alwaysDirectPackagesText,
+                onValueChange = viewModel::setAlwaysDirectPackagesText,
+                label = { Text(stringResource(R.string.always_direct_apps)) },
+                supportingText = { Text(stringResource(R.string.always_direct_apps_desc)) },
+                minLines = 3,
+                maxLines = 6,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            )
+
+            TextButton(
+                onClick = viewModel::applyAlwaysDirectPackages,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) {
+                Text(stringResource(R.string.apply))
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))

@@ -72,6 +72,7 @@ data class SettingsUiState(
     val dnsPreset: DnsPreset = DnsPreset.CLOUDFLARE,
     val customDnsUrl: String = "",
     val urlTestUrl: String = "https://www.gstatic.com/generate_204",
+    val alwaysDirectPackagesText: String = "",
     val logLevel: LogLevel = LogLevel.WARNING,
     // Module
     val moduleVersion: String = "0.1.0",
@@ -113,7 +114,7 @@ class SettingsViewModel @Inject constructor(
                 RoutingMode.GLOBAL -> com.privstack.panel.model.RoutingMode.PROXY_ALL
                 RoutingMode.WHITELIST -> com.privstack.panel.model.RoutingMode.PER_APP
                 RoutingMode.BYPASS -> com.privstack.panel.model.RoutingMode.PER_APP_BYPASS
-                RoutingMode.DIRECT -> com.privstack.panel.model.RoutingMode.RULES
+                RoutingMode.DIRECT -> com.privstack.panel.model.RoutingMode.DIRECT
             }
             val ok = profileRepository.updateConfig { config ->
                 config.copy(routing = config.routing.copy(mode = profileMode))
@@ -152,6 +153,10 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(urlTestUrl = url, errorMessage = null) }
     }
 
+    fun setAlwaysDirectPackagesText(value: String) {
+        _uiState.update { it.copy(alwaysDirectPackagesText = value, errorMessage = null) }
+    }
+
     fun applyUrlTestUrl() {
         val url = _uiState.value.urlTestUrl.trim()
         if (url.isBlank()) {
@@ -165,6 +170,23 @@ class SettingsViewModel @Inject constructor(
             if (!ok) {
                 val err = profileRepository.error.value
                 Log.w(TAG, "Failed to save URL test setting: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(errorMessage = err) }
+            }
+        }
+    }
+
+    fun applyAlwaysDirectPackages() {
+        val packages = parsePackageList(_uiState.value.alwaysDirectPackagesText)
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(
+                    routing = config.routing.copy(alwaysDirectAppList = packages),
+                )
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save always-direct apps: $err")
                 profileRepository.refresh()
                 _uiState.update { it.copy(errorMessage = err) }
             }
@@ -359,6 +381,7 @@ class SettingsViewModel @Inject constructor(
             com.privstack.panel.model.RoutingMode.PROXY_ALL -> RoutingMode.GLOBAL
             com.privstack.panel.model.RoutingMode.PER_APP -> RoutingMode.WHITELIST
             com.privstack.panel.model.RoutingMode.PER_APP_BYPASS -> RoutingMode.BYPASS
+            com.privstack.panel.model.RoutingMode.DIRECT -> RoutingMode.DIRECT
             com.privstack.panel.model.RoutingMode.RULES -> RoutingMode.DIRECT
         }
 
@@ -372,6 +395,7 @@ class SettingsViewModel @Inject constructor(
                 dnsPreset = dnsPreset,
                 customDnsUrl = if (dnsPreset == DnsPreset.CUSTOM) dnsUrl else it.customDnsUrl,
                 urlTestUrl = config.health.checkUrl,
+                alwaysDirectPackagesText = config.routing.alwaysDirectAppList.joinToString("\n"),
             )
         }
     }
@@ -444,4 +468,10 @@ class SettingsViewModel @Inject constructor(
         is DaemonClientResult.Failure -> result.throwable.message ?: "Unknown error"
         else -> "Unknown error"
     }
+
+    private fun parsePackageList(raw: String): List<String> =
+        raw.split('\n', ',', ';', ' ', '\t')
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
 }

@@ -284,9 +284,12 @@ set_permissions_and_caps() {
         chmod 0700 "${PRIVSTACK_DIR}/config/rendered" 2>/dev/null
     fi
 
-    # Logs: 0750 root:PRIVSTACK_GID
-    chown -R 0:${PRIVSTACK_GID} "${PRIVSTACK_DIR}/logs" 2>/dev/null
-    chmod 0750 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+    # Logs: 0700 root:root — may contain proxy endpoints and diagnostics.
+    chown -R 0:0 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+    chmod 0700 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+    for f in "${PRIVSTACK_DIR}/logs"/*; do
+        [ -f "$f" ] && chmod 0600 "$f" 2>/dev/null
+    done
 
     # Run: 0750 root:PRIVSTACK_GID (PID files, sockets)
     chown -R 0:${PRIVSTACK_GID} "${PRIVSTACK_DIR}/run" 2>/dev/null

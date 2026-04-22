@@ -365,7 +365,7 @@ func (m *CoreManager) openSingBoxLog() (*os.File, string, error) {
 		return nil, "", err
 	}
 	logPath := filepath.Join(logDir, "sing-box.log")
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0640)
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return nil, "", err
 	}
@@ -507,14 +507,15 @@ func (m *CoreManager) scriptEnv() map[string]string {
 
 	appMode := MapAppMode(m.config.Apps.Mode)
 
-	// DNS_MODE: "per_uid" when whitelist (only selected apps proxied),
-	// "all" otherwise (all traffic goes through proxy DNS).
 	dnsMode := "all"
-	if appMode == "whitelist" {
+	if appMode == "off" {
+		dnsMode = "off"
+	} else if appMode == "whitelist" || appMode == "blacklist" {
 		dnsMode = "per_uid"
 	}
 
 	appUIDs := ResolvePackageUIDs(m.config.Apps.Packages)
+	bypassUIDs := BuildBypassUIDs(m.config.Routing.AlwaysDirectApps)
 
 	return map[string]string{
 		"PRIVSTACK_DIR":  m.dataDir,
@@ -527,7 +528,7 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		"ROUTE_TABLE_V6": "2024",
 		"APP_MODE":       appMode,
 		"APP_UIDS":       appUIDs,
-		"BYPASS_UIDS":    "1073",
+		"BYPASS_UIDS":    bypassUIDs,
 		"DNS_MODE":       dnsMode,
 		"PROXY_MODE":     "tproxy",
 	}
@@ -547,5 +548,5 @@ func renderConfig(cfg *config.Config, profile *config.NodeProfile, path string) 
 	}
 	data = append(data, '\n')
 
-	return os.WriteFile(path, data, 0640)
+	return os.WriteFile(path, data, 0600)
 }

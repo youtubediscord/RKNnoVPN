@@ -43,7 +43,9 @@ data class RoutingConfig(
     /** IP CIDR rules forced through the proxy. */
     val proxyIps: List<String> = emptyList(),
     /** IP CIDR rules that should be blocked. */
-    val blockIps: List<String> = emptyList()
+    val blockIps: List<String> = emptyList(),
+    /** Package names that must always bypass PrivStack before TPROXY/DNS interception. */
+    val alwaysDirectAppList: List<String> = emptyList()
 )
 
 @Serializable
@@ -54,6 +56,8 @@ enum class RoutingMode {
     PER_APP,
     /** All apps except listed ones go through the proxy. */
     PER_APP_BYPASS,
+    /** Do not intercept app traffic. */
+    DIRECT,
     /** Use domain/IP rule sets for split routing. */
     RULES
 }

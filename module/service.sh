@@ -222,6 +222,11 @@ launch_daemon() {
 
     # Ensure log directory is writable
     mkdir -p "${PRIVSTACK_DIR}/logs" 2>/dev/null
+    chown 0:0 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+    chmod 0700 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+    touch "${PRIVSTACK_DIR}/logs/privd.log" 2>/dev/null
+    chown 0:0 "${PRIVSTACK_DIR}/logs/privd.log" 2>/dev/null
+    chmod 0600 "${PRIVSTACK_DIR}/logs/privd.log" 2>/dev/null
 
     # Launch daemon with nohup + setsid to fully detach from init
     # - nohup: ignore SIGHUP when terminal closes

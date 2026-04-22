@@ -394,7 +394,12 @@ gen_nat_v4() {
 #    redirected back to itself.
 -A ${CHAIN_DNS} -m owner --gid-owner ${CORE_GID} -j RETURN
 
-# 2. DNS redirect rules — depends on DNS_MODE.
+# 2. Bypass UIDs: these apps must keep their own DNS path too.
+$(for uid in ${BYPASS_UIDS}; do
+    echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -j RETURN"
+done)
+
+# 3. DNS redirect rules — depends on DNS_MODE.
 $(if [ "${DNS_MODE}" = "per_uid" ]; then
     # per_uid: only redirect DNS for whitelisted UIDs.
     # This means non-proxied apps keep using the system DNS resolver,
@@ -441,7 +446,12 @@ gen_nat_v6() {
 # 1. Loop prevention
 -A ${CHAIN_DNS} -m owner --gid-owner ${CORE_GID} -j RETURN
 
-# 2. DNS redirect rules
+# 2. Bypass UIDs
+$(for uid in ${BYPASS_UIDS}; do
+    echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -j RETURN"
+done)
+
+# 3. DNS redirect rules
 $(if [ "${DNS_MODE}" = "per_uid" ]; then
     if [ "${APP_MODE}" = "whitelist" ]; then
         for uid in ${APP_UIDS}; do
@@ -558,6 +568,14 @@ flush_chains() {
     log_info "${ipt} chains flushed and removed"
 }
 
+flush_nat_chain() {
+    local ipt="$1"  # "iptables" or "ip6tables"
+
+    while ${ipt} ${IPT_WAIT} -t nat -D OUTPUT -j ${CHAIN_DNS} 2>/dev/null; do :; done
+    ${ipt} ${IPT_WAIT} -t nat -F ${CHAIN_DNS} 2>/dev/null || true
+    ${ipt} ${IPT_WAIT} -t nat -X ${CHAIN_DNS} 2>/dev/null || true
+}
+
 # ============================================================================
 # START — apply all rules
 # ============================================================================
@@ -601,12 +619,12 @@ do_start() {
         gen_nat_v4
     } > "${SNAPSHOT_DIR}/iptables.rules"
 
-    # IPv6 rules: mangle + nat combined
-    {
-        gen_mangle_v6
-        echo ""
-        gen_nat_v6
-    } > "${SNAPSHOT_DIR}/ip6tables.rules"
+    # IPv6 rules: apply mangle separately because IPv6 nat may be unavailable.
+    gen_mangle_v6 > "${SNAPSHOT_DIR}/ip6tables.rules"
+
+    # IPv6 nat is absent on some Android kernels/legacy ip6tables builds.
+    # Keep IPv6 TPROXY mandatory, but make classic IPv6 DNS redirect optional.
+    gen_nat_v6 > "${SNAPSHOT_DIR}/ip6tables-nat.rules"
 
     log_info "Rules files generated"
 
@@ -632,6 +650,18 @@ do_start() {
         # Roll back v4 too
         do_stop
         exit 1
+    fi
+
+    if ip6tables ${IPT_WAIT} -t nat -L >/dev/null 2>&1; then
+        log_info "Applying IPv6 DNS nat rules..."
+        if ! ip6tables-restore ${IPT_WAIT} --noflush < "${SNAPSHOT_DIR}/ip6tables-nat.rules"; then
+            log_warn "ip6tables-restore failed for IPv6 nat; continuing without IPv6 classic DNS redirect"
+            log_warn "Rules file content:"
+            cat "${SNAPSHOT_DIR}/ip6tables-nat.rules" >&2
+            flush_nat_chain ip6tables
+        fi
+    else
+        log_warn "IPv6 nat table is unavailable; skipping IPv6 classic DNS redirect"
     fi
 
     # ---- Step 7: Verify critical chains exist ----
@@ -711,6 +741,7 @@ do_stop() {
     if [ -d "${SNAPSHOT_DIR}" ]; then
         rm -f "${SNAPSHOT_DIR}/iptables.rules"
         rm -f "${SNAPSHOT_DIR}/ip6tables.rules"
+        rm -f "${SNAPSHOT_DIR}/ip6tables-nat.rules"
         rm -f "${SNAPSHOT_DIR}/iptables_backup.rules"
         rm -f "${SNAPSHOT_DIR}/ip6tables_backup.rules"
         rm -f "${SNAPSHOT_DIR}/env.sh"

@@ -90,10 +90,15 @@ if [ -d "${PRIVSTACK_DIR}/scripts" ]; then
     done
 fi
 
-# Run and logs: 0750 root:23333
-for dir in run logs; do
-    chown 0:${PRIVSTACK_GID} "${PRIVSTACK_DIR}/${dir}" 2>/dev/null
-    chmod 0750 "${PRIVSTACK_DIR}/${dir}" 2>/dev/null
+# Run: 0750 root:23333
+chown 0:${PRIVSTACK_GID} "${PRIVSTACK_DIR}/run" 2>/dev/null
+chmod 0750 "${PRIVSTACK_DIR}/run" 2>/dev/null
+
+# Logs: 0700 root:root — may contain proxy endpoints and diagnostics.
+chown 0:0 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+chmod 0700 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+for f in "${PRIVSTACK_DIR}/logs"/*; do
+    [ -f "$f" ] && chmod 0600 "$f" 2>/dev/null
 done
 
 log_info "Permissions set"

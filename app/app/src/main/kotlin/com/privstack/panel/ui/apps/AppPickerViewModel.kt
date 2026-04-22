@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.privstack.panel.advisor.AlwaysDirectApps
 import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.model.RoutingMode
 import com.privstack.panel.repository.ProfileRepository
@@ -27,6 +28,7 @@ private const val TAG = "AppPickerViewModel"
 private data class RoutingSelection(
     val routingMode: RoutingMode,
     val selectedPackages: Set<String>,
+    val alwaysDirectPackages: Set<String>,
 )
 
 /**
@@ -37,6 +39,7 @@ data class AppInfo(
     val label: String,
     val isSystemApp: Boolean,
     val isProxied: Boolean = false,
+    val isAlwaysDirect: Boolean = false,
 )
 
 data class AppPickerUiState(
@@ -120,7 +123,9 @@ class AppPickerViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 apps = state.apps.map {
-                    if (it.packageName == packageName) it.copy(isProxied = !it.isProxied)
+                    if (it.packageName == packageName && !it.isAlwaysDirect) {
+                        it.copy(isProxied = !it.isProxied)
+                    }
                     else it
                 },
             )
@@ -133,7 +138,13 @@ class AppPickerViewModel @Inject constructor(
             val visiblePackages = state.filteredApps.map { it.packageName }.toSet()
             state.copy(
                 apps = state.apps.map { app ->
-                    if (app.packageName in visiblePackages) app.copy(isProxied = true) else app
+                    if (app.packageName !in visiblePackages) {
+                        app
+                    } else if (app.isAlwaysDirect && state.routingMode != RoutingMode.PER_APP_BYPASS) {
+                        app.copy(isProxied = false)
+                    } else {
+                        app.copy(isProxied = true)
+                    }
                 },
             )
         }
@@ -142,7 +153,13 @@ class AppPickerViewModel @Inject constructor(
     fun clearSelection() {
         if (!_uiState.value.supportsPerAppSelection) return
         _uiState.update { state ->
-            state.copy(apps = state.apps.map { it.copy(isProxied = false) })
+            state.copy(
+                apps = state.apps.map { app ->
+                    app.copy(
+                        isProxied = app.isAlwaysDirect && state.routingMode == RoutingMode.PER_APP_BYPASS,
+                    )
+                },
+            )
         }
     }
 
@@ -165,10 +182,16 @@ class AppPickerViewModel @Inject constructor(
             state.copy(
                 apps = state.apps.map { app ->
                     if (template == AppTemplate.ALL_EXCEPT_BANKS) {
-                        app.copy(isProxied = app.packageName in targetPackages)
+                        app.copy(
+                            isProxied = if (app.isAlwaysDirect) {
+                                state.routingMode == RoutingMode.PER_APP_BYPASS
+                            } else {
+                                app.packageName in targetPackages
+                            },
+                        )
                     } else {
                         // For specific templates, toggle ON those packages, leave others unchanged
-                        if (app.packageName in targetPackages) app.copy(isProxied = true)
+                        if (app.packageName in targetPackages && !app.isAlwaysDirect) app.copy(isProxied = true)
                         else app
                     }
                 },
@@ -179,6 +202,7 @@ class AppPickerViewModel @Inject constructor(
     fun applySelection() {
         val selectedPackages = _uiState.value.apps
             .filter { it.isProxied }
+            .filterNot { it.isAlwaysDirect && _uiState.value.routingMode == RoutingMode.PER_APP }
             .map { it.packageName }
         val routingMode = _uiState.value.routingMode
 
@@ -234,11 +258,17 @@ class AppPickerViewModel @Inject constructor(
 
                 // 3. Merge into UI model
                 val appInfoList = installedApps.map { (pkg, label, isSystem) ->
+                    val isAlwaysDirect = AlwaysDirectApps.matches(pkg, daemonSelection.alwaysDirectPackages)
                     AppInfo(
                         packageName = pkg,
                         label = label,
                         isSystemApp = isSystem,
-                        isProxied = pkg in daemonSelection.selectedPackages,
+                        isAlwaysDirect = isAlwaysDirect,
+                        isProxied = if (isAlwaysDirect && daemonSelection.routingMode == RoutingMode.PER_APP_BYPASS) {
+                            true
+                        } else {
+                            pkg in daemonSelection.selectedPackages
+                        },
                     )
                 }.sortedBy { it.label.lowercase() }
 
@@ -302,7 +332,7 @@ class AppPickerViewModel @Inject constructor(
         if (err != null) {
             Log.w(TAG, "Could not load proxied apps from daemon: $err")
         }
-        return RoutingSelection(RoutingMode.PROXY_ALL, emptySet())
+        return RoutingSelection(RoutingMode.PROXY_ALL, emptySet(), emptySet())
     }
 
     private fun observeProfile() {
@@ -315,7 +345,18 @@ class AppPickerViewModel @Inject constructor(
                         state.copy(
                             routingMode = selection.routingMode,
                             apps = state.apps.map { app ->
-                                app.copy(isProxied = app.packageName in selection.selectedPackages)
+                                val isAlwaysDirect = AlwaysDirectApps.matches(
+                                    app.packageName,
+                                    selection.alwaysDirectPackages,
+                                )
+                                app.copy(
+                                    isAlwaysDirect = isAlwaysDirect,
+                                    isProxied = if (isAlwaysDirect && selection.routingMode == RoutingMode.PER_APP_BYPASS) {
+                                        true
+                                    } else {
+                                        app.packageName in selection.selectedPackages
+                                    },
+                                )
                             },
                         )
                     }
@@ -335,7 +376,7 @@ private fun ProfileConfig.toRoutingSelection(): RoutingSelection {
         RoutingMode.PER_APP_BYPASS -> routing.appBypassList.toSet()
         else -> emptySet()
     }
-    return RoutingSelection(routingMode, selected)
+    return RoutingSelection(routingMode, selected, routing.alwaysDirectAppList.toSet())
 }
 
 enum class AppTemplate {

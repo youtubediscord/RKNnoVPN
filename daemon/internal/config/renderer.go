@@ -1006,9 +1006,14 @@ func buildRoute(cfg *Config) map[string]interface{} {
 		})
 	}
 
+	finalOutbound := "proxy"
+	if cfg.Routing.Mode == "direct" {
+		finalOutbound = "direct"
+	}
+
 	route := map[string]interface{}{
 		"rules":                   rules,
-		"final":                   "proxy",
+		"final":                   finalOutbound,
 		"default_domain_resolver": "direct-dns",
 		"default_mark":            255,
 	}
