@@ -172,25 +172,30 @@ class AppPickerViewModel @Inject constructor(
                 AppTemplate.SOCIAL -> SOCIAL_PACKAGES intersect visiblePackages
                 AppTemplate.STREAMING -> STREAMING_PACKAGES intersect visiblePackages
                 AppTemplate.ALL_EXCEPT_BANKS -> {
-                    // Select visible apps except sensitive/RU/network clients.
-                    state.apps
-                        .filter { it.packageName in visiblePackages }
-                        .filterNot { it.isAlwaysDirect || it.packageName in BANK_PACKAGES }
-                        .map { it.packageName }
-                        .toSet()
+                    if (state.routingMode == RoutingMode.PER_APP_BYPASS) {
+                        // In bypass mode selected means "direct", so select only
+                        // protected apps instead of selecting everything else.
+                        state.apps
+                            .filter { it.packageName in visiblePackages }
+                            .filter { it.isAlwaysDirect || it.packageName in BANK_PACKAGES }
+                            .map { it.packageName }
+                            .toSet()
+                    } else {
+                        // In whitelist mode selected means "proxied", so select
+                        // visible apps except sensitive/RU/network clients.
+                        state.apps
+                            .filter { it.packageName in visiblePackages }
+                            .filterNot { it.isAlwaysDirect || it.packageName in BANK_PACKAGES }
+                            .map { it.packageName }
+                            .toSet()
+                    }
                 }
             }
 
             state.copy(
                 apps = state.apps.map { app ->
                     if (template == AppTemplate.ALL_EXCEPT_BANKS) {
-                        app.copy(
-                            isProxied = if (app.isAlwaysDirect) {
-                                state.routingMode == RoutingMode.PER_APP_BYPASS
-                            } else {
-                                app.packageName in targetPackages
-                            },
-                        )
+                        app.copy(isProxied = app.packageName in targetPackages)
                     } else {
                         // For specific templates, toggle ON those packages, leave others unchanged
                         if (app.packageName in targetPackages && !app.isAlwaysDirect) app.copy(isProxied = true)

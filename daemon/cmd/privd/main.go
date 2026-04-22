@@ -368,7 +368,14 @@ func (d *daemon) registerHandlers() {
 
 func (d *daemon) handleStatus(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	status := d.coreMgr.Status()
-	return d.buildStatusPayload(status, d.healthMon.LastResult()), nil
+	healthResult := d.healthMon.LastResult()
+	state := d.coreMgr.GetState()
+	if state == core.StateRunning || state == core.StateDegraded {
+		if healthResult == nil || time.Since(healthResult.Timestamp) > 10*time.Second {
+			healthResult = d.healthMon.RunOnce()
+		}
+	}
+	return d.buildStatusPayload(status, healthResult), nil
 }
 
 func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCError) {

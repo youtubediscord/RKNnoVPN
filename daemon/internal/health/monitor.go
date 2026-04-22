@@ -216,6 +216,11 @@ func (h *HealthMonitor) RunOnce() *HealthResult {
 			break
 		}
 	}
+
+	h.mu.Lock()
+	h.lastResult = result
+	h.mu.Unlock()
+
 	return result
 }
 
