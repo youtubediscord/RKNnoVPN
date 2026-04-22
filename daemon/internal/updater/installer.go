@@ -193,6 +193,14 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	setPerms(binDir, 0750)
 	setPerms(scriptsDir, 0755)
 
+	// Remove stale rules again using the freshly copied scripts. This cleans up
+	// duplicate fwmark policy rules or old chain layouts that older scripts may
+	// have failed to tear down before extraction.
+	logger.Println("running post-copy network cleanup with updated scripts")
+	if err := stopCurrentProxy(dataDir); err != nil {
+		logger.Printf("warning: post-copy cleanup: %v", err)
+	}
+
 	// --- 8. Verify new privd binary ---
 	newPrivd := filepath.Join(binDir, "privd")
 	if _, err := os.Stat(newPrivd); err == nil {
@@ -308,8 +316,11 @@ func relaunchDaemon(dataDir string) error {
 	if _, err := os.Stat(logDir); os.IsNotExist(err) {
 		logDir = filepath.Join(dataDir, "log")
 	}
-	os.MkdirAll(logDir, 0750)
+	os.MkdirAll(logDir, 0700)
 	logFile := filepath.Join(logDir, "privd.log")
+	if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+		_ = f.Close()
+	}
 
 	runDir := filepath.Join(dataDir, "run")
 	os.MkdirAll(runDir, 0750)

@@ -81,6 +81,10 @@ class DaemonClient @Inject constructor(
     suspend fun reload(): DaemonClientResult<Unit> =
         callVoid("reload")
 
+    /** Force-remove PrivStack network rules and stop the proxy core. */
+    suspend fun networkReset(): DaemonClientResult<Unit> =
+        callVoid("network-reset", timeoutMs = 60_000L)
+
     /** Run a full health check and return the result in the dashboard shape. */
     suspend fun health(): DaemonClientResult<DaemonStatus> =
         call("health") { json.decodeFromJsonElement(DaemonStatus.serializer(), it) }

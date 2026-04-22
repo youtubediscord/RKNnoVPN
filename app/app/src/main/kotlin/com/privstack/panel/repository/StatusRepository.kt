@@ -80,6 +80,12 @@ class StatusRepository @Inject constructor(
         return result.toOutcome("Reload")
     }
 
+    suspend fun networkReset(): CommandOutcome {
+        val result = client.networkReset()
+        poller.pollNow()
+        return result.toOutcome("Network reset")
+    }
+
     /**
      * Run a daemon health check.
      * On success, also updates the cached status with the health info.

@@ -328,6 +328,7 @@ func (d *daemon) registerHandlers() {
 	d.ipcServer.Register("start", d.handleStart)
 	d.ipcServer.Register("stop", d.handleStop)
 	d.ipcServer.Register("reload", d.handleReload)
+	d.ipcServer.Register("network-reset", d.handleNetworkReset)
 	d.ipcServer.Register("health", d.handleHealth)
 	d.ipcServer.Register("audit", d.handleAudit)
 	d.ipcServer.Register("app.list", d.handleAppList)
@@ -412,6 +413,46 @@ func (d *daemon) handleStop(params *json.RawMessage) (interface{}, *ipc.RPCError
 func (d *daemon) handleReload(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	d.reloadConfig()
 	return map[string]string{"status": "reloaded"}, nil
+}
+
+func (d *daemon) handleNetworkReset(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	d.stopSubsystems()
+
+	var errors []string
+	if d.coreMgr.GetState() != core.StateStopped {
+		if err := d.coreMgr.Stop(); err != nil {
+			errors = append(errors, "core stop: "+err.Error())
+		}
+	}
+
+	d.mu.Lock()
+	cfg := d.cfg
+	d.mu.Unlock()
+	env := buildScriptEnv(cfg, d.dataDir)
+
+	dnsScript := filepath.Join(d.dataDir, "scripts", "dns.sh")
+	if err := core.ExecScript(dnsScript, "stop", env); err != nil {
+		errors = append(errors, "dns stop: "+err.Error())
+	}
+
+	iptablesScript := filepath.Join(d.dataDir, "scripts", "iptables.sh")
+	if err := core.ExecScript(iptablesScript, "stop", env); err != nil {
+		errors = append(errors, "iptables stop: "+err.Error())
+	}
+
+	_, _ = core.ExecCommand("killall", "-TERM", "sing-box")
+	_, _ = core.ExecCommand("killall", "-KILL", "sing-box")
+	d.rescueMgr.Reset()
+	d.coreMgr.SetState(core.StateStopped)
+
+	if len(errors) > 0 {
+		return map[string]interface{}{
+			"status": "partial",
+			"errors": errors,
+		}, nil
+	}
+
+	return map[string]string{"status": "reset"}, nil
 }
 
 func (d *daemon) handleHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {

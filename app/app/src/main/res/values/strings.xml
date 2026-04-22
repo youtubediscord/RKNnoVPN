@@ -126,6 +126,8 @@
     <string name="module_version">Version</string>
     <string name="daemon_status">Daemon status</string>
     <string name="restart_daemon">Restart</string>
+    <string name="reset_network_rules">Reset network</string>
+    <string name="reset_network_rules_desc">Stop the core and remove PrivStack iptables, DNS and routing rules.</string>
     <string name="settings_theme">Theme</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>

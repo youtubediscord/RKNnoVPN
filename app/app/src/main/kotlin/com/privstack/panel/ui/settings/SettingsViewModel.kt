@@ -219,6 +219,27 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun resetNetworkRules() {
+        _uiState.update { it.copy(daemonStatusText = "Resetting network...", errorMessage = null) }
+        viewModelScope.launch {
+            when (val outcome = statusRepository.networkReset()) {
+                is CommandOutcome.Success -> {
+                    Log.d(TAG, "Network reset succeeded")
+                    _uiState.update { it.copy(daemonStatusText = "Stopped") }
+                }
+                is CommandOutcome.Failed -> {
+                    Log.w(TAG, "Network reset failed: ${outcome.message}")
+                    _uiState.update {
+                        it.copy(
+                            daemonStatusText = "Error",
+                            errorMessage = outcome.message,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     fun setThemeMode(mode: ThemeMode) {
         _uiState.update { it.copy(themeMode = mode) }
         // Theme is a pure UI preference, stored locally (SharedPreferences/DataStore).

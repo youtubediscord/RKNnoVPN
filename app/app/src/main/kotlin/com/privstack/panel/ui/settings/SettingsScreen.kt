@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -210,6 +211,27 @@ fun SettingsScreen(
                         Text(stringResource(R.string.restart_daemon))
                     }
                 },
+                colors = transparentListItemColors(),
+            )
+
+            ListItem(
+                headlineContent = {
+                    FilledTonalButton(
+                        onClick = viewModel::resetNetworkRules,
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Filled.RestartAlt,
+                            contentDescription = null,
+                            modifier = Modifier.padding(end = 4.dp),
+                        )
+                        Text(stringResource(R.string.reset_network_rules))
+                    }
+                },
+                supportingContent = { Text(stringResource(R.string.reset_network_rules_desc)) },
                 colors = transparentListItemColors(),
             )
 

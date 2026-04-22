@@ -278,11 +278,17 @@ private fun MetricsRow(state: DashboardUiState) {
         // DNS
         MetricCard(
             label = stringResource(R.string.dns_status),
-            value = if (state.dnsOperational) stringResource(R.string.dns_ok)
-            else stringResource(R.string.dns_fail),
+            value = when {
+                !state.dnsChecked -> stringResource(R.string.unknown_ip)
+                state.dnsOperational -> stringResource(R.string.dns_ok)
+                else -> stringResource(R.string.dns_fail)
+            },
             icon = { Icon(Icons.Filled.Dns, contentDescription = null, modifier = Modifier.size(16.dp)) },
-            valueColor = if (state.dnsOperational) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.error,
+            valueColor = when {
+                !state.dnsChecked -> MaterialTheme.colorScheme.onSurface
+                state.dnsOperational -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.error
+            },
             modifier = Modifier.weight(1f),
         )
 

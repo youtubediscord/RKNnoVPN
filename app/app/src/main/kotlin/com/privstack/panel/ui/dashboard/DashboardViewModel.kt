@@ -31,6 +31,7 @@ data class DashboardUiState(
     val egressIp: String? = null,
     val countryFlag: String? = null,
     val latencyMs: Int? = null,
+    val dnsChecked: Boolean = false,
     val dnsOperational: Boolean = false,
     val uptimeSeconds: Long = 0L,
     val isRefreshing: Boolean = false,
@@ -189,6 +190,7 @@ class DashboardViewModel @Inject constructor(
                 activeNodeProtocol = status.activeNodeProtocol,
                 traffic = status.traffic,
                 trafficHistory = _trafficRing.toList(),
+                dnsChecked = status.health.checkedAt > 0L,
                 dnsOperational = status.health.dnsOperational,
                 uptimeSeconds = status.uptime,
                 // Clear error when we get a successful status with a healthy state

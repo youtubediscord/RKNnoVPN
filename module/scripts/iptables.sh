@@ -22,6 +22,7 @@ set -eu
 # ============================================================================
 
 TAG="PrivStack:iptables"
+SCRIPT_VERSION="v1.5.1"
 
 # Chain name prefix — all PrivStack chains start with this
 CHAIN_PREFIX="PRIVSTACK"
@@ -504,6 +505,11 @@ backup_rules() {
 # ============================================================================
 
 setup_policy_routing() {
+    # Remove stale duplicate rules from interrupted/failed older starts before
+    # adding a fresh pair. Android permits duplicate ip rules, and one `del`
+    # removes only one entry.
+    teardown_policy_routing
+
     # IPv4 policy route
     # "ip rule": if packet has fwmark $FWMARK, use routing table $ROUTE_TABLE
     ip rule add fwmark ${FWMARK} table ${ROUTE_TABLE} 2>/dev/null || true
@@ -519,11 +525,11 @@ setup_policy_routing() {
 
 teardown_policy_routing() {
     # Remove policy rules and routes. Suppress errors if they don't exist.
-    ip rule del fwmark ${FWMARK} table ${ROUTE_TABLE} 2>/dev/null || true
+    while ip rule del fwmark ${FWMARK} table ${ROUTE_TABLE} 2>/dev/null; do :; done
     ip route del local default dev lo table ${ROUTE_TABLE} 2>/dev/null || true
     ip route flush table ${ROUTE_TABLE} 2>/dev/null || true
 
-    ip -6 rule del fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null || true
+    while ip -6 rule del fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null; do :; done
     ip -6 route del local default dev lo table ${ROUTE_TABLE_V6} 2>/dev/null || true
     ip -6 route flush table ${ROUTE_TABLE_V6} 2>/dev/null || true
 
@@ -582,7 +588,7 @@ flush_nat_chain() {
 
 do_start() {
     log_info "========================================="
-    log_info "Starting PrivStack iptables (mode=${APP_MODE}, proxy=${PROXY_MODE})"
+    log_info "Starting PrivStack iptables ${SCRIPT_VERSION} (mode=${APP_MODE}, proxy=${PROXY_MODE})"
     log_info "  TPROXY_PORT=${TPROXY_PORT}"
     log_info "  DNS_PORT=${DNS_PORT}"
     log_info "  API_PORT=${API_PORT}"
@@ -612,19 +618,10 @@ do_start() {
     # ---- Step 5: Generate rules files ----
     mkdir -p "${SNAPSHOT_DIR}"
 
-    # IPv4 rules: mangle + nat combined into one restore file
-    {
-        gen_mangle_v4
-        echo ""
-        gen_nat_v4
-    } > "${SNAPSHOT_DIR}/iptables.rules"
+    # iptables.sh owns mangle + policy routing. DNS nat is owned by dns.sh.
+    gen_mangle_v4 > "${SNAPSHOT_DIR}/iptables.rules"
 
-    # IPv6 rules: apply mangle separately because IPv6 nat may be unavailable.
     gen_mangle_v6 > "${SNAPSHOT_DIR}/ip6tables.rules"
-
-    # IPv6 nat is absent on some Android kernels/legacy ip6tables builds.
-    # Keep IPv6 TPROXY mandatory, but make classic IPv6 DNS redirect optional.
-    gen_nat_v6 > "${SNAPSHOT_DIR}/ip6tables-nat.rules"
 
     log_info "Rules files generated"
 
@@ -650,18 +647,6 @@ do_start() {
         # Roll back v4 too
         do_stop
         exit 1
-    fi
-
-    if ip6tables ${IPT_WAIT} -t nat -L >/dev/null 2>&1; then
-        log_info "Applying IPv6 DNS nat rules..."
-        if ! ip6tables-restore ${IPT_WAIT} --noflush < "${SNAPSHOT_DIR}/ip6tables-nat.rules"; then
-            log_warn "ip6tables-restore failed for IPv6 nat; continuing without IPv6 classic DNS redirect"
-            log_warn "Rules file content:"
-            cat "${SNAPSHOT_DIR}/ip6tables-nat.rules" >&2
-            flush_nat_chain ip6tables
-        fi
-    else
-        log_warn "IPv6 nat table is unavailable; skipping IPv6 classic DNS redirect"
     fi
 
     # ---- Step 7: Verify critical chains exist ----
@@ -741,7 +726,6 @@ do_stop() {
     if [ -d "${SNAPSHOT_DIR}" ]; then
         rm -f "${SNAPSHOT_DIR}/iptables.rules"
         rm -f "${SNAPSHOT_DIR}/ip6tables.rules"
-        rm -f "${SNAPSHOT_DIR}/ip6tables-nat.rules"
         rm -f "${SNAPSHOT_DIR}/iptables_backup.rules"
         rm -f "${SNAPSHOT_DIR}/ip6tables_backup.rules"
         rm -f "${SNAPSHOT_DIR}/env.sh"

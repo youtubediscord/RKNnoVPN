@@ -126,6 +126,8 @@
     <string name="module_version">Версия</string>
     <string name="daemon_status">Статус демона</string>
     <string name="restart_daemon">Перезапустить</string>
+    <string name="reset_network_rules">Сбросить сеть</string>
+    <string name="reset_network_rules_desc">Остановить core и убрать правила PrivStack из iptables, DNS и policy routing.</string>
     <string name="settings_theme">Тема</string>
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Тёмная</string>

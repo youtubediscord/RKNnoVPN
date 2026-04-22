@@ -18,6 +18,7 @@ var commands = map[string]string{
 	"start":              "Start proxy",
 	"stop":               "Stop proxy",
 	"reload":             "Reload config and restart proxy",
+	"network-reset":      "Force-remove PrivStack iptables/DNS/routing rules",
 	"health":             "Get health check status",
 	"audit":              "Run privacy/security audit",
 	"app.list":           "List installed apps known to the daemon",
@@ -181,7 +182,7 @@ func printUsage() {
 	}
 
 	order := []string{
-		"status", "start", "stop", "reload", "health", "audit",
+		"status", "start", "stop", "reload", "network-reset", "health", "audit",
 		"app.list", "app.resolveUid",
 		"config-get", "config-set", "config-set-many", "config-list", "config-import", "subscription-fetch", "node-test",
 		"logs", "version",

@@ -28,6 +28,7 @@
 set -eu
 
 TAG="privstack:dns"
+SCRIPT_VERSION="v1.5.1"
 
 # Sane defaults if the caller omitted something.
 DNS_PORT="${DNS_PORT:-10856}"
@@ -105,7 +106,13 @@ hook_chains() {
 # ── start ───────────────────────────────────────────────────────────────────
 
 start() {
-    log "starting DNS interception (mode=$DNS_MODE, port=$DNS_PORT)"
+    log "starting DNS interception $SCRIPT_VERSION (mode=$DNS_MODE, port=$DNS_PORT)"
+
+    if [ "$DNS_MODE" = "off" ]; then
+        stop
+        log "DNS interception disabled"
+        return
+    fi
 
     create_chains
 
