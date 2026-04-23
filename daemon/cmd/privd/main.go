@@ -44,15 +44,15 @@ type daemon struct {
 	ipcServer  *ipc.Server
 	runtimeV2  *runtimev2.Orchestrator
 
-	mu         sync.Mutex // protects cfg
-	metricsMu  sync.Mutex
-	runtimeOpMu sync.Mutex
+	mu                    sync.Mutex // protects cfg
+	metricsMu             sync.Mutex
+	runtimeOpMu           sync.Mutex
 	runtimeDesiredRunning bool
-	runtimeOpEpoch uint64
-	traffic    trafficSnapshot
-	latency    latencySnapshot
-	egress     egressSnapshot
-	healthKick time.Time
+	runtimeOpEpoch        uint64
+	traffic               trafficSnapshot
+	latency               latencySnapshot
+	egress                egressSnapshot
+	healthKick            time.Time
 }
 
 type trafficSnapshot struct {

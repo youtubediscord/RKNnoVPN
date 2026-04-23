@@ -255,12 +255,12 @@ func BuildBypassUIDs(alwaysDirectPackages []string) string {
 // AppRoutingEnv is the explicit UID/scope contract passed to the shell
 // firewall and DNS scripts. APP_UIDS is kept only as a legacy mirror.
 type AppRoutingEnv struct {
-	AppMode      string
-	AppUIDs      string
-	ProxyUIDs    string
-	DirectUIDs   string
-	BypassUIDs   string
-	DNSScope     string
+	AppMode       string
+	AppUIDs       string
+	ProxyUIDs     string
+	DirectUIDs    string
+	BypassUIDs    string
+	DNSScope      string
 	LegacyDNSMode string
 }
 

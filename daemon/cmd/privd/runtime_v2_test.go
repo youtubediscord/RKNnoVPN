@@ -135,6 +135,37 @@ func TestRootReconcileGuardRequiresActiveMarker(t *testing.T) {
 	}
 }
 
+func TestBuildScriptEnvUsesExplicitDNSScopeForBlacklist(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Apps.Mode = "blacklist"
+	cfg.Apps.Packages = []string{"com.example.direct"}
+
+	env := buildScriptEnv(cfg, t.TempDir())
+	if env["APP_MODE"] != "blacklist" {
+		t.Fatalf("unexpected APP_MODE: %q", env["APP_MODE"])
+	}
+	if env["DNS_SCOPE"] != "all_except_uids" {
+		t.Fatalf("blacklist DNS must exclude direct UIDs, got %q", env["DNS_SCOPE"])
+	}
+	if env["PROXY_UIDS"] != "" {
+		t.Fatalf("blacklist mode must not put selected packages into PROXY_UIDS: %q", env["PROXY_UIDS"])
+	}
+}
+
+func TestBuildScriptEnvUsesExplicitDNSScopeForWhitelist(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Apps.Mode = "whitelist"
+	cfg.Apps.Packages = []string{"com.example.proxy"}
+
+	env := buildScriptEnv(cfg, t.TempDir())
+	if env["DNS_SCOPE"] != "uids" {
+		t.Fatalf("whitelist DNS must target proxied UIDs only, got %q", env["DNS_SCOPE"])
+	}
+	if env["DIRECT_UIDS"] != "" {
+		t.Fatalf("whitelist mode must not put selected packages into DIRECT_UIDS: %q", env["DIRECT_UIDS"])
+	}
+}
+
 func TestReadLogTailReturnsBoundedTail(t *testing.T) {
 	path := t.TempDir() + "/runtime.log"
 	content := strings.Join([]string{"one", "two", "three", "four"}, "\n")

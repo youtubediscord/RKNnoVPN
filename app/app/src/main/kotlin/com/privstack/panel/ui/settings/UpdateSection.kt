@@ -41,8 +41,8 @@ private const val GITHUB_RELEASES_URL =
  *
  * Shows current version, a "Check for updates" button, and -- when an
  * update is available -- the changelog, download progress, and install
- * button. Update checks/downloads are performed by the APK control-plane,
- * while installation still goes through the rooted backend.
+ * button. Update checks, downloads, and installation go through the rooted
+ * backend so the APK does not need its own INTERNET permission.
  */
 @Composable
 fun UpdateSection(
