@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 manifest="${repo_root}/app/app/src/main/AndroidManifest.xml"
 kotlin_src="${repo_root}/app/app/src/main/kotlin"
 profile_config="${repo_root}/app/app/src/main/kotlin/com/privstack/panel/model/ProfileConfig.kt"
+daemon_config="${repo_root}/daemon/internal/config/config.go"
 
 fail=0
 
@@ -51,5 +52,6 @@ check_absent_tree "No direct APK HTTP client" 'HttpURLConnection|OkHttpClient|Re
 check_present_file "SOCKS helper disabled by default" 'val socksPort: Int = 0' "${profile_config}"
 check_present_file "HTTP helper disabled by default" 'val httpPort: Int = 0' "${profile_config}"
 check_present_file "TUN disabled by default" 'val enabled: Boolean = false' "${profile_config}"
+check_present_file "Clash API disabled by default" 'APIPort:[[:space:]]+0' "${daemon_config}"
 
 exit "${fail}"

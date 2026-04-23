@@ -1439,9 +1439,6 @@ func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCE
 		}
 	}
 	apiPort := cfg.Proxy.APIPort
-	if apiPort == 0 {
-		apiPort = 9090
-	}
 	testURL := strings.TrimSpace(p.URL)
 	if testURL == "" {
 		testURL = strings.TrimSpace(cfg.Health.URL)
@@ -1476,7 +1473,16 @@ func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCE
 			result["tcp_ms"] = tcpMS
 		}
 
-		urlMS, statusCode, urlErr := testClashDelay(apiPort, profile.Tag, testURL, p.TimeoutMS)
+		var urlMS int64
+		var statusCode int
+		var urlErr error
+		if apiPort > 0 {
+			urlMS, statusCode, urlErr = testClashDelay(apiPort, profile.Tag, testURL, p.TimeoutMS)
+		} else if len(profiles) == 1 {
+			urlMS, statusCode, urlErr = testTransparentURLDelay(cfg, testURL, p.TimeoutMS)
+		} else {
+			urlErr = fmt.Errorf("api_disabled")
+		}
 		if urlErr != nil {
 			result["url_status"] = "fail"
 			result["verdict"] = "unusable"
@@ -1510,6 +1516,9 @@ func testTCPConnect(host string, port int, timeout time.Duration) (int64, error)
 }
 
 func testClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS int) (int64, int, error) {
+	if apiPort <= 0 {
+		return 0, 0, fmt.Errorf("api_disabled")
+	}
 	if outboundTag == "" {
 		return 0, 0, fmt.Errorf("outbound tag is empty")
 	}
@@ -1539,6 +1548,80 @@ func testClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS i
 		return 0, resp.StatusCode, fmt.Errorf("parse clash delay response: %w", err)
 	}
 	return parsed.Delay, resp.StatusCode, nil
+}
+
+func testTransparentURLDelay(cfg *config.Config, testURL string, timeoutMS int) (int64, int, error) {
+	if cfg == nil {
+		return 0, 0, fmt.Errorf("config is nil")
+	}
+	if timeoutMS <= 0 {
+		timeoutMS = 5000
+	}
+	parsed, err := neturl.Parse(strings.TrimSpace(testURL))
+	if err != nil {
+		return 0, 0, err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return 0, 0, fmt.Errorf("unsupported URL scheme %q", parsed.Scheme)
+	}
+
+	timeout := time.Duration(timeoutMS) * time.Millisecond
+	dnsPort := cfg.Proxy.DNSPort
+	if dnsPort == 0 {
+		dnsPort = 10856
+	}
+	mark := cfg.Proxy.Mark
+	if mark == 0 {
+		mark = 0x2023
+	}
+
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: timeout}
+			return dialer.DialContext(ctx, network, net.JoinHostPort("127.0.0.1", strconv.Itoa(dnsPort)))
+		},
+	}
+	dialer := &net.Dialer{
+		Timeout:  timeout,
+		Resolver: resolver,
+		Control: func(network, address string, conn syscall.RawConn) error {
+			var sockErr error
+			if err := conn.Control(func(fd uintptr) {
+				sockErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, mark)
+			}); err != nil {
+				return err
+			}
+			return sockErr
+		},
+	}
+	transport := &http.Transport{
+		Proxy:               nil,
+		DialContext:         dialer.DialContext,
+		TLSHandshakeTimeout: timeout,
+		DisableKeepAlives:   true,
+	}
+	defer transport.CloseIdleConnections()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	req.Header.Set("User-Agent", "PrivStack/health")
+
+	start := time.Now()
+	resp, err := (&http.Client{Timeout: timeout + time.Second, Transport: transport}).Do(req)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return 0, resp.StatusCode, fmt.Errorf("transparent URL probe HTTP %d", resp.StatusCode)
+	}
+	return time.Since(start).Milliseconds(), resp.StatusCode, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -1991,9 +2074,6 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 	cfg := d.cfg
 	d.mu.Unlock()
 	apiPort := cfg.Proxy.APIPort
-	if apiPort == 0 {
-		apiPort = 9090
-	}
 	panelInbounds := cfg.ResolvePanelInbounds()
 	traffic := d.buildTrafficPayload(state, apiPort)
 	latencyMs := d.cachedLatencyMs(state, cfg, apiPort)
@@ -2130,7 +2210,13 @@ func (d *daemon) cachedLatencyMs(state core.State, cfg *config.Config, apiPort i
 	if testURL == "" {
 		testURL = "https://www.gstatic.com/generate_204"
 	}
-	latency, _, err := testClashDelay(apiPort, "proxy", testURL, 2500)
+	var latency int64
+	var err error
+	if apiPort > 0 {
+		latency, _, err = testClashDelay(apiPort, "proxy", testURL, 2500)
+	} else {
+		latency, _, err = testTransparentURLDelay(cfg, testURL, 2500)
+	}
 
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
@@ -2192,8 +2278,8 @@ func (d *daemon) resetRuntimeMetrics() {
 }
 
 func queryClashTraffic(apiPort int, timeout time.Duration) (int64, int64, error) {
-	if apiPort == 0 {
-		apiPort = 9090
+	if apiPort <= 0 {
+		return 0, 0, fmt.Errorf("api_disabled")
 	}
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d/connections", apiPort)
 	client := &http.Client{Timeout: timeout}

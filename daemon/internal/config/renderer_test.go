@@ -79,6 +79,49 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 	}
 }
 
+func TestRenderOmitsClashAPIByDefault(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if experimental, ok := rendered["experimental"]; ok {
+		t.Fatalf("clash API must be production-off by default, got experimental=%#v", experimental)
+	}
+}
+
+func TestRenderAddsClashAPIWhenExplicitlyEnabled(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Proxy.APIPort = 9090
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	experimental := rendered["experimental"].(map[string]any)
+	clashAPI := experimental["clash_api"].(map[string]any)
+	if clashAPI["external_controller"] != "127.0.0.1:9090" {
+		t.Fatalf("unexpected clash API controller: %#v", clashAPI)
+	}
+}
+
 func TestRenderSocksOutboundDoesNotInheritTransport(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "127.0.0.1"

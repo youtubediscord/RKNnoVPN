@@ -901,9 +901,6 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 		}
 	}
 	apiPort := cfg.Proxy.APIPort
-	if apiPort == 0 {
-		apiPort = 9090
-	}
 	testURL := strings.TrimSpace(url)
 	if testURL == "" {
 		testURL = strings.TrimSpace(cfg.Health.URL)
@@ -951,7 +948,15 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 		}
 
 		if runtimeRunning {
-			urlMS, _, urlErr := testClashDelay(apiPort, profile.Tag, testURL, timeoutMS)
+			var urlMS int64
+			var urlErr error
+			if apiPort > 0 {
+				urlMS, _, urlErr = testClashDelay(apiPort, profile.Tag, testURL, timeoutMS)
+			} else if len(profiles) == 1 {
+				urlMS, _, urlErr = testTransparentURLDelay(cfg, testURL, timeoutMS)
+			} else {
+				urlErr = fmt.Errorf("api_disabled")
+			}
 			if urlErr == nil {
 				result.TunnelDelay = &urlMS
 				result.URLStatus = "ok"
@@ -985,6 +990,9 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 func classifyRuntimeURLTestFailure(err error, snapshot runtimev2.HealthSnapshot) string {
 	if !snapshot.Healthy() {
 		return "runtime_not_ready"
+	}
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "api_disabled") {
+		return "api_disabled"
 	}
 	if !snapshot.DNSReady {
 		return "proxy_dns_unavailable"

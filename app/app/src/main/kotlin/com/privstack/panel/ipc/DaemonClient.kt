@@ -496,7 +496,8 @@ class DaemonClient @Inject constructor(
                                     "runtime_not_ready",
                                     "runtime_degraded",
                                     "proxy_dns_unavailable",
-                                    "http_helper_unavailable" -> probe.errorClass
+                                    "http_helper_unavailable",
+                                    "api_disabled" -> probe.errorClass
                                     else -> null
                                 },
                             )

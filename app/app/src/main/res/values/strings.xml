@@ -234,6 +234,7 @@
     <string name="node_test_reason_runtime_degraded">runtime degraded</string>
     <string name="node_test_reason_proxy_dns_unavailable">proxy DNS unavailable</string>
     <string name="node_test_reason_http_helper_unavailable">HTTP helper unavailable</string>
+    <string name="node_test_reason_api_disabled">per-node URL test disabled in production mode</string>
     <string name="node_test_reason_unknown">error</string>
     <string name="node_test_tcp_ms">TCP %1$d ms</string>
     <string name="node_test_url_ms">URL %1$d ms</string>
@@ -320,8 +321,8 @@
     <string name="audit_check_not_vpn_capability_title">NOT_VPN capability set on active network</string>
     <string name="audit_check_not_vpn_capability_detail">ConnectivityManager reports NOT_VPN for the default network, hiding proxy presence.</string>
     <string name="audit_check_not_vpn_capability_remediation">No action required.</string>
-    <string name="audit_check_api_port_protected_title">Daemon API port is localhost-only</string>
-    <string name="audit_check_api_port_protected_detail">The management API binds to 127.0.0.1 and is not reachable from LAN.</string>
+    <string name="audit_check_api_port_protected_title">Local control ports are protected</string>
+    <string name="audit_check_api_port_protected_detail">Production mode keeps the Clash API disabled; any enabled local control ports are root/core protected.</string>
     <string name="audit_check_api_port_protected_remediation">No action required.</string>
     <string name="audit_check_dns_leak_title">DNS queries may leak to system resolver</string>
     <string name="audit_check_dns_leak_detail">Some queries bypass the tunnel DNS and reach the ISP resolver directly.</string>

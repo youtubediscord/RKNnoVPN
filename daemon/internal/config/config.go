@@ -29,8 +29,8 @@ type ProxyConfig struct {
 	Mode       string `json:"mode"` // "tproxy" (matches config.json proxy.mode)
 	TProxyPort int    `json:"tproxy_port"`
 	DNSPort    int    `json:"dns_port"`
-	GID        int    `json:"gid"`  // core process GID (matches config.json proxy.gid)
-	Mark       int    `json:"mark"` // fwmark for policy routing (matches config.json proxy.mark)
+	GID        int    `json:"gid"`      // core process GID (matches config.json proxy.gid)
+	Mark       int    `json:"mark"`     // fwmark for policy routing (matches config.json proxy.mark)
 	APIPort    int    `json:"api_port"` // 0 disables sing-box Clash REST API
 }
 

@@ -234,6 +234,7 @@
     <string name="node_test_reason_runtime_degraded">runtime degraded</string>
     <string name="node_test_reason_proxy_dns_unavailable">proxy DNS недоступен</string>
     <string name="node_test_reason_http_helper_unavailable">HTTP helper недоступен</string>
+    <string name="node_test_reason_api_disabled">URL-тест узла отключен в production-режиме</string>
     <string name="node_test_reason_unknown">ошибка</string>
     <string name="node_test_tcp_ms">TCP %1$d мс</string>
     <string name="node_test_url_ms">URL %1$d мс</string>
@@ -320,8 +321,8 @@
     <string name="audit_check_not_vpn_capability_title">На активной сети выставлен флаг NOT_VPN</string>
     <string name="audit_check_not_vpn_capability_detail">ConnectivityManager сообщает NOT_VPN для сети по умолчанию, скрывая присутствие прокси.</string>
     <string name="audit_check_not_vpn_capability_remediation">Ничего делать не нужно.</string>
-    <string name="audit_check_api_port_protected_title">API-порт демона доступен только локально</string>
-    <string name="audit_check_api_port_protected_detail">Управляющий API слушает только 127.0.0.1 и недоступен из LAN.</string>
+    <string name="audit_check_api_port_protected_title">Локальные управляющие порты защищены</string>
+    <string name="audit_check_api_port_protected_detail">В production-режиме Clash API отключен; включенные локальные управляющие порты доступны только root/core.</string>
     <string name="audit_check_api_port_protected_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_dns_leak_title">DNS-запросы могут уходить в системный резолвер</string>
     <string name="audit_check_dns_leak_detail">Часть запросов обходит туннельный DNS и попадает к DNS-резолверу провайдера напрямую.</string>

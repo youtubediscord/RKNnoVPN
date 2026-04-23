@@ -84,6 +84,7 @@ class UserMessageFormatter @Inject constructor(
             "runtime_degraded" -> get(R.string.node_test_reason_runtime_degraded)
             "proxy_dns_unavailable" -> get(R.string.node_test_reason_proxy_dns_unavailable)
             "http_helper_unavailable" -> get(R.string.node_test_reason_http_helper_unavailable)
+            "api_disabled" -> get(R.string.node_test_reason_api_disabled)
             "", "ok" -> get(R.string.node_test_reason_unknown)
             else -> normalized
         }
