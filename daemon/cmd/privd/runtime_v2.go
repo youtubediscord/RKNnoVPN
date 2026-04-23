@@ -330,37 +330,56 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 	}
 	snapshot.EgressReady = d.hasRecentEgress()
 
+	diagnostic := firstFailedGateDiagnostic(result, snapshot)
+	if snapshot.LastCode == "" {
+		snapshot.LastCode = diagnostic.Code
+	}
 	if snapshot.LastError == "" {
-		snapshot.LastError = firstFailedGate(result, snapshot)
+		snapshot.LastError = diagnostic.Detail
 	}
 	return snapshot
 }
 
 func firstFailedGate(result *health.HealthResult, snapshot runtimev2.HealthSnapshot) string {
+	return firstFailedGateDiagnostic(result, snapshot).Detail
+}
+
+type healthGateDiagnostic struct {
+	Code   string
+	Detail string
+}
+
+func firstFailedGateDiagnostic(result *health.HealthResult, snapshot runtimev2.HealthSnapshot) healthGateDiagnostic {
 	if result != nil {
 		for _, name := range []string{"singbox_alive", "tproxy_port", "iptables", "routing"} {
 			if check, ok := result.Checks[name]; ok && !check.Pass {
-				return formatHealthCheckError(name, check)
+				return healthGateDiagnostic{
+					Code:   firstNonEmpty(check.Code, "READINESS_GATE_FAILED"),
+					Detail: formatHealthCheckError(name, check),
+				}
 			}
 		}
 		if snapshot.Healthy() {
 			for _, name := range []string{"dns_listener", "dns"} {
 				if check, ok := result.Checks[name]; ok && !check.Pass {
-					return fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", formatHealthCheckError(name, check))
+					return healthGateDiagnostic{
+						Code:   firstNonEmpty(check.Code, "PROXY_DNS_UNAVAILABLE"),
+						Detail: fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", formatHealthCheckError(name, check)),
+					}
 				}
 			}
 		}
 	}
 	if !snapshot.Healthy() {
-		return "one or more readiness gates are red"
+		return healthGateDiagnostic{Code: "READINESS_GATE_FAILED", Detail: "one or more readiness gates are red"}
 	}
 	if !snapshot.EgressReady {
-		return "operational degraded: no recent successful egress probe"
+		return healthGateDiagnostic{Code: "OUTBOUND_URL_FAILED", Detail: "operational degraded: no recent successful egress probe"}
 	}
 	if !snapshot.OperationalHealthy() {
-		return "operational degraded: one or more operational health signals are red"
+		return healthGateDiagnostic{Code: "OPERATIONAL_DEGRADED", Detail: "operational degraded: one or more operational health signals are red"}
 	}
-	return ""
+	return healthGateDiagnostic{}
 }
 
 func formatHealthCheckError(name string, check health.CheckResult) string {
