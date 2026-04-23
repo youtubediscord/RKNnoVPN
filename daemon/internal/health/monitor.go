@@ -23,6 +23,7 @@ import (
 type CheckResult struct {
 	Pass   bool   `json:"pass"`
 	Detail string `json:"detail"`
+	Code   string `json:"code,omitempty"`
 }
 
 // HealthResult aggregates all check outcomes for one cycle.
@@ -226,7 +227,8 @@ func (h *HealthMonitor) RunOnce() *HealthResult {
 	// 4. Routing policy rule (fwmark).
 	result.Checks["routing"] = h.runRoutingCheck()
 
-	// 5. DNS resolution (best-effort, not a hard health gate).
+	// 5. DNS listener and resolution (best-effort, not a hard health gate).
+	result.Checks["dns_listener"] = h.checkDNSListener()
 	result.Checks["dns"] = h.runDNSCheck()
 
 	// Hard health only depends on the core process, the local listener, and
@@ -323,16 +325,16 @@ func (h *HealthMonitor) tick() {
 // kill(pid, 0).
 func (h *HealthMonitor) checkProcessAlive(pid int) CheckResult {
 	if pid <= 0 {
-		return CheckResult{Pass: false, Detail: "PID не записан"}
+		return CheckResult{Pass: false, Detail: "PID не записан", Code: "CORE_PID_MISSING"}
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка FindProcess: %v", err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка FindProcess: %v", err), Code: "CORE_PID_LOOKUP_FAILED"}
 	}
 	// Signal 0 tests existence without actually sending a signal.
 	err = proc.Signal(syscall.Signal(0))
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("kill -0 %d: %v", pid, err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("kill -0 %d: %v", pid, err), Code: "CORE_PROCESS_DEAD"}
 	}
 	return CheckResult{Pass: true, Detail: fmt.Sprintf("PID %d активен", pid)}
 }
@@ -341,7 +343,7 @@ func (h *HealthMonitor) checkProcessAlive(pid int) CheckResult {
 func (h *HealthMonitor) checkPortListening(port int) CheckResult {
 	err := core.WaitForPort("127.0.0.1", port, 2*time.Second)
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("порт %d: %v", port, err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("порт %d: %v", port, err), Code: "TPROXY_PORT_DOWN"}
 	}
 	return CheckResult{Pass: true, Detail: fmt.Sprintf("порт %d открыт", port)}
 }
@@ -351,7 +353,7 @@ func (h *HealthMonitor) checkPortListening(port int) CheckResult {
 func (h *HealthMonitor) checkIptablesIntact() CheckResult {
 	err := core.ExecIptables("-t", "mangle", "-C", "PREROUTING", "-j", "PRIVSTACK_PRE")
 	if err != nil {
-		return CheckResult{Pass: false, Detail: "цепочка PRIVSTACK_PRE не подключена к PREROUTING"}
+		return CheckResult{Pass: false, Detail: "цепочка PRIVSTACK_PRE не подключена к PREROUTING", Code: "RULES_NOT_APPLIED"}
 	}
 	return CheckResult{Pass: true, Detail: "цепочка iptables на месте"}
 }
@@ -368,12 +370,12 @@ func (h *HealthMonitor) checkRoutingIntact() CheckResult {
 
 	out, err := core.ExecCommand("ip", "rule", "show")
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка ip rule show: %v", err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка ip rule show: %v", err), Code: "ROUTING_CHECK_FAILED"}
 	}
 
 	out6, err := core.ExecCommand("ip", "-6", "rule", "show")
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка ip -6 rule show: %v", err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка ip -6 rule show: %v", err), Code: "ROUTING_CHECK_FAILED"}
 	}
 
 	hasV4 := strings.Contains(out, markHex) || strings.Contains(out, markDec)
@@ -382,12 +384,24 @@ func (h *HealthMonitor) checkRoutingIntact() CheckResult {
 		return CheckResult{Pass: true, Detail: fmt.Sprintf("правило fwmark %s есть для IPv4 и IPv6", markHex)}
 	}
 	if hasV4 {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует для IPv6", markHex)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует для IPv6", markHex), Code: "ROUTING_V6_MISSING"}
 	}
 	if hasV6 {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует для IPv4", markHex)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует для IPv4", markHex), Code: "ROUTING_V4_MISSING"}
 	}
-	return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует", markHex)}
+	return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует", markHex), Code: "ROUTING_NOT_APPLIED"}
+}
+
+func (h *HealthMonitor) checkDNSListener() CheckResult {
+	port := h.dnsPort
+	if port <= 0 {
+		port = 10856
+	}
+	err := core.WaitForPort("127.0.0.1", port, 2*time.Second)
+	if err != nil {
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("DNS listener 127.0.0.1:%d недоступен: %v", port, err), Code: "DNS_LISTENER_DOWN"}
+	}
+	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS listener 127.0.0.1:%d открыт", port)}
 }
 
 // checkDNS attempts a trivial DNS lookup via the system resolver.
@@ -420,12 +434,29 @@ func (h *HealthMonitor) checkDNS() CheckResult {
 	}
 	addrs, err := resolver.LookupHost(ctx, host)
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s через 127.0.0.1:%d завершился ошибкой: %v", host, port, err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s через 127.0.0.1:%d завершился ошибкой: %v", host, port, err), Code: classifyDNSError(err)}
 	}
 	if len(addrs) == 0 {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s через 127.0.0.1:%d не вернул ответов", host, port)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s через 127.0.0.1:%d не вернул ответов", host, port), Code: "DNS_EMPTY_RESPONSE"}
 	}
 	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS для %s через 127.0.0.1:%d работает", host, port)}
+}
+
+func classifyDNSError(err error) string {
+	if err == nil {
+		return ""
+	}
+	detail := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(detail, "i/o timeout"),
+		strings.Contains(detail, "deadline exceeded"),
+		strings.Contains(detail, "timeout"):
+		return "DNS_LOOKUP_TIMEOUT"
+	case strings.Contains(detail, "connection refused"):
+		return "DNS_LISTENER_DOWN"
+	default:
+		return "DNS_LOOKUP_FAILED"
+	}
 }
 
 // --------------------------------------------------------------------------

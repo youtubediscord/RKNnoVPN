@@ -252,6 +252,51 @@ func BuildBypassUIDs(alwaysDirectPackages []string) string {
 	return joinUniqueFields(networkStackUID, ResolveAlwaysDirectUIDs(alwaysDirectPackages))
 }
 
+// AppRoutingEnv is the explicit UID/scope contract passed to the shell
+// firewall and DNS scripts. APP_UIDS is kept only as a legacy mirror.
+type AppRoutingEnv struct {
+	AppMode      string
+	AppUIDs      string
+	ProxyUIDs    string
+	DirectUIDs   string
+	BypassUIDs   string
+	DNSScope     string
+	LegacyDNSMode string
+}
+
+// BuildAppRoutingEnv resolves package names into unambiguous UID sets for
+// proxy, direct and hard-bypass traffic.
+func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []string) AppRoutingEnv {
+	appMode := MapAppMode(mode)
+	env := AppRoutingEnv{
+		AppMode:    appMode,
+		BypassUIDs: BuildBypassUIDs(alwaysDirectPackages),
+	}
+
+	selectedUIDs := ResolvePackageUIDs(packages)
+	switch appMode {
+	case "whitelist":
+		env.ProxyUIDs = selectedUIDs
+		env.AppUIDs = selectedUIDs
+		env.DNSScope = "uids"
+		env.LegacyDNSMode = "per_uid"
+	case "blacklist":
+		env.DirectUIDs = selectedUIDs
+		env.AppUIDs = selectedUIDs
+		env.DNSScope = "all_except_uids"
+		env.LegacyDNSMode = "per_uid"
+	case "off":
+		env.DNSScope = "off"
+		env.LegacyDNSMode = "off"
+	default:
+		env.AppMode = "all"
+		env.DNSScope = "all"
+		env.LegacyDNSMode = "all"
+	}
+
+	return env
+}
+
 // IsBuiltInAlwaysDirectPackage reports whether a package is part of the
 // built-in hard-direct policy for sensitive apps and network clients.
 func IsBuiltInAlwaysDirectPackage(pkgName string) bool {

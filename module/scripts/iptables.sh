@@ -110,13 +110,32 @@ validate_env() {
     # Default PROXY_MODE to tproxy if not set
     PROXY_MODE="${PROXY_MODE:-tproxy}"
 
-    # Default DNS_MODE to per_uid if not set
-    DNS_MODE="${DNS_MODE:-per_uid}"
-
-    # APP_UIDS and BYPASS_UIDS can be empty
+    # APP_UIDS is the legacy ambiguous selected UID set. New callers pass
+    # explicit PROXY_UIDS/DIRECT_UIDS plus DNS_SCOPE.
     APP_UIDS="${APP_UIDS:-}"
+    PROXY_UIDS="${PROXY_UIDS:-}"
+    DIRECT_UIDS="${DIRECT_UIDS:-}"
     BYPASS_UIDS="${BYPASS_UIDS:-}"
     HTTP_PORT="${HTTP_PORT:-0}"
+    DNS_MODE="${DNS_MODE:-per_uid}"
+    DNS_SCOPE="${DNS_SCOPE:-}"
+
+    if [ -z "$PROXY_UIDS" ] && [ -z "$DIRECT_UIDS" ] && [ -n "$APP_UIDS" ]; then
+        case "$APP_MODE" in
+            whitelist) PROXY_UIDS="$APP_UIDS" ;;
+            blacklist) DIRECT_UIDS="$APP_UIDS" ;;
+        esac
+    fi
+
+    if [ -z "$DNS_SCOPE" ]; then
+        case "$DNS_MODE:$APP_MODE" in
+            off:*) DNS_SCOPE="off" ;;
+            all:*) DNS_SCOPE="all" ;;
+            per_uid:blacklist|uid:blacklist) DNS_SCOPE="all_except_uids" ;;
+            per_uid:*|uid:*) DNS_SCOPE="uids" ;;
+            *) DNS_SCOPE="off" ;;
+        esac
+    fi
 }
 
 # ============================================================================
@@ -139,7 +158,10 @@ ROUTE_TABLE_V6=${ROUTE_TABLE_V6}
 CORE_GID=${CORE_GID}
 APP_MODE=${APP_MODE}
 APP_UIDS="${APP_UIDS}"
+PROXY_UIDS="${PROXY_UIDS}"
+DIRECT_UIDS="${DIRECT_UIDS}"
 BYPASS_UIDS="${BYPASS_UIDS}"
+DNS_SCOPE=${DNS_SCOPE}
 DNS_MODE=${DNS_MODE}
 PROXY_MODE=${PROXY_MODE}
 SNAPSHOT_EOF
@@ -203,15 +225,16 @@ $(for cidr in ${RESERVED_IPV4}; do
     echo "-A ${CHAIN_BYPASS} -d ${cidr} -j ACCEPT"
 done)
 
-# === APP chain (UID whitelist) ===
-# In whitelist mode, only explicitly listed UIDs get marked for proxying.
+# === APP chain (UID selection) ===
+# whitelist: mark only PROXY_UIDS.
+# blacklist: DIRECT_UIDS return direct; everything else is marked.
 # Default policy: RETURN (direct, no proxy).
 $(if [ "${APP_MODE}" = "whitelist" ]; then
-    for uid in ${APP_UIDS}; do
+    for uid in ${PROXY_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j MARK --set-mark ${FWMARK}"
     done
 elif [ "${APP_MODE}" = "blacklist" ]; then
-    for uid in ${APP_UIDS}; do
+    for uid in ${DIRECT_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j RETURN"
     done
     echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
@@ -323,13 +346,13 @@ $(for cidr in ${RESERVED_IPV6}; do
     echo "-A ${CHAIN_BYPASS} -d ${cidr} -j ACCEPT"
 done)
 
-# === APP chain (UID whitelist) ===
+# === APP chain (UID selection) ===
 $(if [ "${APP_MODE}" = "whitelist" ]; then
-    for uid in ${APP_UIDS}; do
+    for uid in ${PROXY_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j MARK --set-mark ${FWMARK}"
     done
 elif [ "${APP_MODE}" = "blacklist" ]; then
-    for uid in ${APP_UIDS}; do
+    for uid in ${DIRECT_UIDS}; do
         echo "-A ${CHAIN_APP} -m owner --uid-owner ${uid} -j RETURN"
     done
     echo "-A ${CHAIN_APP} -j MARK --set-mark ${FWMARK}"
@@ -416,31 +439,19 @@ $(for uid in ${BYPASS_UIDS}; do
     echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -j RETURN"
 done)
 
-# 3. DNS redirect rules — depends on DNS_MODE.
-$(if [ "${DNS_MODE}" = "per_uid" ]; then
-    # per_uid: only redirect DNS for whitelisted UIDs.
-    # This means non-proxied apps keep using the system DNS resolver,
-    # which is important for apps that rely on local DNS (e.g. mDNS).
-    if [ "${APP_MODE}" = "whitelist" ]; then
-        for uid in ${APP_UIDS}; do
-            echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-            echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-        done
-    elif [ "${APP_MODE}" = "blacklist" ]; then
-        for uid in ${APP_UIDS}; do
-            echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -j RETURN"
-        done
-        echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-        echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-    elif [ "${APP_MODE}" = "all" ]; then
-        # "all" mode with per_uid DNS doesn't make sense — redirect all DNS
-        echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-        echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-    fi
-elif [ "${DNS_MODE}" = "all" ]; then
-    # all: redirect every DNS query to sing-box, regardless of UID.
-    # This ensures consistent DNS resolution across all apps, but means
-    # even non-proxied apps use sing-box's DNS.
+# 3. DNS redirect rules — depends on explicit DNS_SCOPE.
+$(if [ "${DNS_SCOPE}" = "uids" ]; then
+    for uid in ${PROXY_UIDS}; do
+        echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+        echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+    done
+elif [ "${DNS_SCOPE}" = "all_except_uids" ]; then
+    for uid in ${DIRECT_UIDS}; do
+        echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -j RETURN"
+    done
+    echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+    echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+elif [ "${DNS_SCOPE}" = "all" ]; then
     echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
     echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
 fi)
@@ -469,23 +480,18 @@ $(for uid in ${BYPASS_UIDS}; do
 done)
 
 # 3. DNS redirect rules
-$(if [ "${DNS_MODE}" = "per_uid" ]; then
-    if [ "${APP_MODE}" = "whitelist" ]; then
-        for uid in ${APP_UIDS}; do
-            echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-            echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-        done
-    elif [ "${APP_MODE}" = "blacklist" ]; then
-        for uid in ${APP_UIDS}; do
-            echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -j RETURN"
-        done
-        echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-        echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-    elif [ "${APP_MODE}" = "all" ]; then
-        echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-        echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
-    fi
-elif [ "${DNS_MODE}" = "all" ]; then
+$(if [ "${DNS_SCOPE}" = "uids" ]; then
+    for uid in ${PROXY_UIDS}; do
+        echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+        echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+    done
+elif [ "${DNS_SCOPE}" = "all_except_uids" ]; then
+    for uid in ${DIRECT_UIDS}; do
+        echo "-A ${CHAIN_DNS} -m owner --uid-owner ${uid} -j RETURN"
+    done
+    echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+    echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
+elif [ "${DNS_SCOPE}" = "all" ]; then
     echo "-A ${CHAIN_DNS} -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
     echo "-A ${CHAIN_DNS} -p tcp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}"
 fi)
@@ -495,21 +501,6 @@ fi)
 
 COMMIT
 NAT_V6_EOF
-}
-
-# ============================================================================
-# Backup existing iptables state (for clean rollback on stop)
-# ============================================================================
-
-backup_rules() {
-    mkdir -p "${SNAPSHOT_DIR}"
-
-    # Save current state so we can restore on stop.
-    # iptables-save includes all tables and chains.
-    iptables-save ${IPT_WAIT} > "${SNAPSHOT_DIR}/iptables_backup.rules" 2>/dev/null || true
-    ip6tables-save ${IPT_WAIT} > "${SNAPSHOT_DIR}/ip6tables_backup.rules" 2>/dev/null || true
-
-    log_info "Backed up current iptables state"
 }
 
 # ============================================================================
@@ -560,8 +551,7 @@ teardown_policy_routing() {
 # 2. Flush our custom chains
 # 3. Delete our custom chains
 #
-# This is used when iptables-restore of the backup fails, or as a
-# fallback cleanup method.
+# This is used by normal stop and rescue cleanup.
 # ============================================================================
 
 flush_chains() {
@@ -611,9 +601,10 @@ do_start() {
     log_info "  HTTP_PORT=${HTTP_PORT}"
     log_info "  FWMARK=${FWMARK}"
     log_info "  CORE_GID=${CORE_GID}"
-    log_info "  APP_UIDS=${APP_UIDS:-<none>}"
+    log_info "  PROXY_UIDS=${PROXY_UIDS:-<none>}"
+    log_info "  DIRECT_UIDS=${DIRECT_UIDS:-<none>}"
     log_info "  BYPASS_UIDS=${BYPASS_UIDS:-<none>}"
-    log_info "  DNS_MODE=${DNS_MODE}"
+    log_info "  DNS_SCOPE=${DNS_SCOPE}"
     log_info "========================================="
 
     # ---- Step 1: Clean any leftover rules from a previous run ----
@@ -623,16 +614,13 @@ do_start() {
     flush_chains iptables
     flush_chains ip6tables
 
-    # ---- Step 2: Backup current iptables state ----
-    backup_rules
-
-    # ---- Step 3: Save runtime config snapshot ----
+    # ---- Step 2: Save runtime config snapshot ----
     save_snapshot
 
-    # ---- Step 4: Setup policy routing ----
+    # ---- Step 3: Setup policy routing ----
     setup_policy_routing
 
-    # ---- Step 5: Generate rules files ----
+    # ---- Step 4: Generate rules files ----
     mkdir -p "${SNAPSHOT_DIR}"
 
     # iptables.sh owns mangle + policy routing. DNS nat is owned by dns.sh.
@@ -642,7 +630,7 @@ do_start() {
 
     log_info "Rules files generated"
 
-    # ---- Step 6: Apply rules atomically via iptables-restore ----
+    # ---- Step 5: Apply rules atomically via iptables-restore ----
     # --noflush: don't flush existing rules in tables we're not touching.
     # This is critical — we only want to add our chains, not destroy
     # other modules' rules (e.g. afwall, adaway).
@@ -666,7 +654,7 @@ do_start() {
         exit 1
     fi
 
-    # ---- Step 7: Verify critical chains exist ----
+    # ---- Step 6: Verify critical chains exist ----
     if ! iptables ${IPT_WAIT} -t mangle -L ${CHAIN_OUT} -n >/dev/null 2>&1; then
         log_error "Verification failed: ${CHAIN_OUT} not found in mangle table!"
         do_stop
@@ -685,7 +673,7 @@ do_start() {
 }
 
 # ============================================================================
-# STOP — remove all rules and restore clean state
+# STOP — remove PrivStack-owned rules and routing state
 # ============================================================================
 
 do_stop() {

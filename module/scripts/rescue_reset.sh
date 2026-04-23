@@ -199,7 +199,9 @@ out="$(ip -6 route show table "$ROUTE_TABLE_V6" 2>/dev/null | head -n 1)"
 [ -n "$out" ] && add_leftover "ip -6 route table $ROUTE_TABLE_V6: $out"
 
 log "[7/7] finishing"
-rm -f "$RESET_LOCK" 2>/dev/null
+if [ "$MODE" != "daemon-reset" ]; then
+    rm -f "$RESET_LOCK" 2>/dev/null
+fi
 
 if [ -n "$leftovers" ]; then
     log "leftovers remain: $leftovers"

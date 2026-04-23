@@ -4,9 +4,6 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.privstack.panel.BuildConfig
-import com.privstack.panel.controlplane.ControlPlaneClient
-import com.privstack.panel.controlplane.DownloadedUpdate
-import com.privstack.panel.controlplane.ReleaseInfo
 import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
@@ -103,7 +100,6 @@ data class SettingsUiState(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val daemonClient: DaemonClient,
-    private val controlPlaneClient: ControlPlaneClient,
     private val profileRepository: ProfileRepository,
     private val statusRepository: StatusRepository,
     private val messages: UserMessageFormatter,
@@ -115,8 +111,7 @@ class SettingsViewModel @Inject constructor(
     private val _updateState = MutableStateFlow(UpdateUiState())
     val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
 
-    private var lastReleaseInfo: ReleaseInfo? = null
-    private var lastDownloadedUpdate: DownloadedUpdate? = null
+    private var lastCheckedHasUpdate: Boolean = false
 
     init {
         observeProfile()
@@ -377,30 +372,28 @@ class SettingsViewModel @Inject constructor(
     fun checkForUpdates() {
         _updateState.update { it.copy(status = UpdateStatus.CHECKING, errorMessage = "") }
         viewModelScope.launch {
-            runCatching {
-                controlPlaneClient.checkForUpdates(_updateState.value.currentVersion)
-            }.onSuccess { release ->
-                lastReleaseInfo = release
-                lastDownloadedUpdate = null
-                _updateState.update {
-                    it.copy(
-                        currentVersion = release.currentVersion,
-                        latestVersion = release.latestVersion,
-                        changelog = release.changelog,
-                        status = if (release.hasUpdate) UpdateStatus.AVAILABLE else UpdateStatus.UP_TO_DATE,
-                        modulePath = "",
-                        apkPath = "",
-                    )
+            when (val result = daemonClient.updateCheck()) {
+                is DaemonClientResult.Ok -> {
+                    val info = result.data
+                    lastCheckedHasUpdate = info.hasUpdate
+                    _updateState.update {
+                        it.copy(
+                            currentVersion = info.currentVersion,
+                            latestVersion = info.latestVersion,
+                            changelog = info.changelog,
+                            status = if (info.hasUpdate) UpdateStatus.AVAILABLE else UpdateStatus.UP_TO_DATE,
+                            modulePath = "",
+                            apkPath = "",
+                        )
+                    }
                 }
-            }.onFailure { throwable ->
-                _updateState.update {
-                    it.copy(
-                        status = UpdateStatus.ERROR,
-                        errorMessage = messages.formatControlPlaneFailure(
-                            throwable.message,
-                            com.privstack.panel.R.string.update_error_check_failed,
-                        ),
-                    )
+                else -> {
+                    _updateState.update {
+                        it.copy(
+                            status = UpdateStatus.ERROR,
+                            errorMessage = formatUpdateError(result),
+                        )
+                    }
                 }
             }
         }
@@ -409,8 +402,7 @@ class SettingsViewModel @Inject constructor(
     fun downloadUpdate() {
         _updateState.update { it.copy(status = UpdateStatus.DOWNLOADING, downloadProgress = 0f) }
         viewModelScope.launch {
-            val release = lastReleaseInfo
-            if (release == null || !release.hasUpdate) {
+            if (!lastCheckedHasUpdate) {
                 _updateState.update {
                     it.copy(
                         status = UpdateStatus.ERROR,
@@ -420,35 +412,31 @@ class SettingsViewModel @Inject constructor(
                 return@launch
             }
 
-            runCatching {
-                controlPlaneClient.downloadUpdate(release) { progress ->
-                    _updateState.update { current -> current.copy(downloadProgress = progress) }
+            when (val result = daemonClient.updateDownload()) {
+                is DaemonClientResult.Ok -> {
+                    val downloaded = result.data
+                    val hasArtifacts = downloaded.modulePath.isNotBlank() && downloaded.apkPath.isNotBlank()
+                    _updateState.update {
+                        it.copy(
+                            status = if (hasArtifacts) UpdateStatus.DOWNLOADED else UpdateStatus.ERROR,
+                            downloadProgress = if (hasArtifacts) 1f else 0f,
+                            errorMessage = if (hasArtifacts) {
+                                ""
+                            } else {
+                                messages.get(com.privstack.panel.R.string.update_error_pair_required)
+                            },
+                            modulePath = downloaded.modulePath,
+                            apkPath = downloaded.apkPath,
+                        )
+                    }
                 }
-            }.onSuccess { downloaded ->
-                lastDownloadedUpdate = downloaded
-                val hasArtifacts = downloaded.modulePath.isNotBlank() && downloaded.apkPath.isNotBlank()
-                _updateState.update {
-                    it.copy(
-                        status = if (hasArtifacts) UpdateStatus.DOWNLOADED else UpdateStatus.ERROR,
-                        downloadProgress = if (hasArtifacts) 1f else 0f,
-                        errorMessage = if (hasArtifacts) {
-                            ""
-                        } else {
-                            messages.get(com.privstack.panel.R.string.update_error_pair_required)
-                        },
-                        modulePath = downloaded.modulePath,
-                        apkPath = downloaded.apkPath,
-                    )
-                }
-            }.onFailure { throwable ->
-                _updateState.update {
-                    it.copy(
-                        status = UpdateStatus.ERROR,
-                        errorMessage = messages.formatControlPlaneFailure(
-                            throwable.message,
-                            com.privstack.panel.R.string.update_error_download_failed,
-                        ),
-                    )
+                else -> {
+                    _updateState.update {
+                        it.copy(
+                            status = UpdateStatus.ERROR,
+                            errorMessage = formatUpdateError(result),
+                        )
+                    }
                 }
             }
         }
@@ -457,8 +445,8 @@ class SettingsViewModel @Inject constructor(
     fun installUpdate() {
         _updateState.update { it.copy(status = UpdateStatus.INSTALLING) }
         viewModelScope.launch {
-            val downloaded = lastDownloadedUpdate
-            if (downloaded == null) {
+            val current = _updateState.value
+            if (current.modulePath.isBlank() || current.apkPath.isBlank()) {
                 _updateState.update {
                     it.copy(
                         status = UpdateStatus.ERROR,
@@ -469,8 +457,8 @@ class SettingsViewModel @Inject constructor(
             }
 
             when (val result = daemonClient.updateInstall(
-                modulePath = downloaded.modulePath,
-                apkPath = downloaded.apkPath,
+                modulePath = current.modulePath,
+                apkPath = current.apkPath,
             )) {
                 is DaemonClientResult.Ok -> {
                     val installedSomething = result.data.moduleInstalled || result.data.apkInstalled

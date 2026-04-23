@@ -31,6 +31,7 @@ func (b *rootBackendV2) Supported() (bool, string) {
 }
 
 func (b *rootBackendV2) Start(desired runtimev2.DesiredState) error {
+	epoch := b.d.beginRuntimeStartOperation()
 	state := b.d.coreMgr.GetState()
 	if state == core.StateRunning || state == core.StateDegraded {
 		return nil
@@ -42,9 +43,11 @@ func (b *rootBackendV2) Start(desired runtimev2.DesiredState) error {
 	b.d.mu.Unlock()
 
 	if profile.Address == "" && !hasPanelNodes {
+		b.d.markRuntimeStartFailed(epoch)
 		return fmt.Errorf("no node configured (address is empty)")
 	}
 	if err := b.d.coreMgr.Start(profile); err != nil {
+		b.d.markRuntimeStartFailed(epoch)
 		return err
 	}
 	b.d.rescueMgr.Reset()
@@ -53,24 +56,25 @@ func (b *rootBackendV2) Start(desired runtimev2.DesiredState) error {
 	snapshot := b.RefreshHealth()
 	if !snapshot.Healthy() {
 		b.d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		b.d.markRuntimeStartFailed(epoch)
 		return fmt.Errorf("readiness gates failed after start: %s", snapshot.LastError)
 	}
 	return nil
 }
 
 func (b *rootBackendV2) Stop() error {
-	if b.d.coreMgr.GetState() == core.StateStopped {
-		return nil
-	}
+	b.d.beginRuntimeStopOperation()
 	b.d.stopSubsystems()
 	return b.d.coreMgr.Stop()
 }
 
 func (b *rootBackendV2) Reset(generation int64) runtimev2.ResetReport {
+	b.d.beginRuntimeStopOperation()
 	return b.d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
 }
 
 func (b *rootBackendV2) Restart(desired runtimev2.DesiredState, generation int64) error {
+	b.d.beginRuntimeStartOperation()
 	return b.d.restartRootBackendV2()
 }
 
@@ -96,6 +100,50 @@ func (d *daemon) initRuntimeV2() {
 		d.desiredStateV2(),
 		&rootBackendV2{d: d},
 	)
+}
+
+func (d *daemon) beginRuntimeStartOperation() uint64 {
+	d.runtimeOpMu.Lock()
+	defer d.runtimeOpMu.Unlock()
+	d.runtimeOpEpoch++
+	d.runtimeDesiredRunning = true
+	return d.runtimeOpEpoch
+}
+
+func (d *daemon) beginRuntimeStopOperation() uint64 {
+	d.runtimeOpMu.Lock()
+	defer d.runtimeOpMu.Unlock()
+	d.runtimeOpEpoch++
+	d.runtimeDesiredRunning = false
+	return d.runtimeOpEpoch
+}
+
+func (d *daemon) markRuntimeStartFailed(epoch uint64) {
+	d.runtimeOpMu.Lock()
+	defer d.runtimeOpMu.Unlock()
+	if d.runtimeOpEpoch == epoch {
+		d.runtimeDesiredRunning = false
+	}
+}
+
+func (d *daemon) currentRuntimeOperationEpoch() uint64 {
+	d.runtimeOpMu.Lock()
+	defer d.runtimeOpMu.Unlock()
+	return d.runtimeOpEpoch
+}
+
+func (d *daemon) canRunRuntimeRecovery(epoch uint64) bool {
+	d.runtimeOpMu.Lock()
+	allowed := d.runtimeDesiredRunning && d.runtimeOpEpoch == epoch
+	d.runtimeOpMu.Unlock()
+	if !allowed {
+		return false
+	}
+	if skip, _ := d.shouldSkipRootReconcile(); skip {
+		return false
+	}
+	state := d.coreMgr.GetState()
+	return state == core.StateRunning || state == core.StateDegraded || state == core.StateRescue
 }
 
 func (d *daemon) desiredStateV2() runtimev2.DesiredState {
@@ -245,6 +293,8 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 	tproxyReady := false
 	iptablesReady := false
 	routeReady := false
+	dnsListenerReady := true
+	dnsLookupReady := true
 	for name, check := range result.Checks {
 		switch name {
 		case "singbox_alive", "tproxy_port":
@@ -254,8 +304,10 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 			if name == "tproxy_port" {
 				tproxyReady = check.Pass
 			}
+		case "dns_listener":
+			dnsListenerReady = check.Pass
 		case "dns":
-			snapshot.DNSReady = check.Pass
+			dnsLookupReady = check.Pass
 		case "iptables", "routing":
 			if name == "iptables" {
 				iptablesReady = check.Pass
@@ -267,6 +319,7 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 	}
 	snapshot.CoreReady = singboxReady && tproxyReady
 	snapshot.RoutingReady = iptablesReady && routeReady
+	snapshot.DNSReady = dnsListenerReady && dnsLookupReady
 
 	if allowEgressProbe && snapshot.Healthy() {
 		d.mu.Lock()
@@ -290,12 +343,14 @@ func firstFailedGate(result *health.HealthResult, snapshot runtimev2.HealthSnaps
 	if result != nil {
 		for _, name := range []string{"singbox_alive", "tproxy_port", "iptables", "routing"} {
 			if check, ok := result.Checks[name]; ok && !check.Pass {
-				return fmt.Sprintf("%s: %s", name, check.Detail)
+				return formatHealthCheckError(name, check)
 			}
 		}
 		if snapshot.Healthy() {
-			if check, ok := result.Checks["dns"]; ok && !check.Pass {
-				return fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", check.Detail)
+			for _, name := range []string{"dns_listener", "dns"} {
+				if check, ok := result.Checks[name]; ok && !check.Pass {
+					return fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", formatHealthCheckError(name, check))
+				}
 			}
 		}
 	}
@@ -309,6 +364,13 @@ func firstFailedGate(result *health.HealthResult, snapshot runtimev2.HealthSnaps
 		return "operational degraded: one or more operational health signals are red"
 	}
 	return ""
+}
+
+func formatHealthCheckError(name string, check health.CheckResult) string {
+	if check.Code != "" {
+		return fmt.Sprintf("%s: %s: %s", name, check.Code, check.Detail)
+	}
+	return fmt.Sprintf("%s: %s", name, check.Detail)
 }
 
 func (d *daemon) hasRecentEgress() bool {

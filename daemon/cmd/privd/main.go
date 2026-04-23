@@ -46,6 +46,9 @@ type daemon struct {
 
 	mu         sync.Mutex // protects cfg
 	metricsMu  sync.Mutex
+	runtimeOpMu sync.Mutex
+	runtimeDesiredRunning bool
+	runtimeOpEpoch uint64
 	traffic    trafficSnapshot
 	latency    latencySnapshot
 	egress     egressSnapshot
@@ -193,6 +196,11 @@ func main() {
 	d.initRuntimeV2()
 
 	d.healthMon.SetOnDegraded(func() {
+		epoch := d.currentRuntimeOperationEpoch()
+		if !d.canRunRuntimeRecovery(epoch) {
+			log.Printf("rescue skipped: runtime is no longer desired running")
+			return
+		}
 		d.mu.Lock()
 		rescueEnabled := d.cfg.Rescue.Enabled
 		d.mu.Unlock()
@@ -200,7 +208,9 @@ func main() {
 			log.Printf("rescue disabled, skipping automatic recovery")
 			return
 		}
-		if err := d.rescueMgr.Attempt(); err != nil {
+		if err := d.rescueMgr.Attempt(func() bool {
+			return d.canRunRuntimeRecovery(epoch)
+		}); err != nil {
 			log.Printf("rescue attempt failed: %v", err)
 			d.mu.Lock()
 			maxAttempts := d.cfg.Rescue.MaxAttempts
@@ -208,7 +218,7 @@ func main() {
 			if maxAttempts < 1 {
 				maxAttempts = 1
 			}
-			if d.rescueMgr.Attempts() >= maxAttempts {
+			if d.rescueMgr.Attempts() >= maxAttempts && d.canRunRuntimeRecovery(epoch) {
 				if rollbackErr := d.rescueMgr.Rollback(); rollbackErr != nil {
 					log.Printf("rescue rollback failed: %v", rollbackErr)
 				}
@@ -473,13 +483,6 @@ func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCErro
 }
 
 func (d *daemon) handleStop(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	state := d.coreMgr.GetState()
-	if state == core.StateStopped {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeProxyNotRunning,
-			Message: "proxy is not running",
-		}
-	}
 	status, err := d.runtimeV2.Stop()
 	if err != nil {
 		return nil, &ipc.RPCError{
@@ -1254,15 +1257,11 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		apiPort = 9090
 	}
 	panelInbounds := cfg.ResolvePanelInbounds()
-	appMode := core.MapAppMode(cfg.Apps.Mode)
-	dnsMode := "all"
-	if appMode == "off" {
-		dnsMode = "off"
-	} else if appMode == "whitelist" || appMode == "blacklist" {
-		dnsMode = "per_uid"
-	}
-	appUIDs := core.ResolvePackageUIDs(cfg.Apps.Packages)
-	bypassUIDs := core.BuildBypassUIDs(cfg.Routing.AlwaysDirectApps)
+	appRouting := core.BuildAppRoutingEnv(
+		cfg.Apps.Mode,
+		cfg.Apps.Packages,
+		cfg.Routing.AlwaysDirectApps,
+	)
 
 	return map[string]string{
 		"PRIVSTACK_DIR":  dataDir,
@@ -1274,10 +1273,13 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"FWMARK":         fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":    "2023",
 		"ROUTE_TABLE_V6": "2024",
-		"APP_MODE":       appMode,
-		"APP_UIDS":       appUIDs,
-		"BYPASS_UIDS":    bypassUIDs,
-		"DNS_MODE":       dnsMode,
+		"APP_MODE":       appRouting.AppMode,
+		"APP_UIDS":       appRouting.AppUIDs,
+		"PROXY_UIDS":     appRouting.ProxyUIDs,
+		"DIRECT_UIDS":    appRouting.DirectUIDs,
+		"BYPASS_UIDS":    appRouting.BypassUIDs,
+		"DNS_SCOPE":      appRouting.DNSScope,
+		"DNS_MODE":       appRouting.LegacyDNSMode,
 		"PROXY_MODE":     "tproxy",
 	}
 }
@@ -2315,6 +2317,9 @@ func buildHealthPayload(state core.State, result *health.HealthResult, egressRea
 	if check, ok := result.Checks["dns"]; ok {
 		dnsOK = check.Pass
 	}
+	if check, ok := result.Checks["dns_listener"]; ok {
+		dnsOK = dnsOK && check.Pass
+	}
 	if check, ok := result.Checks["tproxy_port"]; ok {
 		tproxyOK = check.Pass
 	}
@@ -2340,8 +2345,10 @@ func firstHealthError(checks map[string]health.CheckResult, readinessOK bool, eg
 		return firstError
 	}
 	if readinessOK {
-		if check, ok := checks["dns"]; ok && !check.Pass {
-			return fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", check.Detail)
+		for _, name := range []string{"dns_listener", "dns"} {
+			if check, ok := checks[name]; ok && !check.Pass {
+				return fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", formatHealthCheckError(name, check))
+			}
 		}
 		if !egressReady {
 			return "operational degraded: no recent successful egress probe"
@@ -2353,7 +2360,7 @@ func firstHealthError(checks map[string]health.CheckResult, readinessOK bool, eg
 func firstFailedCheck(checks map[string]health.CheckResult, orderedNames ...string) string {
 	for _, name := range orderedNames {
 		if check, ok := checks[name]; ok && !check.Pass {
-			return fmt.Sprintf("%s: %s", name, check.Detail)
+			return formatHealthCheckError(name, check)
 		}
 	}
 	return ""

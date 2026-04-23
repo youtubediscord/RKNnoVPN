@@ -260,7 +260,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 // Order matters: DNS first, then iptables, then kill — so traffic is never
 // black-holed through a dead proxy.
 func (m *CoreManager) Stop() error {
-	return m.stopWithMode(false)
+	return m.stopWithMode(true)
 }
 
 // RescueReset tears down PrivStack-owned runtime state even if the in-memory
@@ -635,18 +635,12 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		mark = 0x2023
 	}
 
-	appMode := MapAppMode(m.config.Apps.Mode)
 	panelInbounds := m.config.ResolvePanelInbounds()
-
-	dnsMode := "all"
-	if appMode == "off" {
-		dnsMode = "off"
-	} else if appMode == "whitelist" || appMode == "blacklist" {
-		dnsMode = "per_uid"
-	}
-
-	appUIDs := ResolvePackageUIDs(m.config.Apps.Packages)
-	bypassUIDs := BuildBypassUIDs(m.config.Routing.AlwaysDirectApps)
+	appRouting := BuildAppRoutingEnv(
+		m.config.Apps.Mode,
+		m.config.Apps.Packages,
+		m.config.Routing.AlwaysDirectApps,
+	)
 
 	return map[string]string{
 		"PRIVSTACK_DIR":  m.dataDir,
@@ -658,10 +652,13 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		"FWMARK":         fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":    "2023",
 		"ROUTE_TABLE_V6": "2024",
-		"APP_MODE":       appMode,
-		"APP_UIDS":       appUIDs,
-		"BYPASS_UIDS":    bypassUIDs,
-		"DNS_MODE":       dnsMode,
+		"APP_MODE":       appRouting.AppMode,
+		"APP_UIDS":       appRouting.AppUIDs,
+		"PROXY_UIDS":     appRouting.ProxyUIDs,
+		"DIRECT_UIDS":    appRouting.DirectUIDs,
+		"BYPASS_UIDS":    appRouting.BypassUIDs,
+		"DNS_SCOPE":      appRouting.DNSScope,
+		"DNS_MODE":       appRouting.LegacyDNSMode,
 		"PROXY_MODE":     "tproxy",
 	}
 }

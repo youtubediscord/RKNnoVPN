@@ -6,17 +6,15 @@
 //  2. Re-apply iptables + DNS rules
 //  3. Full teardown + cold start
 //
-// If all strategies are exhausted, Rollback tears everything down and
-// restores the pre-proxy network state.
+// If all strategies are exhausted, Rollback tears down PrivStack-owned
+// runtime state without restoring stale whole-table iptables backups.
 package rescue
 
 import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +58,8 @@ type RescueManager struct {
 	mu          sync.Mutex
 }
 
+type RecoveryGate func() bool
+
 // NewRescueManager creates a rescue manager that will try up to
 // maxAttempts strategies before giving up.
 func NewRescueManager(
@@ -93,9 +93,13 @@ func NewRescueManager(
 // on its next cycle). Returns an error if the strategy failed. If all
 // strategies are exhausted, it returns an error indicating rescue is
 // depleted and the caller should invoke Rollback.
-func (r *RescueManager) Attempt() error {
+func (r *RescueManager) Attempt(canProceed RecoveryGate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if !recoveryAllowed(canProceed) {
+		return fmt.Errorf("rescue: cancelled by desired runtime state")
+	}
 
 	// Enforce cooldown between attempts.
 	if !r.lastAttempt.IsZero() && time.Since(r.lastAttempt) < r.cooldown {
@@ -116,20 +120,29 @@ func (r *RescueManager) Attempt() error {
 	r.core.SetState(core.StateRescue)
 	r.logger.Printf("attempt %d/%d: strategy=%s", r.attempts, r.maxAttempts, strategy)
 
+	if !recoveryAllowed(canProceed) {
+		return fmt.Errorf("rescue: cancelled by desired runtime state")
+	}
+
 	var err error
 	switch strategy {
 	case StrategyRestartCore:
-		err = r.restartCore()
+		err = r.restartCore(canProceed)
 	case StrategyReapplyRules:
-		err = r.reapplyRules()
+		err = r.reapplyRules(canProceed)
 	case StrategyFullRestart:
-		err = r.fullRestart()
+		err = r.fullRestart(canProceed)
 	}
 
 	if err != nil {
 		r.logger.Printf("strategy %s failed: %v", strategy, err)
-		r.core.SetState(core.StateDegraded)
+		if recoveryAllowed(canProceed) {
+			r.core.SetState(core.StateDegraded)
+		}
 		return fmt.Errorf("rescue: %s: %w", strategy, err)
+	}
+	if !recoveryAllowed(canProceed) {
+		return fmt.Errorf("rescue: cancelled by desired runtime state")
 	}
 
 	r.logger.Printf("strategy %s succeeded", strategy)
@@ -137,25 +150,26 @@ func (r *RescueManager) Attempt() error {
 	return nil
 }
 
-// Rollback tears down everything and tries to restore a clean network
-// state. This is the last resort when all recovery strategies have failed.
+// Rollback tears down all PrivStack-owned network state. This is the last
+// resort when all recovery strategies have failed.
 func (r *RescueManager) Rollback() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.logger.Println("rollback: tearing down all proxy state")
 
-	// 1. Restore iptables from backup if available. iptables-restore reads
-	// rules from stdin, so this cannot use ExecCommand(name, path).
-	r.restoreRuleBackups()
-
-	// 2. Full stop (DNS, iptables, sing-box).
-	if err := r.core.Stop(); err != nil {
+	// 1. Forced stop (DNS, PrivStack-only iptables cleanup, sing-box).
+	if err := r.core.RescueReset(); err != nil {
 		r.logger.Printf("rollback: stop failed: %v", err)
 		return fmt.Errorf("rescue: rollback stop: %w", err)
 	}
 
-	// 3. Explicitly flush PRIVSTACK chains as a safety net.
+	// 2. Run the same root-level cleanup script used by the UI reset path.
+	if err := core.ExecScript(filepath.Join(r.dataDir, "scripts", "rescue_reset.sh"), "daemon-reset", r.scriptEnv()); err != nil {
+		r.logger.Printf("rollback: rescue cleanup script failed: %v", err)
+	}
+
+	// 3. Explicitly flush PRIVSTACK chains as a final safety net.
 	r.flushPrivstackChains()
 
 	r.core.SetState(core.StateStopped)
@@ -210,14 +224,20 @@ func (r *RescueManager) pickStrategy() Strategy {
 }
 
 // restartCore kills and respawns sing-box without touching iptables.
-func (r *RescueManager) restartCore() error {
+func (r *RescueManager) restartCore(canProceed RecoveryGate) error {
+	if !recoveryAllowed(canProceed) {
+		return fmt.Errorf("cancelled")
+	}
 	profile := r.cfg.ResolveProfile()
 	return r.core.HotSwap(profile)
 }
 
 // reapplyRules re-runs the iptables and DNS scripts without restarting
 // sing-box.
-func (r *RescueManager) reapplyRules() error {
+func (r *RescueManager) reapplyRules(canProceed RecoveryGate) error {
+	if !recoveryAllowed(canProceed) {
+		return fmt.Errorf("cancelled")
+	}
 	env := r.scriptEnv()
 
 	// Re-apply iptables.
@@ -227,6 +247,9 @@ func (r *RescueManager) reapplyRules() error {
 	}
 	if err := core.ExecScript(iptablesScript, "start", env); err != nil {
 		return fmt.Errorf("iptables start: %w", err)
+	}
+	if !recoveryAllowed(canProceed) {
+		return fmt.Errorf("cancelled")
 	}
 
 	// Re-apply DNS.
@@ -242,14 +265,24 @@ func (r *RescueManager) reapplyRules() error {
 }
 
 // fullRestart performs a complete stop then start cycle.
-func (r *RescueManager) fullRestart() error {
-	if err := r.core.Stop(); err != nil {
+func (r *RescueManager) fullRestart(canProceed RecoveryGate) error {
+	if !recoveryAllowed(canProceed) {
+		return fmt.Errorf("cancelled")
+	}
+	if err := r.core.RescueReset(); err != nil {
 		r.logger.Printf("full-restart: stop failed: %v", err)
 		// Continue anyway — we want a clean start.
+	}
+	if !recoveryAllowed(canProceed) {
+		return fmt.Errorf("cancelled")
 	}
 
 	profile := r.cfg.ResolveProfile()
 	return r.core.Start(profile)
+}
+
+func recoveryAllowed(canProceed RecoveryGate) bool {
+	return canProceed == nil || canProceed()
 }
 
 // --------------------------------------------------------------------------
@@ -278,18 +311,12 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		mark = 0x2023
 	}
 
-	appMode := core.MapAppMode(r.cfg.Apps.Mode)
 	panelInbounds := r.cfg.ResolvePanelInbounds()
-
-	dnsMode := "all"
-	if appMode == "off" {
-		dnsMode = "off"
-	} else if appMode == "whitelist" || appMode == "blacklist" {
-		dnsMode = "per_uid"
-	}
-
-	appUIDs := core.ResolvePackageUIDs(r.cfg.Apps.Packages)
-	bypassUIDs := core.BuildBypassUIDs(r.cfg.Routing.AlwaysDirectApps)
+	appRouting := core.BuildAppRoutingEnv(
+		r.cfg.Apps.Mode,
+		r.cfg.Apps.Packages,
+		r.cfg.Routing.AlwaysDirectApps,
+	)
 
 	return map[string]string{
 		"PRIVSTACK_DIR":  r.dataDir,
@@ -301,10 +328,13 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		"FWMARK":         fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":    "2023",
 		"ROUTE_TABLE_V6": "2024",
-		"APP_MODE":       appMode,
-		"APP_UIDS":       appUIDs,
-		"BYPASS_UIDS":    bypassUIDs,
-		"DNS_MODE":       dnsMode,
+		"APP_MODE":       appRouting.AppMode,
+		"APP_UIDS":       appRouting.AppUIDs,
+		"PROXY_UIDS":     appRouting.ProxyUIDs,
+		"DIRECT_UIDS":    appRouting.DirectUIDs,
+		"BYPASS_UIDS":    appRouting.BypassUIDs,
+		"DNS_SCOPE":      appRouting.DNSScope,
+		"DNS_MODE":       appRouting.LegacyDNSMode,
 		"PROXY_MODE":     "tproxy",
 	}
 }
@@ -332,59 +362,6 @@ func (r *RescueManager) flushPrivstackChains() {
 	for _, chain := range natChains6 {
 		flushChain(core.ExecIp6tables, "nat", chain)
 	}
-}
-
-func (r *RescueManager) restoreRuleBackups() {
-	candidates := []struct {
-		command string
-		paths   []string
-	}{
-		{
-			command: "iptables-restore",
-			paths: []string{
-				filepath.Join(r.dataDir, "run", "iptables_backup.rules"),
-				filepath.Join(r.dataDir, "backup", "iptables_pre.rules"),
-				filepath.Join(r.dataDir, "backup", "iptables.rules"),
-			},
-		},
-		{
-			command: "ip6tables-restore",
-			paths: []string{
-				filepath.Join(r.dataDir, "run", "ip6tables_backup.rules"),
-				filepath.Join(r.dataDir, "backup", "ip6tables_pre.rules"),
-				filepath.Join(r.dataDir, "backup", "ip6tables.rules"),
-			},
-		},
-	}
-
-	for _, candidate := range candidates {
-		for _, path := range candidate.paths {
-			if _, err := os.Stat(path); err != nil {
-				continue
-			}
-			r.logger.Printf("rollback: restoring %s from %s", candidate.command, path)
-			if err := restoreRules(candidate.command, path); err != nil {
-				r.logger.Printf("rollback: %s failed: %v", candidate.command, err)
-			}
-			break
-		}
-	}
-}
-
-func restoreRules(command string, path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	cmd := exec.Command(command)
-	cmd.Stdin = file
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s < %s: %w; output: %s", command, path, err, strings.TrimSpace(string(out)))
-	}
-	return nil
 }
 
 func flushChain(execFn func(...string) error, table string, chain string) {

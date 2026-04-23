@@ -8,10 +8,6 @@
         android:required="false" />
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <!-- v2 control-plane lives in the APK and must not depend on the rooted data plane -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
     <!-- Package enumeration for checking installed VPN clients -->
     <queries>
         <intent>

@@ -127,17 +127,44 @@ func (o *Orchestrator) Start() (Status, error) {
 
 func (o *Orchestrator) Stop() (Status, error) {
 	o.mu.Lock()
-	if o.applied.Phase == PhaseStopped {
-		status := o.statusLocked()
-		o.mu.Unlock()
-		return status, nil
+	backendKind := o.applied.BackendKind
+	if backendKind == "" {
+		backendKind = o.desired.BackendKind
 	}
-	backend, err := o.backendForLocked(o.applied.BackendKind)
+	backend, err := o.backendForLocked(backendKind)
 	if err != nil {
 		o.health = HealthSnapshot{LastError: err.Error(), CheckedAt: time.Now()}
 		status := o.statusLocked()
 		o.mu.Unlock()
 		return status, err
+	}
+	if o.applied.Phase == PhaseStopped {
+		generation := o.nextGenerationLocked()
+		active := o.applied
+		o.applied = AppliedState{
+			BackendKind:     backendKind,
+			Phase:           PhaseApplying,
+			ActiveProfileID: active.ActiveProfileID,
+			Generation:      generation,
+		}
+		o.mu.Unlock()
+
+		stopErr := backend.Stop()
+
+		o.mu.Lock()
+		o.health = HealthSnapshot{CheckedAt: time.Now()}
+		if stopErr != nil {
+			o.health.LastError = stopErr.Error()
+		}
+		o.applied = AppliedState{
+			BackendKind:     backendKind,
+			Phase:           PhaseStopped,
+			ActiveProfileID: active.ActiveProfileID,
+			Generation:      generation,
+		}
+		status := o.statusLocked()
+		o.mu.Unlock()
+		return status, stopErr
 	}
 	generation := o.nextGenerationLocked()
 	active := o.applied

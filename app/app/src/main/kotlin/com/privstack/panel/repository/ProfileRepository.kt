@@ -1,7 +1,6 @@
 package com.privstack.panel.repository
 
 import android.util.Log
-import com.privstack.panel.controlplane.ControlPlaneClient
 import com.privstack.panel.`import`.LinkParser
 import com.privstack.panel.`import`.SubscriptionHandler
 import com.privstack.panel.i18n.UserMessageFormatter
@@ -38,7 +37,6 @@ import javax.inject.Singleton
 @Singleton
 class ProfileRepository @Inject constructor(
     private val client: DaemonClient,
-    private val controlPlaneClient: ControlPlaneClient,
     private val messages: UserMessageFormatter,
 ) {
     companion object {
@@ -330,16 +328,14 @@ class ProfileRepository @Inject constructor(
         current: ProfileConfig,
         url: String
     ): List<Node> {
-        val fetched = try {
-            controlPlaneClient.fetchSubscription(url)
-        } catch (t: Throwable) {
-            val msg = messages.formatControlPlaneFailure(
-                t.message,
-                com.privstack.panel.R.string.subscription_fetch_failed,
-            )
-            Log.w(TAG, "control-plane subscription fetch failed: $msg")
-            _error.value = msg
-            return emptyList()
+        val fetched = when (val result = client.subscriptionFetch(url)) {
+            is DaemonClientResult.Ok -> result.data
+            else -> {
+                val msg = messages.formatDaemonFailure(result)
+                Log.w(TAG, "daemon subscription fetch failed: $msg")
+                _error.value = msg
+                return emptyList()
+            }
         }
 
         val parsed = SubscriptionHandler.parseResponse(fetched.body, fetched.headers)

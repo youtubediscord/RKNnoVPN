@@ -18,8 +18,10 @@
 # Environment (set by privd before calling this script):
 #   DNS_PORT       — sing-box DNS listener port (default 10856)
 #   CORE_GID       — GID used by the proxy core (default 23333)
-#   DNS_MODE       — "uid" = per-UID interception; "all" = everything
-#   APP_UIDS       — space-separated list of UIDs to intercept (uid mode)
+#   DNS_SCOPE      — "off" | "all" | "uids" | "all_except_uids"
+#   PROXY_UIDS     — UIDs whose DNS should be redirected in uids scope
+#   DIRECT_UIDS    — UIDs whose DNS must stay direct in all_except_uids scope
+#   APP_UIDS       — legacy selected UID set, used only as fallback
 #   BYPASS_UIDS    — space-separated list of UIDs that must never be redirected
 #   PRIVSTACK_DIR  — base directory, e.g. /data/adb/privstack
 # ============================================================================
@@ -33,8 +35,12 @@ SCRIPT_VERSION="v1.6.3"
 # Sane defaults if the caller omitted something.
 DNS_PORT="${DNS_PORT:-10856}"
 CORE_GID="${CORE_GID:-23333}"
+APP_MODE="${APP_MODE:-whitelist}"
 DNS_MODE="${DNS_MODE:-uid}"
+DNS_SCOPE="${DNS_SCOPE:-}"
 APP_UIDS="${APP_UIDS:-}"
+PROXY_UIDS="${PROXY_UIDS:-}"
+DIRECT_UIDS="${DIRECT_UIDS:-}"
 BYPASS_UIDS="${BYPASS_UIDS:-}"
 PRIVSTACK_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}"
 IPT_WAIT="-w 100"
@@ -47,6 +53,27 @@ HAS_IPV6_NAT=0
 log() { /system/bin/log -t "$TAG" -p i "$*"; }
 
 # ── helpers ─────────────────────────────────────────────────────────────────
+
+normalize_scope() {
+    if [ -z "$PROXY_UIDS" ] && [ -z "$DIRECT_UIDS" ] && [ -n "$APP_UIDS" ]; then
+        case "$APP_MODE" in
+            whitelist) PROXY_UIDS="$APP_UIDS" ;;
+            blacklist) DIRECT_UIDS="$APP_UIDS" ;;
+        esac
+    fi
+
+    if [ -n "$DNS_SCOPE" ]; then
+        return
+    fi
+
+    case "$DNS_MODE:$APP_MODE" in
+        off:*) DNS_SCOPE="off" ;;
+        all:*) DNS_SCOPE="all" ;;
+        per_uid:blacklist|uid:blacklist) DNS_SCOPE="all_except_uids" ;;
+        per_uid:*|uid:*) DNS_SCOPE="uids" ;;
+        *) DNS_SCOPE="off" ;;
+    esac
+}
 
 has_ipv6_nat() {
     ip6tables $IPT_WAIT -t nat -L >/dev/null 2>&1
@@ -77,18 +104,26 @@ fill_nat_chain() {
         $_ipt $IPT_WAIT -t nat -A "$_chain" -m owner --uid-owner "$uid" -j RETURN
     done
 
-    if [ "$DNS_MODE" = "all" ]; then
+    if [ "$DNS_SCOPE" = "all" ]; then
         # Redirect every UDP/TCP 53 packet to the core's DNS listener.
         $_ipt $IPT_WAIT -t nat -A "$_chain" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
         $_ipt $IPT_WAIT -t nat -A "$_chain" -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
-    elif [ "$DNS_MODE" = "per_uid" ] || [ "$DNS_MODE" = "uid" ]; then
-        # Per-UID: only redirect listed UIDs.
-        for uid in $APP_UIDS; do
+    elif [ "$DNS_SCOPE" = "uids" ]; then
+        # Whitelist mode: only proxied apps use PrivStack DNS.
+        for uid in $PROXY_UIDS; do
             $_ipt $IPT_WAIT -t nat -A "$_chain" -p udp --dport 53 -m owner --uid-owner "$uid" -j REDIRECT --to-ports "$DNS_PORT"
             $_ipt $IPT_WAIT -t nat -A "$_chain" -p tcp --dport 53 -m owner --uid-owner "$uid" -j REDIRECT --to-ports "$DNS_PORT"
         done
+    elif [ "$DNS_SCOPE" = "all_except_uids" ]; then
+        # Blacklist/bypass mode: direct apps keep system DNS; everyone else
+        # follows the transparent proxy DNS path.
+        for uid in $DIRECT_UIDS; do
+            $_ipt $IPT_WAIT -t nat -A "$_chain" -m owner --uid-owner "$uid" -j RETURN
+        done
+        $_ipt $IPT_WAIT -t nat -A "$_chain" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
+        $_ipt $IPT_WAIT -t nat -A "$_chain" -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
     else
-        log "DNS redirect disabled (mode=$DNS_MODE)"
+        log "DNS redirect disabled (scope=$DNS_SCOPE mode=$DNS_MODE)"
     fi
 }
 
@@ -106,9 +141,10 @@ hook_chains() {
 # ── start ───────────────────────────────────────────────────────────────────
 
 start() {
-    log "starting DNS interception $SCRIPT_VERSION (mode=$DNS_MODE, port=$DNS_PORT)"
+    normalize_scope
+    log "starting DNS interception $SCRIPT_VERSION (scope=$DNS_SCOPE, mode=$APP_MODE, port=$DNS_PORT)"
 
-    if [ "$DNS_MODE" = "off" ]; then
+    if [ "$DNS_SCOPE" = "off" ]; then
         stop
         log "DNS interception disabled"
         return
