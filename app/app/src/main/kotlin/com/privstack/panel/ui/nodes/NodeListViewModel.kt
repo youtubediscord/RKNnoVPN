@@ -82,6 +82,9 @@ class NodeListViewModel @Inject constructor(
                 }
             } else {
                 Log.d(TAG, "Active node set to $nodeId via panel-set")
+                profileRepository.error.value?.let { persistedWarning ->
+                    _uiState.update { it.copy(errorMessage = persistedWarning) }
+                }
             }
         }
     }
@@ -339,12 +342,13 @@ class NodeListViewModel @Inject constructor(
                     // Auto-select the group of the first imported node so the user
                     // can see the results immediately.
                     val firstGroup = imported.firstOrNull()?.group
+                    val persistedWarning = profileRepository.error.value
                     _uiState.update {
                         it.copy(
-                            showImportSheet = false,
-                            importCandidates = emptyList(),
+                            showImportSheet = persistedWarning != null,
+                            importCandidates = if (persistedWarning != null) it.importCandidates else emptyList(),
                             isLoading = false,
-                            errorMessage = null,
+                            errorMessage = persistedWarning,
                             selectedGroup = firstGroup ?: it.selectedGroup,
                         )
                     }
@@ -385,12 +389,13 @@ class NodeListViewModel @Inject constructor(
                 }
             } else {
                 val firstGroup = imported.firstOrNull()?.group
+                val persistedWarning = profileRepository.error.value
                 _uiState.update {
                     it.copy(
-                        showImportSheet = false,
-                        importCandidates = emptyList(),
+                        showImportSheet = persistedWarning != null,
+                        importCandidates = if (persistedWarning != null) it.importCandidates else emptyList(),
                         isLoading = false,
-                        errorMessage = null,
+                        errorMessage = persistedWarning,
                         selectedGroup = firstGroup ?: it.selectedGroup,
                     )
                 }

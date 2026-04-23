@@ -358,7 +358,7 @@ class SettingsViewModel @Inject constructor(
                 }
             }.onSuccess { downloaded ->
                 lastDownloadedUpdate = downloaded
-                val hasArtifacts = downloaded.modulePath.isNotBlank() || downloaded.apkPath.isNotBlank()
+                val hasArtifacts = downloaded.modulePath.isNotBlank() && downloaded.apkPath.isNotBlank()
                 _updateState.update {
                     it.copy(
                         status = if (hasArtifacts) UpdateStatus.DOWNLOADED else UpdateStatus.ERROR,
@@ -366,7 +366,7 @@ class SettingsViewModel @Inject constructor(
                         errorMessage = if (hasArtifacts) {
                             ""
                         } else {
-                            messages.get(com.privstack.panel.R.string.update_error_no_artifacts)
+                            messages.get(com.privstack.panel.R.string.update_error_pair_required)
                         },
                         modulePath = downloaded.modulePath,
                         apkPath = downloaded.apkPath,

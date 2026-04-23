@@ -51,6 +51,7 @@ class PrivctlExecutor @Inject constructor() {
     companion object {
         private const val TAG = "PrivctlExecutor"
         private const val DEFAULT_TIMEOUT_MS = 5_000L
+        private const val INLINE_PARAMS_LIMIT = 16 * 1024
 
         /** Exit code returned by `su` when the user denies the superuser prompt. */
         private const val SU_DENIED_EXIT_CODE = 13
@@ -88,11 +89,19 @@ class PrivctlExecutor @Inject constructor() {
     ): PrivctlResult = suspendCancellableCoroutine { cont ->
         var process: Process? = null
         try {
+            val paramsJson = params.toString()
+            val useStdin = params.isNotEmpty() &&
+                paramsJson.toByteArray(StandardCharsets.UTF_8).size > INLINE_PARAMS_LIMIT
+            val commandString = when {
+                params.isEmpty() -> "$privctlPath $method"
+                useStdin -> "PRIVSTACK_STDIN_PARAMS=1 $privctlPath $method"
+                else -> "$privctlPath $method ${shellQuote(paramsJson)}"
+            }
             val command = arrayOf(
-                "su", "-c", "$privctlPath $method"
+                "su", "-c", commandString
             )
 
-            Log.d(TAG, ">>> su -c \"$privctlPath $method\"")
+            Log.d(TAG, ">>> su -c \"$commandString\"")
 
             process = Runtime.getRuntime().exec(command)
 
@@ -100,7 +109,7 @@ class PrivctlExecutor @Inject constructor() {
                 process.destroy()
             }
 
-            writeParamsSafely(process, params)
+            writeParamsSafely(process, if (useStdin) paramsJson else null)
 
             var stdout = ""
             var stderr = ""
@@ -125,17 +134,13 @@ class PrivctlExecutor @Inject constructor() {
         }
     }
 
-    private fun writeParamsSafely(process: Process, params: JsonObject) {
-        try {
-            process.outputStream.use { output ->
-                if (!params.isEmpty()) {
-                    output.write(params.toString().toByteArray(StandardCharsets.UTF_8))
-                    output.write('\n'.code)
-                    output.flush()
-                }
+    private fun writeParamsSafely(process: Process, paramsJson: String?) {
+        process.outputStream.use { output ->
+            if (!paramsJson.isNullOrEmpty()) {
+                output.write(paramsJson.toByteArray(StandardCharsets.UTF_8))
+                output.write('\n'.code)
+                output.flush()
             }
-        } catch (e: IOException) {
-            Log.d(TAG, "privctl stdin closed early: ${e.message}")
         }
     }
 
@@ -244,6 +249,11 @@ class PrivctlExecutor @Inject constructor() {
 
         // Fallback: treat the entire object as the result
         return PrivctlResult.Success(jsonElement)
+    }
+
+    private fun shellQuote(value: String): String {
+        if (value.isEmpty()) return "''"
+        return "'" + value.replace("'", "'\"'\"'") + "'"
     }
 
 }

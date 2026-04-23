@@ -28,14 +28,14 @@ import (
 	"github.com/privstack/daemon/internal/watcher"
 )
 
-var Version = "1.6.1"
+var Version = "1.6.2"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {
-	cfg     *config.Config
-	cfgPath string
+	cfg       *config.Config
+	cfgPath   string
 	panelPath string
-	dataDir string
+	dataDir   string
 
 	coreMgr    *core.CoreManager
 	healthMon  *health.HealthMonitor
@@ -193,6 +193,13 @@ func main() {
 	d.initRuntimeV2()
 
 	d.healthMon.SetOnDegraded(func() {
+		d.mu.Lock()
+		rescueEnabled := d.cfg.Rescue.Enabled
+		d.mu.Unlock()
+		if !rescueEnabled {
+			log.Printf("rescue disabled, skipping automatic recovery")
+			return
+		}
 		if err := d.rescueMgr.Attempt(); err != nil {
 			log.Printf("rescue attempt failed: %v", err)
 			d.mu.Lock()
@@ -223,14 +230,9 @@ func main() {
 
 	if cfg.Autostart {
 		log.Printf("autostart enabled, starting proxy")
-		profile := cfg.ResolveProfile()
-		if err := d.coreMgr.Start(profile); err != nil {
+		d.syncRuntimeV2DesiredState()
+		if _, err := d.runtimeV2.Start(); err != nil {
 			log.Printf("autostart failed: %v", err)
-		} else {
-			// Proxy is running -- start the supporting subsystems.
-			d.startSubsystems()
-			d.syncRuntimeV2DesiredState()
-			d.runtimeV2.RefreshHealth()
 		}
 	}
 
@@ -448,18 +450,15 @@ func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCErro
 			Message: "no node configured (address is empty)",
 		}
 	}
-
-	if err := d.coreMgr.Start(profile); err != nil {
+	d.syncRuntimeV2DesiredState()
+	status, err := d.runtimeV2.Start()
+	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
 			Message: err.Error(),
 		}
 	}
-
-	d.rescueMgr.Reset()
-	d.startSubsystems()
-
-	return map[string]string{"status": "started"}, nil
+	return status, nil
 }
 
 func (d *daemon) handleStop(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -470,16 +469,14 @@ func (d *daemon) handleStop(params *json.RawMessage) (interface{}, *ipc.RPCError
 			Message: "proxy is not running",
 		}
 	}
-
-	d.stopSubsystems()
-	if err := d.coreMgr.Stop(); err != nil {
+	status, err := d.runtimeV2.Stop()
+	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
 			Message: err.Error(),
 		}
 	}
-
-	return map[string]string{"status": "stopped"}, nil
+	return status, nil
 }
 
 func (d *daemon) handleReload(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -987,6 +984,14 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		}
 	}
 
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(*params, &raw); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeConfigError,
+			Message: "invalid config: " + err.Error(),
+		}
+	}
+
 	newCfg := config.DefaultConfig()
 	if err := json.Unmarshal(*params, newCfg); err != nil {
 		return nil, &ipc.RPCError{
@@ -997,6 +1002,15 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 	d.mu.Lock()
 	newCfg.Panel = d.cfg.Panel
 	d.mu.Unlock()
+	if panelRaw, ok := raw["panel"]; ok {
+		if err := json.Unmarshal(panelRaw, &newCfg.Panel); err != nil {
+			return nil, &ipc.RPCError{
+				Code:    ipc.CodeConfigError,
+				Message: "invalid panel config: " + err.Error(),
+			}
+		}
+		newCfg.SyncFromPanel(true)
+	}
 
 	if err := newCfg.Validate(); err != nil {
 		return nil, &ipc.RPCError{
@@ -1007,6 +1021,13 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 
 	if err := d.applyConfig(newCfg, true); err != nil {
 		return nil, d.configApplyRPCError(err)
+	}
+	if _, ok := raw["panel"]; ok {
+		if err := config.SavePanel(d.panelPath, newCfg.Panel); err != nil {
+			return nil, d.configApplyRPCError(
+				fmt.Errorf("apply config import failed; panel saved was not persisted: %w", err),
+			)
+		}
 	}
 
 	return map[string]string{"status": "imported"}, nil
@@ -1172,7 +1193,7 @@ func (d *daemon) resetNetworkState(cfg *config.Config) []string {
 	_, _ = core.ExecCommand("killall", "-TERM", "sing-box")
 	_, _ = core.ExecCommand("killall", "-KILL", "sing-box")
 	d.rescueMgr.Reset()
-	d.coreMgr.SetState(core.StateStopped)
+	d.coreMgr.ResetState()
 	d.resetRuntimeMetrics()
 	return errors
 }
@@ -1765,6 +1786,12 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
 			Message: "no downloaded update files found",
+		}
+	}
+	if moduleExists != apkExists {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "this update requires both module and APK artifacts",
 		}
 	}
 

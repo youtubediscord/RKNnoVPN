@@ -359,7 +359,7 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 
 	runStep("clear-runtime-state", func() error {
 		d.rescueMgr.Reset()
-		d.coreMgr.SetState(core.StateStopped)
+		d.coreMgr.ResetState()
 		d.resetRuntimeMetrics()
 		return nil
 	})
@@ -398,16 +398,21 @@ func (d *daemon) persistDesiredStateV2(desired runtimev2.DesiredState) error {
 		nextCfg.RuntimeV2.FallbackPolicy = string(desired.FallbackPolicy)
 	}
 	d.mu.Lock()
-	nextCfg.Panel = d.cfg.Panel
+	currentPanel := d.cfg.Panel
+	nextCfg.Panel = currentPanel
 	d.mu.Unlock()
 	if desired.ActiveProfileID != "" {
 		nextCfg.Panel.ActiveNodeID = desired.ActiveProfileID
 	}
 	nextCfg.SyncFromPanel(true)
-	if err := d.applyConfig(nextCfg, false); err != nil {
+	if err := config.SavePanel(d.panelPath, nextCfg.Panel); err != nil {
 		return err
 	}
-	return config.SavePanel(d.panelPath, nextCfg.Panel)
+	if err := d.applyConfig(nextCfg, false); err != nil {
+		_ = config.SavePanel(d.panelPath, currentPanel)
+		return err
+	}
+	return nil
 }
 
 func (d *daemon) handleBackendStatus(params *json.RawMessage) (interface{}, *ipc.RPCError) {

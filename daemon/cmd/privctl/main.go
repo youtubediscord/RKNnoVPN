@@ -11,8 +11,9 @@ import (
 )
 
 const defaultSocket = "/data/adb/privstack/run/daemon.sock"
+const maxFrameBytes = 16 * 1024 * 1024
 
-var Version = "1.6.1"
+var Version = "1.6.2"
 
 var commands = map[string]string{
 	"backend.status":            "Get v2 backend status",
@@ -33,7 +34,7 @@ var commands = map[string]string{
 	"app.list":                  "List installed apps known to the daemon",
 	"app.resolveUid":            "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
 	"panel-get":                 "Get APK-facing panel state",
-	"panel-set":                 "Set APK-facing panel state atomically: privctl panel-set < panel.json",
+	"panel-set":                 "Set APK-facing panel state atomically (use PRIVSTACK_STDIN_PARAMS=1 for stdin payloads)",
 	"config-get":                "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
 	"config-set":                "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
 	"config-set-many":           "Set multiple config values atomically: privctl config-set-many '{\"values\":{...},\"reload\":true}'",
@@ -115,19 +116,11 @@ func main() {
 
 	// Read response.
 	reader := bufio.NewReader(conn)
-	line, err := reader.ReadBytes('\n')
+	line, err := readFrame(reader)
 	if err != nil {
-		if err == io.EOF && len(line) > 0 {
-			// Accept a final unterminated frame.
-		} else if err != nil {
-			fmt.Fprintf(os.Stderr, "error: read response: %v\n", err)
-			os.Exit(1)
-		} else {
-			fmt.Fprintf(os.Stderr, "error: daemon closed connection without response\n")
-			os.Exit(1)
-		}
+		fmt.Fprintf(os.Stderr, "error: read response: %v\n", err)
+		os.Exit(1)
 	}
-	line = []byte(strings.TrimSpace(string(line)))
 	if len(line) == 0 {
 		fmt.Fprintf(os.Stderr, "error: daemon closed connection without response\n")
 		os.Exit(1)
@@ -221,7 +214,7 @@ func printUsage() {
 	fmt.Println("  privctl status")
 	fmt.Println("  privctl start")
 	fmt.Println("  privctl audit")
-	fmt.Println("  printf '{\"panel\":{\"id\":\"default\",\"name\":\"Default\"},\"reload\":false}\\n' | privctl panel-set")
+	fmt.Println("  printf '{\"panel\":{\"id\":\"default\",\"name\":\"Default\"},\"reload\":false}\\n' | PRIVSTACK_STDIN_PARAMS=1 privctl panel-set")
 	fmt.Println("  privctl app.resolveUid '{\"uid\":10123}'")
 	fmt.Println("  privctl config-get '{\"key\":\"proxy\"}'")
 	fmt.Println("  privctl config-set '{\"key\":\"autostart\",\"value\":false}'")
@@ -233,12 +226,7 @@ func readRawParams(args []string) string {
 	if len(args) > 0 {
 		return strings.TrimSpace(strings.Join(args, " "))
 	}
-
-	stat, err := os.Stdin.Stat()
-	if err != nil {
-		return ""
-	}
-	if (stat.Mode() & os.ModeCharDevice) != 0 {
+	if os.Getenv("PRIVSTACK_STDIN_PARAMS") != "1" {
 		return ""
 	}
 
@@ -247,4 +235,24 @@ func readRawParams(args []string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+func readFrame(reader *bufio.Reader) ([]byte, error) {
+	var frame []byte
+	for {
+		chunk, isPrefix, err := reader.ReadLine()
+		if err != nil {
+			if err == io.EOF && len(frame) > 0 {
+				return frame, nil
+			}
+			return nil, err
+		}
+		if len(frame)+len(chunk) > maxFrameBytes {
+			return nil, fmt.Errorf("frame exceeds %d bytes", maxFrameBytes)
+		}
+		frame = append(frame, chunk...)
+		if !isPrefix {
+			return frame, nil
+		}
+	}
 }

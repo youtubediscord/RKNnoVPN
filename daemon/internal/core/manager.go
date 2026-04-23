@@ -112,6 +112,20 @@ func (m *CoreManager) SetState(s State) {
 	m.state = s
 }
 
+// ResetState forgets any tracked sing-box process metadata after an external
+// cleanup path already tore the runtime down.
+func (m *CoreManager) ResetState() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.process = nil
+	m.pid = 0
+	m.activeProfile = ""
+	m.startedAt = time.Time{}
+	m.state = StateStopped
+	_ = os.Remove(filepath.Join(m.dataDir, "run", "singbox.pid"))
+}
+
 // --------------------------------------------------------------------------
 // Start
 // --------------------------------------------------------------------------
@@ -183,7 +197,10 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		_ = m.process.Signal(syscall.SIGKILL)
 		m.process = nil
 		m.pid = 0
+		m.activeProfile = ""
+		m.startedAt = time.Time{}
 		m.state = StateStopped
+		_ = os.Remove(pidPath)
 		return fmt.Errorf("core: port %d not ready: %w", tproxyPort, err)
 	}
 	m.logger.Printf("port %d is listening", tproxyPort)
@@ -195,7 +212,10 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		_ = m.process.Signal(syscall.SIGTERM)
 		m.process = nil
 		m.pid = 0
+		m.activeProfile = ""
+		m.startedAt = time.Time{}
 		m.state = StateStopped
+		_ = os.Remove(pidPath)
 		return fmt.Errorf("core: iptables start: %w", err)
 	}
 	m.logger.Println("iptables rules applied")
@@ -208,7 +228,10 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		_ = m.process.Signal(syscall.SIGTERM)
 		m.process = nil
 		m.pid = 0
+		m.activeProfile = ""
+		m.startedAt = time.Time{}
 		m.state = StateStopped
+		_ = os.Remove(pidPath)
 		return fmt.Errorf("core: dns start: %w", err)
 	}
 	m.logger.Println("DNS interception applied")
@@ -347,6 +370,11 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	}
 	if err := m.waitForPortOrExit(tproxyPort, 30*time.Second, exitCh, logPath); err != nil {
 		_ = m.process.Signal(syscall.SIGKILL)
+		m.process = nil
+		m.pid = 0
+		m.activeProfile = ""
+		m.startedAt = time.Time{}
+		_ = os.Remove(pidPath)
 		m.state = StateDegraded
 		return fmt.Errorf("core: hot-swap port wait: %w", err)
 	}

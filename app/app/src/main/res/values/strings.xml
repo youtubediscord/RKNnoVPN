@@ -246,6 +246,7 @@
     <string name="update_error_no_checked_update">No checked update is available to download</string>
     <string name="update_error_no_downloaded_update">No downloaded update is ready to install</string>
     <string name="update_error_no_artifacts">Update download finished without any artifacts</string>
+    <string name="update_error_pair_required">This update requires both module and APK artifacts.</string>
     <string name="update_error_install_without_artifacts">Update install completed without installing module or APK</string>
     <string name="update_error_check_failed">Update check failed</string>
     <string name="update_error_download_failed">Update download failed</string>

@@ -15,8 +15,8 @@ android {
         applicationId = "com.privstack.panel"
         minSdk = 26
         targetSdk = 35
-        versionCode = 161
-        versionName = "v1.6.1"
+        versionCode = 162
+        versionName = "v1.6.2"
 
         vectorDrawables {
             useSupportLibrary = true

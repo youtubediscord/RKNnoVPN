@@ -205,7 +205,11 @@ class DaemonClient @Inject constructor(
             else -> return runtimeResult.asFailure()
         }
 
-        val panelResult = panelGet()
+        val panelResult = when (val result = panelGet()) {
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) legacyPanelGet() else result
+            else -> result
+        }
         val panel = when (panelResult) {
             is DaemonClientResult.Ok -> panelResult.data
             else -> return panelResult.asFailure()
@@ -272,16 +276,17 @@ class DaemonClient @Inject constructor(
         val daemonDns = config.dns.toDaemonDnsSection(extra?.obj("dns_raw"))
         val daemonHealth = config.health.toDaemonHealthSection(extra?.obj("health_raw"))
         val daemonRuntime = config.runtime.toDaemonRuntimeSection()
-
-        val values = buildJsonObject {
-            put("node", json.encodeToJsonElement(DaemonNodeSection.serializer(), daemonNode))
-            put("transport", json.encodeToJsonElement(DaemonTransportSection.serializer(), daemonTransport))
-            put("routing", json.encodeToJsonElement(DaemonRoutingSection.serializer(), daemonRouting))
-            put("apps", json.encodeToJsonElement(DaemonAppsSection.serializer(), daemonApps))
-            put("dns", json.encodeToJsonElement(DaemonDnsSection.serializer(), daemonDns))
-            put("health", json.encodeToJsonElement(DaemonHealthSection.serializer(), daemonHealth))
-            put("runtime_v2", json.encodeToJsonElement(DaemonRuntimeV2Section.serializer(), daemonRuntime))
-        }
+        val values = buildConfigSetValues(
+            config = config,
+            daemonNode = daemonNode,
+            daemonTransport = daemonTransport,
+            daemonRouting = daemonRouting,
+            daemonApps = daemonApps,
+            daemonDns = daemonDns,
+            daemonHealth = daemonHealth,
+            daemonRuntime = daemonRuntime,
+            includePanel = false,
+        )
         val params = buildJsonObject {
             put("values", values)
             put("reload", reload)
@@ -297,8 +302,9 @@ class DaemonClient @Inject constructor(
     suspend fun panelSet(
         config: ProfileConfig,
         reload: Boolean = true,
-    ): DaemonClientResult<Unit> {
-        val params = buildJsonObject {
+    ): DaemonClientResult<Unit> = when (val result = callVoid(
+        "panel-set",
+        buildJsonObject {
             put(
                 "panel",
                 json.encodeToJsonElement(
@@ -307,8 +313,87 @@ class DaemonClient @Inject constructor(
                 )
             )
             put("reload", reload)
+        },
+        timeoutMs = 60_000L,
+    )) {
+        is DaemonClientResult.DaemonError ->
+            if (isMethodNotFound(result)) legacyPanelSet(config, reload) else result
+        else -> result
+    }
+
+    private fun buildConfigSetValues(
+        config: ProfileConfig,
+        daemonNode: DaemonNodeSection,
+        daemonTransport: DaemonTransportSection,
+        daemonRouting: DaemonRoutingSection,
+        daemonApps: DaemonAppsSection,
+        daemonDns: DaemonDnsSection,
+        daemonHealth: DaemonHealthSection,
+        daemonRuntime: DaemonRuntimeV2Section,
+        includePanel: Boolean,
+    ): JsonObject = buildJsonObject {
+        if (includePanel) {
+            put(
+                "panel",
+                json.encodeToJsonElement(
+                    DaemonPanelSection.serializer(),
+                    config.toDaemonPanelSection(),
+                )
+            )
         }
-        return callVoid("panel-set", params, timeoutMs = 60_000L)
+        put("node", json.encodeToJsonElement(DaemonNodeSection.serializer(), daemonNode))
+        put("transport", json.encodeToJsonElement(DaemonTransportSection.serializer(), daemonTransport))
+        put("routing", json.encodeToJsonElement(DaemonRoutingSection.serializer(), daemonRouting))
+        put("apps", json.encodeToJsonElement(DaemonAppsSection.serializer(), daemonApps))
+        put("dns", json.encodeToJsonElement(DaemonDnsSection.serializer(), daemonDns))
+        put("health", json.encodeToJsonElement(DaemonHealthSection.serializer(), daemonHealth))
+        put("runtime_v2", json.encodeToJsonElement(DaemonRuntimeV2Section.serializer(), daemonRuntime))
+    }
+
+    private suspend fun legacyPanelGet(): DaemonClientResult<DaemonPanelSection> {
+        val panelResult = fetchSection("panel")
+        return when (panelResult) {
+            is DaemonClientResult.Ok ->
+                runCatching {
+                    json.decodeFromJsonElement(DaemonPanelSection.serializer(), panelResult.data)
+                }.fold(
+                    onSuccess = { DaemonClientResult.Ok(it) },
+                    onFailure = { DaemonClientResult.ParseError(panelResult.data.toString(), it) }
+                )
+            is DaemonClientResult.DaemonError ->
+                if (panelResult.message.contains("unknown config key: panel", ignoreCase = true)) {
+                    DaemonClientResult.Ok(DaemonPanelSection())
+                } else {
+                    panelResult
+                }
+            else -> panelResult.asFailure()
+        }
+    }
+
+    private suspend fun legacyPanelSet(
+        config: ProfileConfig,
+        reload: Boolean,
+    ): DaemonClientResult<Unit> {
+        val activeNode = config.nodes.find { it.id == config.activeNodeId } ?: config.nodes.firstOrNull()
+        val extra = config.extra?.jsonObject
+        val params = buildJsonObject {
+            put(
+                "values",
+                buildConfigSetValues(
+                    config = config,
+                    daemonNode = activeNode?.toDaemonNodeSection() ?: DaemonNodeSection(),
+                    daemonTransport = activeNode?.toDaemonTransportSection() ?: DaemonTransportSection(),
+                    daemonRouting = config.routing.toDaemonRoutingSection(extra?.obj("routing_raw")),
+                    daemonApps = config.routing.toDaemonAppsSection(),
+                    daemonDns = config.dns.toDaemonDnsSection(extra?.obj("dns_raw")),
+                    daemonHealth = config.health.toDaemonHealthSection(extra?.obj("health_raw")),
+                    daemonRuntime = config.runtime.toDaemonRuntimeSection(),
+                    includePanel = true,
+                )
+            )
+            put("reload", reload)
+        }
+        return callVoid("config-set-many", params, timeoutMs = 60_000L)
     }
 
     /** List all stored config sections the daemon currently understands. */

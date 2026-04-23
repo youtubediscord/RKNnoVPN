@@ -246,6 +246,7 @@
     <string name="update_error_no_checked_update">Сначала нужно найти доступное обновление</string>
     <string name="update_error_no_downloaded_update">Нет загруженного обновления для установки</string>
     <string name="update_error_no_artifacts">Загрузка завершилась без файлов обновления</string>
+    <string name="update_error_pair_required">Для этого обновления нужны и модуль, и APK.</string>
     <string name="update_error_install_without_artifacts">Установка завершилась без модуля и APK</string>
     <string name="update_error_check_failed">Не удалось проверить обновления</string>
     <string name="update_error_download_failed">Не удалось скачать обновление</string>

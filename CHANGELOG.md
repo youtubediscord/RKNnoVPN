@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.6.2
+
+- Stabilized large config/panel payload handling between APK, `privctl`, and daemon IPC.
+- Added `panel.json` install/upgrade support and migration regression coverage.
+- Hardened runtime sync, reset cleanup, and mixed APK/module compatibility paths.
+- Require matching module and APK artifacts for in-app updates after the storage/API split.
+
 ## v1.6.1
 
 - Finalized the Russian-first UI pass across Dashboard, Nodes, Apps, Settings, Audit, and Advisor.

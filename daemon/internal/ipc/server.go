@@ -10,6 +10,8 @@ import (
 	"sync"
 )
 
+const maxFrameBytes = 16 * 1024 * 1024
+
 // Handler is a function that processes a JSON-RPC method call.
 // It receives raw params and returns a result or an error.
 type Handler func(params *json.RawMessage) (interface{}, *RPCError)
@@ -101,12 +103,11 @@ func (s *Server) handleConn(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 
 	for {
-		line, err := reader.ReadBytes('\n')
+		line, err := readFrame(reader)
 		if err != nil && err != io.EOF {
 			log.Printf("ipc: read error: %v", err)
 			return
 		}
-		line = bytesTrimSpace(line)
 		if len(line) == 0 {
 			if err == io.EOF {
 				return
@@ -132,16 +133,24 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 }
 
-func bytesTrimSpace(data []byte) []byte {
-	start := 0
-	for start < len(data) && (data[start] == ' ' || data[start] == '\n' || data[start] == '\r' || data[start] == '\t') {
-		start++
+func readFrame(reader *bufio.Reader) ([]byte, error) {
+	var frame []byte
+	for {
+		chunk, isPrefix, err := reader.ReadLine()
+		if err != nil {
+			if err == io.EOF && len(frame) > 0 {
+				return frame, io.EOF
+			}
+			return nil, err
+		}
+		if len(frame)+len(chunk) > maxFrameBytes {
+			return nil, io.ErrShortBuffer
+		}
+		frame = append(frame, chunk...)
+		if !isPrefix {
+			return frame, nil
+		}
 	}
-	end := len(data)
-	for end > start && (data[end-1] == ' ' || data[end-1] == '\n' || data[end-1] == '\r' || data[end-1] == '\t') {
-		end--
-	}
-	return data[start:end]
 }
 
 func (s *Server) processRequest(data []byte) *Response {
