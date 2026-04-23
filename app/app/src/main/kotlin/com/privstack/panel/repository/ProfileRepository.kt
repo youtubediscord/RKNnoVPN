@@ -100,12 +100,12 @@ class ProfileRepository @Inject constructor(
     // ---- Node CRUD ----
 
     /** Add a node to the profile. */
-    suspend fun addNode(node: Node): Boolean = mutate("addNode") { config ->
+    suspend fun addNode(node: Node): Boolean = mutatePanel("addNode") { config ->
         config.copy(nodes = config.nodes + node)
     }
 
     /** Remove a node by ID. */
-    suspend fun removeNode(nodeId: String): Boolean = mutate("removeNode") { config ->
+    suspend fun removeNode(nodeId: String): Boolean = mutatePanel("removeNode") { config ->
         config.copy(
             nodes = config.nodes.filter { it.id != nodeId },
             activeNodeId = if (config.activeNodeId == nodeId) null else config.activeNodeId
@@ -113,12 +113,12 @@ class ProfileRepository @Inject constructor(
     }
 
     /** Replace a node, matching by ID. */
-    suspend fun updateNode(updated: Node): Boolean = mutate("updateNode") { config ->
+    suspend fun updateNode(updated: Node): Boolean = mutatePanel("updateNode") { config ->
         config.copy(nodes = config.nodes.map { if (it.id == updated.id) updated else it })
     }
 
     /** Set the active node for this profile. */
-    suspend fun setActiveNode(nodeId: String): Boolean = mutate("setActiveNode") { config ->
+    suspend fun setActiveNode(nodeId: String): Boolean = mutatePanel("setActiveNode") { config ->
         config.copy(activeNodeId = nodeId)
     }
 
@@ -153,10 +153,18 @@ class ProfileRepository @Inject constructor(
         _loading.value = true
         _error.value = null
         try {
-            when (val result = client.configSet(config)) {
+            when (val result = client.configSet(config, reload = false)) {
                 is DaemonClientResult.Ok -> {
-                    // Re-read to confirm daemon accepted the config
-                    refreshUnlockedWithStatus("setProfile")
+                    when (val panelResult = client.panelSet(config, reload = true)) {
+                        is DaemonClientResult.Ok -> refreshUnlockedWithStatus("setProfile")
+                        else -> {
+                            val msg = describeFailure(panelResult)
+                            Log.w(TAG, "setProfile panel update failed: $msg")
+                            _error.value = msg
+                            refreshUnlockedWithStatus("setProfile")
+                            false
+                        }
+                    }
                 }
                 else -> {
                     val msg = describeFailure(result)
@@ -204,6 +212,38 @@ class ProfileRepository @Inject constructor(
                 else -> {
                     val msg = describeFailure(result)
                     Log.w(TAG, "$tag failed: $msg")
+                    if (result.configWasSaved()) {
+                        _error.value = msg
+                        return refreshUnlockedWithStatus(tag)
+                    }
+                    _error.value = msg
+                    false
+                }
+            }
+        } finally {
+            _loading.value = false
+        }
+    }
+
+    private suspend fun mutatePanel(
+        tag: String,
+        transform: (ProfileConfig) -> ProfileConfig,
+    ): Boolean = mutex.withLock {
+        _loading.value = true
+        _error.value = null
+        try {
+            val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                if (_error.value.isNullOrBlank()) {
+                    _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                }
+                return@withLock false
+            }
+            val updated = transform(current)
+            when (val result = client.panelSet(updated)) {
+                is DaemonClientResult.Ok -> refreshUnlockedWithStatus(tag)
+                else -> {
+                    val msg = describeFailure(result)
+                    Log.w(TAG, "$tag panel update failed: $msg")
                     if (result.configWasSaved()) {
                         _error.value = msg
                         return refreshUnlockedWithStatus(tag)
@@ -279,7 +319,7 @@ class ProfileRepository @Inject constructor(
         }
 
         val merged = mergeNodes(current, parsedNodes)
-        return if (persistProfileUnlocked(merged.updatedConfig)) {
+        return if (persistPanelUnlocked(merged.updatedConfig)) {
             merged.importedNodes
         } else {
             emptyList()
@@ -313,24 +353,24 @@ class ProfileRepository @Inject constructor(
         }
 
         val merged = mergeNodes(current, parsed.nodes, dropRemoved = true)
-        return if (persistProfileUnlocked(merged.updatedConfig)) {
+        return if (persistPanelUnlocked(merged.updatedConfig)) {
             parsed.nodes
         } else {
             emptyList()
         }
     }
 
-    private suspend fun persistProfileUnlocked(config: ProfileConfig): Boolean {
-        return when (val result = client.configSet(config)) {
+    private suspend fun persistPanelUnlocked(config: ProfileConfig): Boolean {
+        return when (val result = client.panelSet(config)) {
             is DaemonClientResult.Ok -> {
-                refreshUnlockedWithStatus("persistProfileUnlocked")
+                refreshUnlockedWithStatus("persistPanelUnlocked")
             }
             else -> {
                 val msg = describeFailure(result)
-                Log.w(TAG, "persistProfileUnlocked failed: $msg")
+                Log.w(TAG, "persistPanelUnlocked failed: $msg")
                 if (result.configWasSaved()) {
                     _error.value = msg
-                    return refreshUnlockedWithStatus("persistProfileUnlocked")
+                    return refreshUnlockedWithStatus("persistPanelUnlocked")
                 }
                 _error.value = msg
                 false

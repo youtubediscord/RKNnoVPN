@@ -71,20 +71,7 @@ class NodeListViewModel @Inject constructor(
             val previousNodeId = _uiState.value.activeNodeId
             _uiState.update { it.copy(activeNodeId = nodeId, errorMessage = null) }
             val ok = profileRepository.setActiveNode(nodeId)
-            if (ok) {
-                Log.d(TAG, "Active node set to $nodeId, applying backend restart")
-                when (val result = daemonClient.backendRestart()) {
-                    is DaemonClientResult.Ok -> {
-                        Log.d(TAG, "Backend restart succeeded for node $nodeId")
-                    }
-                    else -> {
-                        val msg = describeError(result)
-                        Log.w(TAG, "Backend restart failed for node $nodeId: $msg")
-                        profileRepository.refresh()
-                        _uiState.update { it.copy(activeNodeId = previousNodeId, errorMessage = msg) }
-                    }
-                }
-            } else {
+            if (!ok) {
                 val err = profileRepository.error.value
                 profileRepository.refresh()
                 _uiState.update {
@@ -93,6 +80,8 @@ class NodeListViewModel @Inject constructor(
                         errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_set_active_failed),
                     )
                 }
+            } else {
+                Log.d(TAG, "Active node set to $nodeId via panel-set")
             }
         }
     }

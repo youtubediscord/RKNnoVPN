@@ -3,6 +3,7 @@ package ipc
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -97,13 +98,19 @@ func (s *Server) handleConn(conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
 
-	scanner := bufio.NewScanner(conn)
-	// Allow up to 1 MB per request line.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	reader := bufio.NewReader(conn)
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	for {
+		line, err := reader.ReadBytes('\n')
+		if err != nil && err != io.EOF {
+			log.Printf("ipc: read error: %v", err)
+			return
+		}
+		line = bytesTrimSpace(line)
 		if len(line) == 0 {
+			if err == io.EOF {
+				return
+			}
 			continue
 		}
 
@@ -118,10 +125,23 @@ func (s *Server) handleConn(conn net.Conn) {
 			log.Printf("ipc: write error: %v", err)
 			return
 		}
+
+		if err == io.EOF {
+			return
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		log.Printf("ipc: read error: %v", err)
+}
+
+func bytesTrimSpace(data []byte) []byte {
+	start := 0
+	for start < len(data) && (data[start] == ' ' || data[start] == '\n' || data[start] == '\r' || data[start] == '\t') {
+		start++
 	}
+	end := len(data)
+	for end > start && (data[end-1] == ' ' || data[end-1] == '\n' || data[end-1] == '\r' || data[end-1] == '\t') {
+		end--
+	}
+	return data[start:end]
 }
 
 func (s *Server) processRequest(data []byte) *Response {

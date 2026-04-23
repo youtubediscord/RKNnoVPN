@@ -18,6 +18,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.InterruptedIOException
+import java.nio.charset.StandardCharsets
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.concurrent.thread
@@ -27,9 +28,10 @@ import kotlin.coroutines.resume
  * Low-level executor that shells out to the `privctl` binary via `su`.
  *
  * Every call:
- * 1. Builds a JSON-RPC-style request:  `privctl <method> '<params>'`
- * 2. Runs it under `su -c "..."`
- * 3. Captures stdout, parses as JSON
+ * 1. Builds a JSON-RPC-style request for `privctl <method>`
+ * 2. Streams optional JSON params via stdin to avoid argv length limits
+ * 3. Runs it under `su -c "..."`
+ * 4. Captures stdout, parses as JSON
  * 4. Maps the response to [PrivctlResult]
  *
  * Thread-safety: all calls are dispatched on [Dispatchers.IO].
@@ -86,18 +88,19 @@ class PrivctlExecutor @Inject constructor() {
     ): PrivctlResult = suspendCancellableCoroutine { cont ->
         var process: Process? = null
         try {
-            val paramsJson = if (params.isEmpty()) "" else " ${shellQuote(params.toString())}"
             val command = arrayOf(
-                "su", "-c", "$privctlPath $method$paramsJson"
+                "su", "-c", "$privctlPath $method"
             )
 
-            Log.d(TAG, ">>> su -c \"$privctlPath $method${if (params.isEmpty()) "" else " ..."}\"")
+            Log.d(TAG, ">>> su -c \"$privctlPath $method\"")
 
             process = Runtime.getRuntime().exec(command)
 
             cont.invokeOnCancellation {
                 process.destroy()
             }
+
+            writeParamsSafely(process, params)
 
             var stdout = ""
             var stderr = ""
@@ -119,6 +122,20 @@ class PrivctlExecutor @Inject constructor() {
         } catch (e: Exception) {
             process?.destroy()
             cont.resume(PrivctlResult.UnexpectedError(e))
+        }
+    }
+
+    private fun writeParamsSafely(process: Process, params: JsonObject) {
+        try {
+            process.outputStream.use { output ->
+                if (!params.isEmpty()) {
+                    output.write(params.toString().toByteArray(StandardCharsets.UTF_8))
+                    output.write('\n'.code)
+                    output.flush()
+                }
+            }
+        } catch (e: IOException) {
+            Log.d(TAG, "privctl stdin closed early: ${e.message}")
         }
     }
 
@@ -229,16 +246,6 @@ class PrivctlExecutor @Inject constructor() {
         return PrivctlResult.Success(jsonElement)
     }
 
-    /**
-     * Quote an argument for safe passage through `su -c <command-string>`.
-     *
-     * We only get one shell-parsed command string here, so JSON params must be
-     * wrapped safely even when they contain apostrophes, spaces, or shell chars.
-     */
-    private fun shellQuote(value: String): String {
-        if (value.isEmpty()) return "''"
-        return "'" + value.replace("'", "'\"'\"'") + "'"
-    }
 }
 
 /** Convenience alias for an empty JsonObject. */

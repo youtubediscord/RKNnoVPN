@@ -343,10 +343,12 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 
 	runStep("kill-sing-box", func() error {
 		var errs []string
-		if _, err := core.ExecCommand("killall", "-TERM", "sing-box"); err != nil {
+		if out, err := core.ExecCommand("killall", "-TERM", "sing-box"); err != nil &&
+			!isIgnorableKillallError(out, err) {
 			errs = append(errs, err.Error())
 		}
-		if _, err := core.ExecCommand("killall", "-KILL", "sing-box"); err != nil {
+		if out, err := core.ExecCommand("killall", "-KILL", "sing-box"); err != nil &&
+			!isIgnorableKillallError(out, err) {
 			errs = append(errs, err.Error())
 		}
 		if len(errs) > 0 {
@@ -366,6 +368,13 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 		report.Status = "partial"
 	}
 	return report
+}
+
+func isIgnorableKillallError(output string, err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.TrimSpace(output) == "" && err.Error() == "exit status 1"
 }
 
 func (d *daemon) persistDesiredStateV2(desired runtimev2.DesiredState) error {
@@ -388,10 +397,17 @@ func (d *daemon) persistDesiredStateV2(desired runtimev2.DesiredState) error {
 	if desired.FallbackPolicy != "" {
 		nextCfg.RuntimeV2.FallbackPolicy = string(desired.FallbackPolicy)
 	}
+	d.mu.Lock()
+	nextCfg.Panel = d.cfg.Panel
+	d.mu.Unlock()
 	if desired.ActiveProfileID != "" {
 		nextCfg.Panel.ActiveNodeID = desired.ActiveProfileID
 	}
-	return d.applyConfig(nextCfg, false)
+	nextCfg.SyncFromPanel(true)
+	if err := d.applyConfig(nextCfg, false); err != nil {
+		return err
+	}
+	return config.SavePanel(d.panelPath, nextCfg.Panel)
 }
 
 func (d *daemon) handleBackendStatus(params *json.RawMessage) (interface{}, *ipc.RPCError) {

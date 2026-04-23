@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -31,6 +32,8 @@ var commands = map[string]string{
 	"audit":                     "Run privacy/security audit",
 	"app.list":                  "List installed apps known to the daemon",
 	"app.resolveUid":            "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
+	"panel-get":                 "Get APK-facing panel state",
+	"panel-set":                 "Set APK-facing panel state atomically: privctl panel-set < panel.json",
 	"config-get":                "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
 	"config-set":                "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
 	"config-set-many":           "Set multiple config values atomically: privctl config-set-many '{\"values\":{...},\"reload\":true}'",
@@ -71,9 +74,9 @@ func main() {
 		"method":  cmd,
 	}
 
-	// If there's a second argument, parse it as JSON params.
-	if len(os.Args) >= 3 {
-		raw := strings.Join(os.Args[2:], " ")
+	// Parse params either from argv or stdin (for large payloads that would
+	// otherwise overflow shell/argv limits).
+	if raw := readRawParams(os.Args[2:]); raw != "" {
 		var params json.RawMessage
 		if err := json.Unmarshal([]byte(raw), &params); err != nil {
 			fmt.Fprintf(os.Stderr, "error: invalid JSON params: %v\n", err)
@@ -111,16 +114,22 @@ func main() {
 	}
 
 	// Read response.
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	if !scanner.Scan() {
-		err := scanner.Err()
-		if err != nil {
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		if err == io.EOF && len(line) > 0 {
+			// Accept a final unterminated frame.
+		} else if err != nil {
 			fmt.Fprintf(os.Stderr, "error: read response: %v\n", err)
+			os.Exit(1)
 		} else {
 			fmt.Fprintf(os.Stderr, "error: daemon closed connection without response\n")
+			os.Exit(1)
 		}
+	}
+	line = []byte(strings.TrimSpace(string(line)))
+	if len(line) == 0 {
+		fmt.Fprintf(os.Stderr, "error: daemon closed connection without response\n")
 		os.Exit(1)
 	}
 
@@ -136,9 +145,9 @@ func main() {
 		} `json:"error,omitempty"`
 	}
 
-	if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+	if err := json.Unmarshal(line, &resp); err != nil {
 		fmt.Fprintf(os.Stderr, "error: parse response: %v\n", err)
-		fmt.Fprintf(os.Stderr, "raw: %s\n", scanner.Text())
+		fmt.Fprintf(os.Stderr, "raw: %s\n", string(line))
 		os.Exit(1)
 	}
 
@@ -194,6 +203,7 @@ func printUsage() {
 		"diagnostics.health", "diagnostics.testNodes",
 		"status", "start", "stop", "reload", "network-reset", "health", "audit",
 		"app.list", "app.resolveUid",
+		"panel-get", "panel-set",
 		"config-get", "config-set", "config-set-many", "config-list", "config-import", "subscription-fetch", "node-test",
 		"logs", "version",
 		"update-check", "update-download", "update-install",
@@ -211,9 +221,30 @@ func printUsage() {
 	fmt.Println("  privctl status")
 	fmt.Println("  privctl start")
 	fmt.Println("  privctl audit")
+	fmt.Println("  printf '{\"panel\":{\"id\":\"default\",\"name\":\"Default\"},\"reload\":false}\\n' | privctl panel-set")
 	fmt.Println("  privctl app.resolveUid '{\"uid\":10123}'")
 	fmt.Println("  privctl config-get '{\"key\":\"proxy\"}'")
 	fmt.Println("  privctl config-set '{\"key\":\"autostart\",\"value\":false}'")
 	fmt.Println("  privctl node-test '{\"url\":\"https://www.gstatic.com/generate_204\"}'")
 	fmt.Println("  privctl logs '{\"lines\":100}'")
+}
+
+func readRawParams(args []string) string {
+	if len(args) > 0 {
+		return strings.TrimSpace(strings.Join(args, " "))
+	}
+
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return ""
+	}
+	if (stat.Mode() & os.ModeCharDevice) != 0 {
+		return ""
+	}
+
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }

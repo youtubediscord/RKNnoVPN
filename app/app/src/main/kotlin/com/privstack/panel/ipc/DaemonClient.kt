@@ -205,15 +205,9 @@ class DaemonClient @Inject constructor(
             else -> return runtimeResult.asFailure()
         }
 
-        val panelResult = fetchSection("panel")
+        val panelResult = panelGet()
         val panel = when (panelResult) {
-            is DaemonClientResult.Ok -> json.decodeFromJsonElement(DaemonPanelSection.serializer(), panelResult.data)
-            is DaemonClientResult.DaemonError ->
-                if (panelResult.message.contains("unknown config key: panel", ignoreCase = true)) {
-                    DaemonPanelSection()
-                } else {
-                    return panelResult
-                }
+            is DaemonClientResult.Ok -> panelResult.data
             else -> return panelResult.asFailure()
         }
 
@@ -265,7 +259,10 @@ class DaemonClient @Inject constructor(
     }
 
     /** Replace the full profile config by fanning out to daemon config sections. */
-    suspend fun configSet(config: ProfileConfig): DaemonClientResult<Unit> {
+    suspend fun configSet(
+        config: ProfileConfig,
+        reload: Boolean = true,
+    ): DaemonClientResult<Unit> {
         val activeNode = config.nodes.find { it.id == config.activeNodeId } ?: config.nodes.firstOrNull()
         val daemonNode = activeNode?.toDaemonNodeSection() ?: DaemonNodeSection()
         val daemonTransport = activeNode?.toDaemonTransportSection() ?: DaemonTransportSection()
@@ -275,18 +272,8 @@ class DaemonClient @Inject constructor(
         val daemonDns = config.dns.toDaemonDnsSection(extra?.obj("dns_raw"))
         val daemonHealth = config.health.toDaemonHealthSection(extra?.obj("health_raw"))
         val daemonRuntime = config.runtime.toDaemonRuntimeSection()
-        val daemonPanel = DaemonPanelSection(
-            id = config.id,
-            name = config.name,
-            activeNodeId = activeNode?.id.orEmpty(),
-            nodes = config.nodes,
-            tun = config.tun,
-            inbounds = config.inbounds,
-            extra = extra?.obj("panel"),
-        )
 
         val values = buildJsonObject {
-            put("panel", json.encodeToJsonElement(DaemonPanelSection.serializer(), daemonPanel))
             put("node", json.encodeToJsonElement(DaemonNodeSection.serializer(), daemonNode))
             put("transport", json.encodeToJsonElement(DaemonTransportSection.serializer(), daemonTransport))
             put("routing", json.encodeToJsonElement(DaemonRoutingSection.serializer(), daemonRouting))
@@ -297,9 +284,31 @@ class DaemonClient @Inject constructor(
         }
         val params = buildJsonObject {
             put("values", values)
-            put("reload", true)
+            put("reload", reload)
         }
-        return callVoid("config-set-many", params)
+        return callVoid("config-set-many", params, timeoutMs = 60_000L)
+    }
+
+    private suspend fun panelGet(): DaemonClientResult<DaemonPanelSection> =
+        call("panel-get") {
+            json.decodeFromJsonElement(DaemonPanelSection.serializer(), it)
+        }
+
+    suspend fun panelSet(
+        config: ProfileConfig,
+        reload: Boolean = true,
+    ): DaemonClientResult<Unit> {
+        val params = buildJsonObject {
+            put(
+                "panel",
+                json.encodeToJsonElement(
+                    DaemonPanelSection.serializer(),
+                    config.toDaemonPanelSection(),
+                )
+            )
+            put("reload", reload)
+        }
+        return callVoid("panel-set", params, timeoutMs = 60_000L)
     }
 
     /** List all stored config sections the daemon currently understands. */
@@ -1202,6 +1211,17 @@ private fun com.privstack.panel.model.RoutingConfig.toDaemonRoutingSection(base:
     }
     return bridgeJson.decodeFromJsonElement(DaemonRoutingSection.serializer(), merged)
 }
+
+private fun ProfileConfig.toDaemonPanelSection(): DaemonPanelSection =
+    DaemonPanelSection(
+        id = id,
+        name = name,
+        activeNodeId = activeNodeId.orEmpty(),
+        nodes = nodes,
+        tun = tun,
+        inbounds = inbounds,
+        extra = extra?.jsonObject?.obj("panel"),
+    )
 
 private fun com.privstack.panel.model.RoutingConfig.toDaemonAppsSection(): DaemonAppsSection =
     when (mode) {

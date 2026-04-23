@@ -34,6 +34,7 @@ var Version = "1.6.1"
 type daemon struct {
 	cfg     *config.Config
 	cfgPath string
+	panelPath string
 	dataDir string
 
 	coreMgr    *core.CoreManager
@@ -181,6 +182,7 @@ func main() {
 	d = &daemon{
 		cfg:        cfg,
 		cfgPath:    *cfgPath,
+		panelPath:  config.PanelPath(*cfgPath),
 		dataDir:    *dataDir,
 		coreMgr:    coreMgr,
 		healthMon:  healthMon,
@@ -376,6 +378,8 @@ func (d *daemon) registerHandlers() {
 	d.ipcServer.Register("audit", d.handleAudit)
 	d.ipcServer.Register("app.list", d.handleAppList)
 	d.ipcServer.Register("app.resolveUid", d.handleResolveUID)
+	d.ipcServer.Register("panel-get", d.handlePanelGet)
+	d.ipcServer.Register("panel-set", d.handlePanelSet)
 	d.ipcServer.Register("config-get", d.handleConfigGet)
 	d.ipcServer.Register("config-set", d.handleConfigSet)
 	d.ipcServer.Register("config-set-many", d.handleConfigSetMany)
@@ -775,6 +779,42 @@ func (d *daemon) handleResolveUID(params *json.RawMessage) (interface{}, *ipc.RP
 	}
 }
 
+func (d *daemon) handlePanelGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	d.mu.Lock()
+	panel := d.cfg.Panel
+	d.mu.Unlock()
+	return panel, nil
+}
+
+func (d *daemon) handlePanelSet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	if params == nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "params required: {\"panel\": {...}, \"reload\": true|false}",
+		}
+	}
+
+	var p struct {
+		Panel  config.PanelConfig `json:"panel"`
+		Reload bool               `json:"reload"`
+	}
+	if err := json.Unmarshal(*params, &p); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "invalid params: " + err.Error(),
+		}
+	}
+
+	if err := d.applyPanelConfig(p.Panel, p.Reload); err != nil {
+		return nil, d.configApplyRPCError(err)
+	}
+
+	return map[string]interface{}{
+		"status": "ok",
+		"reload": p.Reload,
+	}, nil
+}
+
 func (d *daemon) handleConfigGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	if params == nil {
 		return nil, &ipc.RPCError{
@@ -790,6 +830,12 @@ func (d *daemon) handleConfigGet(params *json.RawMessage) (interface{}, *ipc.RPC
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
 			Message: "invalid params: " + err.Error(),
+		}
+	}
+	if p.Key == "panel" {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "panel storage moved to panel-get/panel-set",
 		}
 	}
 
@@ -830,6 +876,12 @@ func (d *daemon) handleConfigSet(params *json.RawMessage) (interface{}, *ipc.RPC
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
 			Message: "invalid params: " + err.Error(),
+		}
+	}
+	if p.Key == "panel" {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "panel storage moved to panel-set",
 		}
 	}
 
@@ -874,6 +926,12 @@ func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
 			Message: "values must not be empty",
+		}
+	}
+	if _, ok := p.Values["panel"]; ok {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "panel storage moved to panel-set",
 		}
 	}
 
@@ -936,6 +994,9 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 			Message: "invalid config: " + err.Error(),
 		}
 	}
+	d.mu.Lock()
+	newCfg.Panel = d.cfg.Panel
+	d.mu.Unlock()
 
 	if err := newCfg.Validate(); err != nil {
 		return nil, &ipc.RPCError{
@@ -964,6 +1025,9 @@ func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Co
 			Message: "invalid value: " + err.Error(),
 		}
 	}
+	d.mu.Lock()
+	newCfg.Panel = d.cfg.Panel
+	d.mu.Unlock()
 
 	if err := newCfg.Validate(); err != nil {
 		return nil, &ipc.RPCError{
@@ -980,7 +1044,7 @@ func (d *daemon) configApplyRPCError(err error) *ipc.RPCError {
 		Code:    ipc.CodeInternalError,
 		Message: err.Error(),
 	}
-	if strings.Contains(err.Error(), "config saved") {
+	if strings.Contains(err.Error(), "config saved") || strings.Contains(err.Error(), "panel saved") {
 		rpcErr.Data = map[string]interface{}{
 			"config_saved": true,
 		}
@@ -1031,21 +1095,63 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 	d.syncRuntimeV2DesiredState()
 
 	if reload && wasRunning {
-		d.stopSubsystems()
-		profile := newCfg.ResolveProfile()
-		if err := d.coreMgr.HotSwap(profile); err != nil {
-			_ = d.resetNetworkState(newCfg)
-			return fmt.Errorf("apply config hot-swap failed; config saved, runtime stopped for safety: %w", err)
+		if err := d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved"); err != nil {
+			return err
 		}
-		if err := d.reapplyRuntimeRules(newCfg); err != nil {
-			_ = d.resetNetworkState(newCfg)
-			return fmt.Errorf("apply config rules failed; config saved, runtime stopped for safety: %w", err)
-		}
-		d.rescueMgr.Reset()
-		d.startSubsystems()
-		d.runtimeV2.RefreshHealth()
 	}
 
+	return nil
+}
+
+func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) error {
+	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
+		d.coreMgr.GetState() == core.StateDegraded
+
+	d.mu.Lock()
+	nextCfg := *d.cfg
+	d.mu.Unlock()
+
+	nextCfg.Panel = newPanel
+	nextCfg.SyncFromPanel(true)
+
+	if err := config.SavePanel(d.panelPath, nextCfg.Panel); err != nil {
+		return fmt.Errorf("persist panel: %w", err)
+	}
+
+	d.mu.Lock()
+	d.cfg.Panel = nextCfg.Panel
+	d.cfg.Node = nextCfg.Node
+	d.cfg.Transport = nextCfg.Transport
+	currentCfg := d.cfg
+	d.mu.Unlock()
+
+	d.coreMgr.SetConfig(currentCfg)
+	d.netWatcher.SetEnv(buildScriptEnv(currentCfg, d.dataDir))
+	d.syncRuntimeV2DesiredState()
+
+	if reload && wasRunning {
+		if err := d.reloadRuntimeAfterConfigChange(currentCfg, "apply panel", "panel saved"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string) error {
+	d.stopSubsystems()
+	profile := cfg.ResolveProfile()
+	if err := d.coreMgr.HotSwap(profile); err != nil {
+		_ = d.resetNetworkState(cfg)
+		return fmt.Errorf("%s hot-swap failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
+	}
+	if err := d.reapplyRuntimeRules(cfg); err != nil {
+		_ = d.resetNetworkState(cfg)
+		return fmt.Errorf("%s rules failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
+	}
+	d.rescueMgr.Reset()
+	d.startSubsystems()
+	d.runtimeV2.RefreshHealth()
 	return nil
 }
 

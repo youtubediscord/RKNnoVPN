@@ -459,6 +459,24 @@ func ProfilesFromPanelNodes(cfg *Config) []*NodeProfile {
 	return profiles
 }
 
+// ResolveActivePanelProfile returns the selected panel node profile, or the
+// first valid panel node when the selected one is absent. It returns nil when
+// panel storage is empty or malformed.
+func ResolveActivePanelProfile(cfg *Config) *NodeProfile {
+	profiles := ProfilesFromPanelNodes(cfg)
+	if len(profiles) == 0 {
+		return nil
+	}
+
+	activeID := cfg.Panel.ActiveNodeID
+	for _, profile := range profiles {
+		if profile.ID == activeID {
+			return profile
+		}
+	}
+	return profiles[0]
+}
+
 func isDomainAddress(address string) bool {
 	host := strings.Trim(address, "[]")
 	return host != "" && net.ParseIP(host) == nil

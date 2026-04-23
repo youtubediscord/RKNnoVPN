@@ -13,7 +13,7 @@ type Config struct {
 	Proxy     ProxyConfig     `json:"proxy"`
 	Transport TransportConfig `json:"transport"`
 	Node      NodeConfig      `json:"node"`
-	Panel     PanelConfig     `json:"panel,omitempty"`
+	Panel     PanelConfig     `json:"-"`
 	RuntimeV2 RuntimeV2Config `json:"runtime_v2,omitempty"`
 	Routing   RoutingConfig   `json:"routing"`
 	Apps      AppsConfig      `json:"apps"`
@@ -86,6 +86,8 @@ type PanelConfig struct {
 	Inbounds     json.RawMessage   `json:"inbounds,omitempty"`
 	Extra        json.RawMessage   `json:"extra,omitempty"`
 }
+
+const panelFileName = "panel.json"
 
 // RuntimeV2Config stores reliability-first backend selection state for the
 // side-by-side v2 runtime path.
@@ -248,6 +250,14 @@ func DefaultConfig() *Config {
 	}
 }
 
+// DefaultPanelConfig returns the APK-facing metadata defaults stored in panel.json.
+func DefaultPanelConfig() PanelConfig {
+	return PanelConfig{
+		ID:   "default",
+		Name: "Default",
+	}
+}
+
 // ResolvePanelInbounds returns the effective panel inbound settings with
 // defaults applied even when the APK-facing panel section is absent.
 func (c *Config) ResolvePanelInbounds() PanelInboundsConfig {
@@ -279,7 +289,14 @@ func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return DefaultConfig(), nil
+			cfg := DefaultConfig()
+			panel, found, panelErr := loadPanelFromSidecar(PanelPath(path))
+			if panelErr != nil {
+				return nil, panelErr
+			}
+			cfg.Panel = normalizePanelConfig(panel)
+			cfg.SyncFromPanel(found)
+			return cfg, nil
 		}
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
@@ -319,6 +336,32 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 
+	panelPath := PanelPath(path)
+	panel, found, err := loadPanelFromSidecar(panelPath)
+	if err != nil {
+		return nil, err
+	}
+	panelAuthoritative := found
+	if found {
+		cfg.Panel = normalizePanelConfig(panel)
+	} else {
+		legacyPanel, hasLegacy, err := loadLegacyPanel(raw)
+		if err != nil {
+			return nil, err
+		}
+		panelAuthoritative = hasLegacy
+		cfg.Panel = normalizePanelConfig(legacyPanel)
+		if hasLegacy {
+			if err := SavePanel(panelPath, cfg.Panel); err != nil {
+				return nil, err
+			}
+			if err := cfg.Save(path); err != nil {
+				return nil, err
+			}
+		}
+	}
+	cfg.SyncFromPanel(panelAuthoritative)
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config: validate: %w", err)
 	}
@@ -341,6 +384,35 @@ func (c *Config) Save(path string) error {
 
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("config: write %s: %w", path, err)
+	}
+	return nil
+}
+
+// PanelPath returns the sidecar path for APK-facing panel state.
+func PanelPath(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), panelFileName)
+}
+
+// SavePanel writes the APK-facing panel metadata atomically.
+func SavePanel(path string, panel PanelConfig) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		return fmt.Errorf("panel: mkdir: %w", err)
+	}
+
+	panel = normalizePanelConfig(panel)
+	data, err := json.MarshalIndent(panel, "", "  ")
+	if err != nil {
+		return fmt.Errorf("panel: marshal: %w", err)
+	}
+	data = append(data, '\n')
+
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		return fmt.Errorf("panel: write %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("panel: rename %s: %w", path, err)
 	}
 	return nil
 }
@@ -468,5 +540,86 @@ func (c *Config) ResolveProfile() *NodeProfile {
 		RealityPubKey:  c.Node.RealityPublicKey,
 		RealityShortID: c.Node.RealityShortID,
 		Extra:          c.Transport.Extra,
+	}
+}
+
+func normalizePanelConfig(panel PanelConfig) PanelConfig {
+	if panel.ID == "" {
+		panel.ID = DefaultPanelConfig().ID
+	}
+	if panel.Name == "" {
+		panel.Name = DefaultPanelConfig().Name
+	}
+	if panel.Nodes == nil {
+		panel.Nodes = []json.RawMessage{}
+	}
+	return panel
+}
+
+func loadLegacyPanel(raw map[string]json.RawMessage) (PanelConfig, bool, error) {
+	panelRaw, ok := raw["panel"]
+	if !ok {
+		return DefaultPanelConfig(), false, nil
+	}
+
+	panel := DefaultPanelConfig()
+	if err := json.Unmarshal(panelRaw, &panel); err != nil {
+		return PanelConfig{}, false, fmt.Errorf("config: parse legacy panel: %w", err)
+	}
+	return panel, true, nil
+}
+
+func loadPanelFromSidecar(path string) (PanelConfig, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return DefaultPanelConfig(), false, nil
+		}
+		return PanelConfig{}, false, fmt.Errorf("panel: read %s: %w", path, err)
+	}
+
+	panel := DefaultPanelConfig()
+	if err := json.Unmarshal(data, &panel); err != nil {
+		return PanelConfig{}, false, fmt.Errorf("panel: parse %s: %w", path, err)
+	}
+	return panel, true, nil
+}
+
+func (c *Config) SyncFromPanel(authoritative bool) {
+	if profile := ResolveActivePanelProfile(c); profile != nil {
+		c.Node.Address = profile.Address
+		c.Node.Port = profile.Port
+		c.Node.Protocol = profile.Protocol
+		c.Node.UUID = profile.UUID
+		c.Node.Username = profile.Username
+		c.Node.Password = profile.Password
+		c.Node.Flow = profile.Flow
+		c.Node.SSMethod = profile.SSMethod
+		c.Node.SSPlugin = profile.SSPlugin
+		c.Node.SSPluginOpts = profile.SSPluginOpts
+		c.Node.SocksVersion = profile.SocksVersion
+		c.Node.Network = profile.Network
+		c.Node.ServerPorts = append([]string(nil), profile.ServerPorts...)
+		c.Node.ObfsType = profile.ObfsType
+		c.Node.ObfsPassword = profile.ObfsPassword
+		c.Node.AlterID = profile.AlterID
+		c.Node.Security = profile.Security
+		c.Node.RealityPublicKey = profile.RealityPubKey
+		c.Node.RealityShortID = profile.RealityShortID
+		c.Transport.Protocol = profile.Transport
+		c.Transport.TLSServer = profile.TLSServer
+		c.Transport.Fingerprint = profile.Fingerprint
+		if profile.Extra == nil {
+			c.Transport.Extra = map[string]string{}
+		} else {
+			c.Transport.Extra = profile.Extra
+		}
+		return
+	}
+
+	if authoritative {
+		defaults := DefaultConfig()
+		c.Node = defaults.Node
+		c.Transport = defaults.Transport
 	}
 }
