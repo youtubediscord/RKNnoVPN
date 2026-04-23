@@ -344,12 +344,12 @@ class SettingsViewModel @Inject constructor(
         }
         _uiState.update { it.copy(isLoadingLogs = true, errorMessage = null) }
         viewModelScope.launch {
-            when (val result = daemonClient.runtimeLogs(lines = 220)) {
+            when (val result = daemonClient.diagnosticBundle(lines = 220)) {
                 is DaemonClientResult.Ok -> {
                     _uiState.update {
                         it.copy(
-                            logsText = result.data.text,
-                            shareLogsText = result.data.text,
+                            logsText = result.data,
+                            shareLogsText = result.data,
                             isLoadingLogs = false,
                         )
                     }
@@ -576,13 +576,30 @@ class SettingsViewModel @Inject constructor(
             when (val result = daemonClient.version()) {
                 is DaemonClientResult.Ok -> {
                     val info = result.data
+                    val missingMethods = info.missingRequiredMethods(DaemonClient.REQUIRED_METHODS)
+                    val compatibilityWarning = when {
+                        info.controlProtocolVersion in 1 until DaemonClient.MIN_CONTROL_PROTOCOL_VERSION ->
+                            messages.get(
+                                com.privstack.panel.R.string.daemon_status_incompatible_protocol,
+                                info.controlProtocolVersion,
+                                DaemonClient.MIN_CONTROL_PROTOCOL_VERSION,
+                            )
+                        missingMethods.isNotEmpty() ->
+                            messages.get(
+                                com.privstack.panel.R.string.daemon_status_missing_methods,
+                                missingMethods.joinToString(", "),
+                            )
+                        else -> null
+                    }
                     _uiState.update {
                         it.copy(
                             moduleVersion = info.daemonVersion,
-                            daemonStatusText = messages.get(
-                                com.privstack.panel.R.string.daemon_status_running_with_core,
-                                info.coreVersion,
-                            ),
+                            daemonStatusText = compatibilityWarning
+                                ?: messages.get(
+                                    com.privstack.panel.R.string.daemon_status_running_with_core,
+                                    info.coreVersion,
+                                ),
+                            errorMessage = compatibilityWarning,
                         )
                     }
                     _updateState.update {
@@ -697,7 +714,7 @@ class SettingsViewModel @Inject constructor(
             .distinct()
 
     private fun summarizeResetReport(report: com.privstack.panel.model.ResetReport): String {
-        if (report.errors.isEmpty()) {
+        if (report.errors.isEmpty() && report.leftovers.isEmpty()) {
             return messages.get(com.privstack.panel.R.string.reset_summary_all_done)
         }
         return buildString {
@@ -719,6 +736,16 @@ class SettingsViewModel @Inject constructor(
                     stepValue,
                 )
             })
+            if (report.leftovers.isNotEmpty()) {
+                append('\n')
+                append(messages.get(com.privstack.panel.R.string.reset_summary_leftovers_prefix))
+                append('\n')
+                append(report.leftovers.joinToString("\n"))
+            }
+            if (report.rebootRequired) {
+                append('\n')
+                append(messages.get(com.privstack.panel.R.string.reset_summary_reboot_required))
+            }
         }
     }
 }

@@ -39,6 +39,9 @@ IPT_WAIT="-w 100"
 
 LOG_FILE="$PRIVSTACK_DIR/logs/net_change.log"
 LOCK_FILE="$PRIVSTACK_DIR/run/net_change.lock"
+ACTIVE_FILE="$PRIVSTACK_DIR/run/active"
+RESET_LOCK="$PRIVSTACK_DIR/run/reset.lock"
+MANUAL_FLAG="$PRIVSTACK_DIR/config/manual"
 
 # inotifyd arguments.
 EVENT="${1:-unknown}"
@@ -63,6 +66,23 @@ log() {
 # Ensure log directory exists.
 mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || true
+
+# A network event must never resurrect proxy rules while reset is in progress
+# or after the user explicitly disabled automatic runtime startup.
+if [ -f "$RESET_LOCK" ]; then
+    log "reset lock present - exiting"
+    exit 0
+fi
+
+if [ ! -f "$ACTIVE_FILE" ]; then
+    log "PrivStack is not active - exiting"
+    exit 0
+fi
+
+if [ -f "$MANUAL_FLAG" ]; then
+    log "manual mode enabled - exiting"
+    exit 0
+fi
 
 # ── debounce ────────────────────────────────────────────────────────────────
 # Network changes come in bursts (Wi-Fi reassociation fires 4-6 events in

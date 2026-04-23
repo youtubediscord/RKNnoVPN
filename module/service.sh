@@ -50,17 +50,7 @@ log_error() {
 }
 
 # ============================================================================
-# 1. Check manual flag — skip autostart if set
-# ============================================================================
-
-if [ -f "$MANUAL_FLAG" ]; then
-    log_info "Manual flag detected at ${MANUAL_FLAG} — skipping autostart"
-    log_info "Remove the flag and run privctl start to launch manually"
-    exit 0
-fi
-
-# ============================================================================
-# 2. Detect root manager and set busybox path
+# 1. Detect root manager and set busybox path
 # ============================================================================
 
 detect_busybox() {
@@ -100,7 +90,7 @@ detect_busybox
 log_info "Busybox: ${BUSYBOX:-not found}"
 
 # ============================================================================
-# 3. Wait for boot completion
+# 2. Wait for boot completion
 # ============================================================================
 
 wait_boot_completed() {
@@ -126,6 +116,25 @@ wait_boot_completed
 # Post-boot settle delay — let other services finish starting
 log_info "Settle delay: ${SETTLE_DELAY}s"
 sleep "$SETTLE_DELAY"
+
+# ============================================================================
+# 3. Boot rescue cleanup
+# ============================================================================
+
+if [ -x "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" ]; then
+    log_info "Running boot rescue cleanup"
+    if "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
+        log_info "Boot rescue cleanup completed"
+    else
+        log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
+    fi
+else
+    log_warn "Boot rescue cleanup script not found"
+fi
+
+if [ -f "$MANUAL_FLAG" ]; then
+    log_info "Manual flag detected at ${MANUAL_FLAG} — daemon will start, proxy autostart stays disabled"
+fi
 
 # ============================================================================
 # 4. Pre-launch validation

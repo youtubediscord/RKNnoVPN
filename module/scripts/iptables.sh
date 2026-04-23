@@ -116,7 +116,7 @@ validate_env() {
     # APP_UIDS and BYPASS_UIDS can be empty
     APP_UIDS="${APP_UIDS:-}"
     BYPASS_UIDS="${BYPASS_UIDS:-}"
-    HTTP_PORT="${HTTP_PORT:-10809}"
+    HTTP_PORT="${HTTP_PORT:-0}"
 }
 
 # ============================================================================
@@ -154,6 +154,18 @@ load_snapshot() {
         return 0
     fi
     return 1
+}
+
+http_port_enabled() {
+    [ "${HTTP_PORT:-0}" -gt 0 ] 2>/dev/null
+}
+
+emit_http_port_protection() {
+    local chain="$1"
+    if http_port_enabled; then
+        echo "-A ${chain} -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${chain} -p tcp --dport ${HTTP_PORT} -j RETURN"
+    fi
 }
 
 # ============================================================================
@@ -236,13 +248,12 @@ fi)
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -j RETURN
--A ${CHAIN_OUT} -p tcp --dport ${HTTP_PORT} -j RETURN
+$(emit_http_port_protection "${CHAIN_OUT}")
 
 # 6. Bypass UIDs: specific UIDs that must always go direct.
 #    UID 1073 = NetworkStack — needed for captive portal detection.
@@ -345,13 +356,12 @@ fi)
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -j RETURN
--A ${CHAIN_OUT} -p tcp --dport ${HTTP_PORT} -j RETURN
+$(emit_http_port_protection "${CHAIN_OUT}")
 
 # 6. Bypass UIDs
 $(for uid in ${BYPASS_UIDS}; do
@@ -690,41 +700,13 @@ do_stop() {
         log_warn "No runtime snapshot found — using current environment"
     fi
 
-    # ---- Step 1: Remove iptables rules ----
-    # Strategy: try to restore backup first (atomic). If that fails,
-    # fall back to manual chain flush (safe but slower).
-
-    local v4_restored=0
-    local v6_restored=0
-
-    if [ -f "${SNAPSHOT_DIR}/iptables_backup.rules" ]; then
-        log_info "Restoring IPv4 iptables from backup..."
-        if iptables-restore ${IPT_WAIT} < "${SNAPSHOT_DIR}/iptables_backup.rules" 2>/dev/null; then
-            v4_restored=1
-            log_info "IPv4 iptables restored from backup"
-        else
-            log_warn "IPv4 backup restore failed — falling back to manual flush"
-        fi
-    fi
-
-    if [ -f "${SNAPSHOT_DIR}/ip6tables_backup.rules" ]; then
-        log_info "Restoring IPv6 ip6tables from backup..."
-        if ip6tables-restore ${IPT_WAIT} < "${SNAPSHOT_DIR}/ip6tables_backup.rules" 2>/dev/null; then
-            v6_restored=1
-            log_info "IPv6 ip6tables restored from backup"
-        else
-            log_warn "IPv6 backup restore failed — falling back to manual flush"
-        fi
-    fi
-
-    # Fallback: manual chain removal if restore didn't work
-    if [ "${v4_restored}" -eq 0 ]; then
-        flush_chains iptables
-    fi
-
-    if [ "${v6_restored}" -eq 0 ]; then
-        flush_chains ip6tables
-    fi
+    # ---- Step 1: Remove only PrivStack-owned iptables rules ----
+    # Do not restore the full pre-start backup here. Android netd, tethering,
+    # firewall modules and root managers can legitimately mutate iptables while
+    # PrivStack is running; restoring an old whole-table snapshot can roll back
+    # unrelated live state. Reset/stop must only remove PRIVSTACK* artifacts.
+    flush_chains iptables
+    flush_chains ip6tables
 
     # ---- Step 2: Remove policy routing ----
     teardown_policy_routing

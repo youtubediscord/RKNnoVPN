@@ -101,8 +101,8 @@ data class TunConfig(
 
 @Serializable
 data class InboundsConfig(
-    val socksPort: Int = 10808,
-    val httpPort: Int = 10809,
+    val socksPort: Int = 0,
+    val httpPort: Int = 0,
     /** Whether to expose inbound ports on LAN (0.0.0.0) vs localhost only. */
     val allowLan: Boolean = false
 )

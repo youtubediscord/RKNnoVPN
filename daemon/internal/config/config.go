@@ -262,8 +262,8 @@ func DefaultPanelConfig() PanelConfig {
 // defaults applied even when the APK-facing panel section is absent.
 func (c *Config) ResolvePanelInbounds() PanelInboundsConfig {
 	result := PanelInboundsConfig{
-		SocksPort: 10808,
-		HTTPPort:  10809,
+		SocksPort: 0,
+		HTTPPort:  0,
 		AllowLAN:  false,
 	}
 	if len(c.Panel.Inbounds) == 0 {

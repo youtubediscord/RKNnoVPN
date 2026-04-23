@@ -71,6 +71,70 @@ func TestIgnorableKillallExitStatusOne(t *testing.T) {
 	}
 }
 
+func TestResetModeCreatesManualLockAndClearsActive(t *testing.T) {
+	d := &daemon{dataDir: t.TempDir()}
+	if err := os.MkdirAll(d.dataDir+"/run", 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(d.activeFilePath(), []byte("active\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.enterResetMode(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(d.resetLockPath()); err != nil {
+		t.Fatalf("reset lock missing: %v", err)
+	}
+	if _, err := os.Stat(d.manualFlagPath()); err != nil {
+		t.Fatalf("manual flag missing: %v", err)
+	}
+	if _, err := os.Stat(d.activeFilePath()); !os.IsNotExist(err) {
+		t.Fatalf("active marker should be removed, stat err=%v", err)
+	}
+	if skip, detail := d.shouldSkipRootReconcile(); !skip || !strings.Contains(detail, "reset lock") {
+		t.Fatalf("expected reset lock guard, got skip=%v detail=%q", skip, detail)
+	}
+
+	if err := d.leaveResetMode(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(d.resetLockPath()); !os.IsNotExist(err) {
+		t.Fatalf("reset lock should be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(d.manualFlagPath()); err != nil {
+		t.Fatalf("manual flag should remain after reset: %v", err)
+	}
+}
+
+func TestRootReconcileGuardRequiresActiveMarker(t *testing.T) {
+	d := &daemon{dataDir: t.TempDir()}
+	if err := os.MkdirAll(d.dataDir+"/run", 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(d.dataDir+"/config", 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	if skip, detail := d.shouldSkipRootReconcile(); !skip || !strings.Contains(detail, "not marked active") {
+		t.Fatalf("expected inactive guard, got skip=%v detail=%q", skip, detail)
+	}
+
+	if err := os.WriteFile(d.activeFilePath(), []byte("active\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if skip, detail := d.shouldSkipRootReconcile(); skip {
+		t.Fatalf("active runtime should reconcile, detail=%q", detail)
+	}
+
+	if err := os.WriteFile(d.manualFlagPath(), []byte("manual\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if skip, detail := d.shouldSkipRootReconcile(); !skip || !strings.Contains(detail, "manual mode") {
+		t.Fatalf("expected manual guard, got skip=%v detail=%q", skip, detail)
+	}
+}
+
 func TestReadLogTailReturnsBoundedTail(t *testing.T) {
 	path := t.TempDir() + "/runtime.log"
 	content := strings.Join([]string{"one", "two", "three", "four"}, "\n")

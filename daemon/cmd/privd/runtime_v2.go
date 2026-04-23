@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -82,7 +84,7 @@ func (b *rootBackendV2) CurrentHealth() runtimev2.HealthSnapshot {
 
 func (b *rootBackendV2) RefreshHealth() runtimev2.HealthSnapshot {
 	result := b.d.healthMon.RunOnce()
-	return b.d.buildRuntimeV2HealthSnapshot(result, false)
+	return b.d.buildRuntimeV2HealthSnapshot(result, true)
 }
 
 func (b *rootBackendV2) TestNodes(desired runtimev2.DesiredState, url string, timeoutMS int, nodeIDs []string) ([]runtimev2.NodeProbeResult, error) {
@@ -202,6 +204,9 @@ func (d *daemon) reconcileRootRuntime(reason string) error {
 	if state != core.StateRunning && state != core.StateDegraded {
 		return nil
 	}
+	if skip, _ := d.shouldSkipRootReconcile(); skip {
+		return nil
+	}
 
 	d.mu.Lock()
 	cfg := d.cfg
@@ -263,11 +268,17 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 	snapshot.CoreReady = singboxReady && tproxyReady
 	snapshot.RoutingReady = iptablesReady && routeReady
 
-	if allowEgressProbe {
-		snapshot.EgressReady = d.hasRecentEgress()
-	} else {
-		snapshot.EgressReady = d.hasRecentEgress()
+	if allowEgressProbe && snapshot.Healthy() {
+		d.mu.Lock()
+		cfg := d.cfg
+		d.mu.Unlock()
+		apiPort := cfg.Proxy.APIPort
+		if apiPort == 0 {
+			apiPort = 9090
+		}
+		_ = d.cachedLatencyMs(state, cfg, apiPort)
 	}
+	snapshot.EgressReady = d.hasRecentEgress()
 
 	if snapshot.LastError == "" {
 		snapshot.LastError = firstFailedGate(result, snapshot)
@@ -303,7 +314,8 @@ func firstFailedGate(result *health.HealthResult, snapshot runtimev2.HealthSnaps
 func (d *daemon) hasRecentEgress() bool {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
-	return d.egress.Valid && time.Since(d.egress.CheckedAt) < 30*time.Second
+	return (d.egress.Valid && time.Since(d.egress.CheckedAt) < 30*time.Second) ||
+		(d.latency.Valid && time.Since(d.latency.CheckedAt) < 30*time.Second)
 }
 
 func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.BackendKind) runtimev2.ResetReport {
@@ -313,9 +325,13 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 		Status:      "ok",
 	}
 
-	runStep := func(name string, fn func() error) {
-		step := runtimev2.ResetStep{Name: name, Status: "ok"}
-		if err := fn(); err != nil {
+	runStep := func(name string, fn func() (string, string, error)) {
+		status, detail, err := fn()
+		if status == "" {
+			status = "ok"
+		}
+		step := runtimev2.ResetStep{Name: name, Status: status, Detail: detail}
+		if err != nil {
 			step.Status = "failed"
 			step.Detail = err.Error()
 			report.Status = "partial"
@@ -323,17 +339,27 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 		}
 		report.Steps = append(report.Steps, step)
 	}
+	runSimpleStep := func(name string, fn func() error) {
+		runStep(name, func() (string, string, error) {
+			if err := fn(); err != nil {
+				return "", "", err
+			}
+			return "ok", "", nil
+		})
+	}
 
-	runStep("stop-subsystems", func() error {
+	runSimpleStep("enter-reset-mode", d.enterResetMode)
+
+	runSimpleStep("stop-subsystems", func() error {
 		d.stopSubsystems()
 		return nil
 	})
 
-	runStep("stop-core", func() error {
-		if d.coreMgr.GetState() == core.StateStopped {
-			return nil
+	runStep("stop-core", func() (string, string, error) {
+		if err := d.coreMgr.RescueReset(); err != nil {
+			return "", "", err
 		}
-		return d.coreMgr.Stop()
+		return "ok", "", nil
 	})
 
 	d.mu.Lock()
@@ -341,42 +367,101 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 	d.mu.Unlock()
 	env := buildScriptEnv(cfg, d.dataDir)
 
-	runStep("stop-dns-interception", func() error {
-		return core.ExecScript(filepath.Join(d.dataDir, "scripts", "dns.sh"), "stop", env)
+	runSimpleStep("rescue-cleanup-script", func() error {
+		return core.ExecScript(filepath.Join(d.dataDir, "scripts", "rescue_reset.sh"), "daemon-reset", env)
 	})
 
-	runStep("stop-firewall-routing", func() error {
-		return core.ExecScript(filepath.Join(d.dataDir, "scripts", "iptables.sh"), "stop", env)
-	})
-
-	runStep("kill-sing-box", func() error {
-		var errs []string
-		if out, err := core.ExecCommand("killall", "-TERM", "sing-box"); err != nil &&
-			!isIgnorableKillallError(out, err) {
-			errs = append(errs, err.Error())
-		}
-		if out, err := core.ExecCommand("killall", "-KILL", "sing-box"); err != nil &&
-			!isIgnorableKillallError(out, err) {
-			errs = append(errs, err.Error())
-		}
-		if len(errs) > 0 {
-			return fmt.Errorf("%s", strings.Join(errs, "; "))
-		}
-		return nil
-	})
-
-	runStep("clear-runtime-state", func() error {
+	runStep("clear-runtime-state", func() (string, string, error) {
 		d.rescueMgr.Reset()
 		d.coreMgr.ResetState()
 		d.healthMon.Clear()
 		d.resetRuntimeMetrics()
-		return nil
+		return "ok", "", nil
 	})
+
+	runStep("remove-stale-runtime-files", func() (string, string, error) {
+		removed, err := d.removeStaleRuntimeFiles()
+		if err != nil {
+			return "", "", err
+		}
+		if len(removed) == 0 {
+			return "already_clean", "", nil
+		}
+		return "ok", strings.Join(removed, ", "), nil
+	})
+
+	runStep("verify-cleanup", func() (string, string, error) {
+		leftovers := d.collectNetworkLeftovers(cfg)
+		report.Leftovers = leftovers
+		if len(leftovers) == 0 {
+			return "ok", "", nil
+		}
+		report.RebootRequired = true
+		return "failed", strings.Join(leftovers, "; "), fmt.Errorf("%d leftover(s) after reset", len(leftovers))
+	})
+
+	runSimpleStep("leave-reset-mode", d.leaveResetMode)
 
 	if len(report.Errors) > 0 {
 		report.Status = "partial"
 	}
+	if len(report.Leftovers) > 0 {
+		report.Status = "partial"
+		report.RebootRequired = true
+	}
 	return report
+}
+
+func (d *daemon) enterResetMode() error {
+	if err := os.MkdirAll(filepath.Join(d.dataDir, "run"), 0750); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(d.dataDir, "config"), 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(d.resetLockPath(), []byte(time.Now().Format(time.RFC3339)+"\n"), 0640); err != nil {
+		return err
+	}
+	_ = os.Remove(d.activeFilePath())
+	if err := os.WriteFile(d.manualFlagPath(), []byte("network reset\n"), 0600); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *daemon) leaveResetMode() error {
+	if err := os.Remove(d.resetLockPath()); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (d *daemon) shouldSkipRootReconcile() (bool, string) {
+	if _, err := os.Stat(d.resetLockPath()); err == nil {
+		return true, "reset lock is present"
+	}
+	if _, err := os.Stat(d.manualFlagPath()); err == nil {
+		return true, "manual mode is enabled"
+	}
+	if _, err := os.Stat(d.activeFilePath()); err != nil {
+		if os.IsNotExist(err) {
+			return true, "runtime is not marked active"
+		}
+		return true, "active marker is not readable: " + err.Error()
+	}
+	return false, ""
+}
+
+func (d *daemon) resetLockPath() string {
+	return filepath.Join(d.dataDir, "run", "reset.lock")
+}
+
+func (d *daemon) activeFilePath() string {
+	return filepath.Join(d.dataDir, "run", "active")
+}
+
+func (d *daemon) manualFlagPath() string {
+	return filepath.Join(d.dataDir, "config", "manual")
 }
 
 func isIgnorableKillallError(output string, err error) bool {
@@ -384,6 +469,218 @@ func isIgnorableKillallError(output string, err error) bool {
 		return false
 	}
 	return err.Error() == "exit status 1"
+}
+
+func (d *daemon) removeStaleRuntimeFiles() ([]string, error) {
+	files := []string{
+		filepath.Join(d.dataDir, "run", "singbox.pid"),
+		filepath.Join(d.dataDir, "run", "active"),
+		filepath.Join(d.dataDir, "run", "net_change.lock"),
+		filepath.Join(d.dataDir, "run", "iptables.rules"),
+		filepath.Join(d.dataDir, "run", "ip6tables.rules"),
+		filepath.Join(d.dataDir, "run", "iptables_backup.rules"),
+		filepath.Join(d.dataDir, "run", "ip6tables_backup.rules"),
+		filepath.Join(d.dataDir, "run", "env.sh"),
+	}
+
+	removed := make([]string, 0, len(files))
+	errs := make([]string, 0)
+	for _, path := range files {
+		if err := os.Remove(path); err == nil {
+			removed = append(removed, filepath.Base(path))
+		} else if !os.IsNotExist(err) {
+			errs = append(errs, filepath.Base(path)+": "+err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return removed, fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return removed, nil
+}
+
+func (d *daemon) collectNetworkLeftovers(cfg *config.Config) []string {
+	if cfg == nil {
+		return []string{"config unavailable for cleanup verification"}
+	}
+
+	env := buildScriptEnv(cfg, d.dataDir)
+	leftovers := make([]string, 0)
+	add := func(format string, args ...interface{}) {
+		leftovers = append(leftovers, fmt.Sprintf(format, args...))
+	}
+
+	for _, spec := range []struct {
+		bin   string
+		table string
+	}{
+		{bin: "iptables", table: "mangle"},
+		{bin: "iptables", table: "nat"},
+		{bin: "ip6tables", table: "mangle"},
+		{bin: "ip6tables", table: "nat"},
+	} {
+		out, err := core.ExecCommand(spec.bin, "-w", "100", "-t", spec.table, "-S")
+		if err != nil {
+			if spec.bin == "ip6tables" && spec.table == "nat" && isMissingKernelTableOutput(out) {
+				continue
+			}
+			if strings.TrimSpace(out) != "" {
+				add("%s %s check failed: %v: %s", spec.bin, spec.table, err, firstLine(out))
+			} else {
+				add("%s %s check failed: %v", spec.bin, spec.table, err)
+			}
+			continue
+		}
+		if line := firstLineContaining(out, "PRIVSTACK"); line != "" {
+			add("%s %s rule remains: %s", spec.bin, spec.table, line)
+		}
+	}
+
+	mark := strings.ToLower(env["FWMARK"])
+	routeTable := env["ROUTE_TABLE"]
+	routeTableV6 := env["ROUTE_TABLE_V6"]
+	for _, spec := range []struct {
+		name  string
+		args  []string
+		table string
+	}{
+		{name: "ip rule", args: []string{"rule", "show"}, table: routeTable},
+		{name: "ip -6 rule", args: []string{"-6", "rule", "show"}, table: routeTableV6},
+	} {
+		out, err := core.ExecCommand("ip", spec.args...)
+		if err != nil {
+			add("%s check failed: %v", spec.name, err)
+			continue
+		}
+		for _, line := range splitLines(out) {
+			lower := strings.ToLower(line)
+			if strings.Contains(lower, mark) || strings.Contains(lower, "lookup "+spec.table) {
+				add("%s remains: %s", spec.name, strings.TrimSpace(line))
+				break
+			}
+		}
+	}
+
+	for _, spec := range []struct {
+		name string
+		args []string
+	}{
+		{name: "ip route table " + routeTable, args: []string{"route", "show", "table", routeTable}},
+		{name: "ip -6 route table " + routeTableV6, args: []string{"-6", "route", "show", "table", routeTableV6}},
+	} {
+		out, err := core.ExecCommand("ip", spec.args...)
+		if err != nil {
+			if isMissingRouteTableOutput(out) {
+				continue
+			}
+			if strings.TrimSpace(out) == "" {
+				add("%s check failed: %v", spec.name, err)
+			} else {
+				add("%s check failed: %v: %s", spec.name, err, firstLine(out))
+			}
+			continue
+		}
+		if strings.TrimSpace(out) != "" {
+			add("%s still has routes: %s", spec.name, firstLine(out))
+		}
+	}
+
+	if out, _ := core.ExecCommand("pidof", "sing-box"); strings.TrimSpace(out) != "" {
+		add("sing-box process still running: %s", strings.TrimSpace(out))
+	}
+
+	for _, port := range effectiveLocalPorts(cfg) {
+		if isTCPPortListening("127.0.0.1", port, 150*time.Millisecond) {
+			add("localhost TCP port %d still listening", port)
+		}
+	}
+
+	for _, path := range []string{
+		filepath.Join(d.dataDir, "run", "singbox.pid"),
+		filepath.Join(d.dataDir, "run", "active"),
+		filepath.Join(d.dataDir, "run", "net_change.lock"),
+		filepath.Join(d.dataDir, "run", "iptables.rules"),
+		filepath.Join(d.dataDir, "run", "ip6tables.rules"),
+		filepath.Join(d.dataDir, "run", "env.sh"),
+	} {
+		if _, err := os.Stat(path); err == nil {
+			add("stale runtime file remains: %s", path)
+		}
+	}
+
+	return leftovers
+}
+
+func isMissingKernelTableOutput(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "table does not exist") ||
+		strings.Contains(lower, "can't initialize") ||
+		strings.Contains(lower, "does not exist")
+}
+
+func isMissingRouteTableOutput(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "fib table does not exist") ||
+		strings.Contains(lower, "no such process") ||
+		strings.Contains(lower, "no such file")
+}
+
+func effectiveLocalPorts(cfg *config.Config) []int {
+	if cfg == nil {
+		return nil
+	}
+	panelInbounds := cfg.ResolvePanelInbounds()
+	ports := []int{
+		valueOrDefaultInt(cfg.Proxy.TProxyPort, 10853),
+		valueOrDefaultInt(cfg.Proxy.DNSPort, 10856),
+		valueOrDefaultInt(cfg.Proxy.APIPort, 9090),
+		panelInbounds.SocksPort,
+		panelInbounds.HTTPPort,
+	}
+	seen := make(map[int]bool, len(ports))
+	result := make([]int, 0, len(ports))
+	for _, port := range ports {
+		if port <= 0 || seen[port] {
+			continue
+		}
+		seen[port] = true
+		result = append(result, port)
+	}
+	return result
+}
+
+func valueOrDefaultInt(value int, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	return value
+}
+
+func isTCPPortListening(host string, port int, timeout time.Duration) bool {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func firstLineContaining(text string, needle string) string {
+	for _, line := range splitLines(text) {
+		if strings.Contains(line, needle) {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
+func firstLine(text string) string {
+	for _, line := range splitLines(text) {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func (d *daemon) persistDesiredStateV2(desired runtimev2.DesiredState) error {

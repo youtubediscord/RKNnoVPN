@@ -187,6 +187,8 @@ class NodeListViewModel @Inject constructor(
                                             com.privstack.panel.R.string.node_test_status_url_error,
                                             messages.formatNodeTestIssue(test.urlError),
                                         )
+                                        test.verdict == "unusable" ->
+                                            messages.get(com.privstack.panel.R.string.node_test_status_unusable)
                                         test.urlMs != null ->
                                             messages.get(com.privstack.panel.R.string.node_test_status_ok)
                                         else ->

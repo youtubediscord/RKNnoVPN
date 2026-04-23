@@ -225,6 +225,7 @@
     <string name="node_test_status_tcp_ok">TCP ОК</string>
     <string name="node_test_status_tcp_error">TCP: %1$s</string>
     <string name="node_test_status_url_error">URL: %1$s</string>
+    <string name="node_test_status_unusable">Нерабочий</string>
     <string name="node_test_reason_tcp_direct_failed">подключение не удалось</string>
     <string name="node_test_reason_tunnel_delay_failed">не удалось измерить задержку</string>
     <string name="node_test_reason_tunnel_unavailable">туннель недоступен</string>
@@ -252,6 +253,8 @@
     <string name="daemon_status_partial_reset">Частичный сброс</string>
     <string name="daemon_status_running_with_core">Запущено (core: %1$s)</string>
     <string name="daemon_status_running_degraded">Запущено (degraded: %1$s)</string>
+    <string name="daemon_status_incompatible_protocol">APK и модуль несовместимы: control protocol %1$d, нужен %2$d</string>
+    <string name="daemon_status_missing_methods">APK и модуль несовместимы: нет методов %1$s</string>
     <string name="daemon_status_error_with_reason">Ошибка: %1$s</string>
     <string name="daemon_status_module_not_installed">Модуль не установлен</string>
     <string name="daemon_status_root_denied">Root-доступ запрещён</string>
@@ -267,6 +270,8 @@
     <string name="reset_summary_all_done">Все шаги очистки выполнены</string>
     <string name="reset_summary_partial_prefix">Частичная очистка:</string>
     <string name="reset_summary_step">%1$s: %2$s</string>
+    <string name="reset_summary_leftovers_prefix">Осталось:</string>
+    <string name="reset_summary_reboot_required">Нужен ребут, чтобы убрать оставшееся сетевое состояние.</string>
 
     <!-- Аудит -->
     <string name="audit_tab_title">Аудит</string>

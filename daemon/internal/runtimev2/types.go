@@ -78,11 +78,13 @@ type ResetStep struct {
 }
 
 type ResetReport struct {
-	BackendKind BackendKind `json:"backendKind"`
-	Generation  int64       `json:"generation"`
-	Status      string      `json:"status"`
-	Steps       []ResetStep `json:"steps"`
-	Errors      []string    `json:"errors,omitempty"`
+	BackendKind    BackendKind `json:"backendKind"`
+	Generation     int64       `json:"generation"`
+	Status         string      `json:"status"`
+	Steps          []ResetStep `json:"steps"`
+	Errors         []string    `json:"errors,omitempty"`
+	Leftovers      []string    `json:"leftovers,omitempty"`
+	RebootRequired bool        `json:"rebootRequired"`
 }
 
 type NodeProbeResult struct {
@@ -94,6 +96,9 @@ type NodeProbeResult struct {
 	TCPDirect    *int64 `json:"tcpDirect,omitempty"`
 	TunnelDelay  *int64 `json:"tunnelDelay,omitempty"`
 	DNSBootstrap bool   `json:"dnsBootstrap"`
+	TCPStatus    string `json:"tcpStatus,omitempty"`
+	URLStatus    string `json:"urlStatus,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
 	ErrorClass   string `json:"errorClass,omitempty"`
 }
 

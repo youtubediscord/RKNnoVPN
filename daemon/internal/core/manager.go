@@ -124,6 +124,7 @@ func (m *CoreManager) ResetState() {
 	m.startedAt = time.Time{}
 	m.state = StateStopped
 	_ = os.Remove(filepath.Join(m.dataDir, "run", "singbox.pid"))
+	_ = os.Remove(filepath.Join(m.dataDir, "run", "active"))
 }
 
 // --------------------------------------------------------------------------
@@ -148,6 +149,10 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	if err := renderConfig(m.config, profile, configPath); err != nil {
 		m.state = StateStopped
 		return fmt.Errorf("core: render config: %w", err)
+	}
+	if err := m.checkSingBoxConfig(configPath); err != nil {
+		m.state = StateStopped
+		return fmt.Errorf("core: config check: %w", err)
 	}
 
 	// 2. Spawn sing-box.
@@ -240,6 +245,9 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	m.activeProfile = profile.Protocol + "://" + profile.Address
 	m.startedAt = time.Now()
 	m.state = StateRunning
+	m.markActive()
+	_ = os.Remove(filepath.Join(m.dataDir, "run", "reset.lock"))
+	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
 	m.logger.Printf("core is running (pid=%d)", m.pid)
 	return nil
 }
@@ -252,14 +260,26 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 // Order matters: DNS first, then iptables, then kill — so traffic is never
 // black-holed through a dead proxy.
 func (m *CoreManager) Stop() error {
+	return m.stopWithMode(false)
+}
+
+// RescueReset tears down PrivStack-owned runtime state even if the in-memory
+// lifecycle already says stopped. Use this for recovery paths where kernel
+// rules can outlive daemon state.
+func (m *CoreManager) RescueReset() error {
+	return m.stopWithMode(true)
+}
+
+func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.state == StateStopped {
+	if m.state == StateStopped && !forceCleanup {
 		return nil
 	}
 	m.state = StateStopping
 	m.logger.Println("stopping core")
+	_ = os.Remove(filepath.Join(m.dataDir, "run", "active"))
 
 	var firstErr error
 
@@ -288,6 +308,8 @@ func (m *CoreManager) Stop() error {
 		if err := m.killProcess(); err != nil && firstErr == nil {
 			firstErr = err
 		}
+	} else if err := m.killTrackedSingBox(); err != nil && firstErr == nil {
+		firstErr = err
 	}
 
 	// 4. Clean PID file.
@@ -320,6 +342,9 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	configPath := filepath.Join(m.dataDir, "config", "rendered", "singbox.json")
 	if err := renderConfig(m.config, profile, configPath); err != nil {
 		return fmt.Errorf("core: hot-swap render: %w", err)
+	}
+	if err := m.checkSingBoxConfig(configPath); err != nil {
+		return fmt.Errorf("core: hot-swap config check: %w", err)
 	}
 
 	// 2. Stop sing-box (SIGTERM only, no iptables teardown).
@@ -383,8 +408,24 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.activeProfile = profile.Protocol + "://" + profile.Address
 	m.startedAt = time.Now()
 	m.state = StateRunning
+	m.markActive()
+	_ = os.Remove(filepath.Join(m.dataDir, "run", "reset.lock"))
+	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
 	m.logger.Printf("hot-swap complete (pid=%d)", m.pid)
 	return nil
+}
+
+func (m *CoreManager) markActive() {
+	runDir := filepath.Join(m.dataDir, "run")
+	if err := os.MkdirAll(runDir, 0750); err != nil {
+		m.logger.Printf("mark active: mkdir %s: %v", runDir, err)
+		return
+	}
+	activePath := filepath.Join(runDir, "active")
+	content := []byte(time.Now().Format(time.RFC3339) + "\n")
+	if err := os.WriteFile(activePath, content, 0640); err != nil {
+		m.logger.Printf("mark active: write %s: %v", activePath, err)
+	}
 }
 
 func (m *CoreManager) openSingBoxLog() (*os.File, string, error) {
@@ -399,6 +440,18 @@ func (m *CoreManager) openSingBoxLog() (*os.File, string, error) {
 	}
 	_, _ = fmt.Fprintf(file, "\n--- sing-box start %s ---\n", time.Now().Format(time.RFC3339))
 	return file, logPath, nil
+}
+
+func (m *CoreManager) checkSingBoxConfig(configPath string) error {
+	binPath := filepath.Join(m.dataDir, "bin", "sing-box")
+	out, err := ExecCommand(binPath, "check", "-c", configPath)
+	if err != nil {
+		if out != "" {
+			return fmt.Errorf("sing-box check failed: %w; output: %s", err, out)
+		}
+		return fmt.Errorf("sing-box check failed: %w", err)
+	}
+	return nil
 }
 
 func (m *CoreManager) waitForPortOrExit(port int, timeout time.Duration, exitCh <-chan error, logPath string) error {
@@ -499,6 +552,55 @@ func (m *CoreManager) killProcess() error {
 		return fmt.Errorf("SIGKILL pid %d: %w", m.pid, err)
 	}
 	return nil
+}
+
+func (m *CoreManager) killTrackedSingBox() error {
+	pids := make(map[int]bool)
+	if m.pid > 0 {
+		pids[m.pid] = true
+	}
+	if raw, err := os.ReadFile(filepath.Join(m.dataDir, "run", "singbox.pid")); err == nil {
+		if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw))); parseErr == nil && pid > 0 {
+			pids[pid] = true
+		}
+	}
+
+	var errs []string
+	for pid := range pids {
+		if pid == os.Getpid() {
+			continue
+		}
+		if !m.pidLooksLikeSingBox(pid) {
+			m.logger.Printf("skipping stale sing-box pid %d: cmdline does not match", pid)
+			continue
+		}
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		m.logger.Printf("sending SIGTERM to tracked sing-box pid %d", pid)
+		_ = proc.Signal(syscall.SIGTERM)
+		time.Sleep(500 * time.Millisecond)
+		if err := proc.Signal(syscall.Signal(0)); err == nil {
+			m.logger.Printf("tracked sing-box pid %d still alive, sending SIGKILL", pid)
+			if killErr := proc.Signal(syscall.SIGKILL); killErr != nil {
+				errs = append(errs, fmt.Sprintf("SIGKILL pid %d: %v", pid, killErr))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func (m *CoreManager) pidLooksLikeSingBox(pid int) bool {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+	if err != nil {
+		return false
+	}
+	cmdline := strings.ReplaceAll(string(data), "\x00", " ")
+	return strings.Contains(cmdline, "sing-box")
 }
 
 func (m *CoreManager) coreGID() uint32 {

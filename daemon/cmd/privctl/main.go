@@ -13,7 +13,7 @@ import (
 const defaultSocket = "/data/adb/privstack/run/daemon.sock"
 const maxFrameBytes = 16 * 1024 * 1024
 
-var Version = "1.6.3"
+var Version = "1.6.4"
 
 var commands = map[string]string{
 	"backend.status":            "Get v2 backend status",
@@ -29,8 +29,10 @@ var commands = map[string]string{
 	"stop":                      "Stop proxy",
 	"reload":                    "Reload config and restart proxy",
 	"network-reset":             "Force-remove PrivStack iptables/DNS/routing rules",
+	"network.reset":             "Alias for network-reset",
 	"health":                    "Get health check status",
 	"audit":                     "Run privacy/security audit",
+	"doctor":                    "Collect redacted diagnostics for support",
 	"app.list":                  "List installed apps known to the daemon",
 	"app.resolveUid":            "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
 	"panel-get":                 "Get APK-facing panel state",
@@ -40,8 +42,10 @@ var commands = map[string]string{
 	"config-set-many":           "Set multiple config values atomically: privctl config-set-many '{\"values\":{...},\"reload\":true}'",
 	"config-list":               "List config sections",
 	"config-import":             "Import full config: privctl config-import '{...}'",
+	"config.import":             "Alias for config-import",
 	"subscription-fetch":        "Fetch subscription URL via daemon network access",
 	"node-test":                 "Test saved nodes: TCP connect + URL delay via sing-box",
+	"node.test":                 "Alias for node-test",
 	"logs":                      "Get recent log lines: privctl logs '{\"lines\":100}'",
 	"version":                   "Get daemon version",
 	"update-check":              "Check for updates from GitHub Releases",
@@ -194,10 +198,10 @@ func printUsage() {
 	order := []string{
 		"backend.status", "backend.start", "backend.stop", "backend.restart", "backend.reset", "backend.applyDesiredState",
 		"diagnostics.health", "diagnostics.testNodes",
-		"status", "start", "stop", "reload", "network-reset", "health", "audit",
+		"status", "start", "stop", "reload", "network-reset", "network.reset", "health", "audit", "doctor",
 		"app.list", "app.resolveUid",
 		"panel-get", "panel-set",
-		"config-get", "config-set", "config-set-many", "config-list", "config-import", "subscription-fetch", "node-test",
+		"config-get", "config-set", "config-set-many", "config-list", "config-import", "config.import", "subscription-fetch", "node-test", "node.test",
 		"logs", "version",
 		"update-check", "update-download", "update-install",
 	}
@@ -214,6 +218,7 @@ func printUsage() {
 	fmt.Println("  privctl status")
 	fmt.Println("  privctl start")
 	fmt.Println("  privctl audit")
+	fmt.Println("  privctl doctor")
 	fmt.Println("  printf '{\"panel\":{\"id\":\"default\",\"name\":\"Default\"},\"reload\":false}\\n' | PRIVSTACK_STDIN_PARAMS=1 privctl panel-set")
 	fmt.Println("  privctl app.resolveUid '{\"uid\":10123}'")
 	fmt.Println("  privctl config-get '{\"key\":\"proxy\"}'")

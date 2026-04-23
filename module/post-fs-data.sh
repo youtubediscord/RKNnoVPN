@@ -179,6 +179,8 @@ fi
 rm -f "${PRIVSTACK_DIR}/run/privd.pid" 2>/dev/null
 rm -f "${PRIVSTACK_DIR}/run/daemon.sock" 2>/dev/null
 rm -f "${PRIVSTACK_DIR}/run/singbox.pid" 2>/dev/null
+rm -f "${PRIVSTACK_DIR}/run/active" 2>/dev/null
+rm -f "${PRIVSTACK_DIR}/run/reset.lock" 2>/dev/null
 
 log_info "Cleaned stale runtime files"
 

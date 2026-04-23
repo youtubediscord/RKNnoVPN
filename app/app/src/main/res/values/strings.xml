@@ -225,6 +225,7 @@
     <string name="node_test_status_tcp_ok">TCP OK</string>
     <string name="node_test_status_tcp_error">TCP: %1$s</string>
     <string name="node_test_status_url_error">URL: %1$s</string>
+    <string name="node_test_status_unusable">Unusable</string>
     <string name="node_test_reason_tcp_direct_failed">connection failed</string>
     <string name="node_test_reason_tunnel_delay_failed">delay test failed</string>
     <string name="node_test_reason_tunnel_unavailable">tunnel unavailable</string>
@@ -252,6 +253,8 @@
     <string name="daemon_status_partial_reset">Partial reset</string>
     <string name="daemon_status_running_with_core">Running (core: %1$s)</string>
     <string name="daemon_status_running_degraded">Running (degraded: %1$s)</string>
+    <string name="daemon_status_incompatible_protocol">APK and module are incompatible: control protocol %1$d, expected %2$d</string>
+    <string name="daemon_status_missing_methods">APK and module are incompatible: missing methods %1$s</string>
     <string name="daemon_status_error_with_reason">Error: %1$s</string>
     <string name="daemon_status_module_not_installed">Module not installed</string>
     <string name="daemon_status_root_denied">Root access denied</string>
@@ -267,6 +270,8 @@
     <string name="reset_summary_all_done">All backend cleanup steps completed</string>
     <string name="reset_summary_partial_prefix">Partial cleanup:</string>
     <string name="reset_summary_step">%1$s: %2$s</string>
+    <string name="reset_summary_leftovers_prefix">Leftovers:</string>
+    <string name="reset_summary_reboot_required">Reboot is required to clear remaining network state.</string>
 
     <!-- Audit -->
     <string name="audit_tab_title">Audit</string>

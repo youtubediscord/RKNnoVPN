@@ -199,12 +199,38 @@ func TestRenderPanelNodesAsURLTestOutbounds(t *testing.T) {
 	}
 }
 
-func TestRenderAddsInternalStatusHTTPInbound(t *testing.T) {
+func TestRenderOmitsInternalStatusHTTPInboundByDefault(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "example.com"
 	cfg.Node.Port = 443
 	cfg.Node.Protocol = "vless"
 	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	inbounds := rendered["inbounds"].([]any)
+	for _, rawInbound := range inbounds {
+		inbound := rawInbound.(map[string]any)
+		if inbound["tag"] == "status-http-in" {
+			t.Fatalf("status-http-in inbound must be disabled by default: %#v", inbound)
+		}
+	}
+}
+
+func TestRenderAddsInternalStatusHTTPInboundWhenExplicitlyEnabled(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Panel.Inbounds = json.RawMessage(`{"httpPort":10809}`)
 
 	var rendered map[string]any
 	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())

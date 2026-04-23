@@ -64,7 +64,28 @@ private const val METHOD_NOT_FOUND_CODE = -32601
 class DaemonClient @Inject constructor(
     private val executor: PrivctlExecutor
 ) {
+    companion object {
+        const val MIN_CONTROL_PROTOCOL_VERSION = 3
+        val REQUIRED_METHODS: Set<String> = setOf(
+            "backend.status",
+            "backend.start",
+            "backend.stop",
+            "backend.reset",
+            "diagnostics.health",
+            "diagnostics.testNodes",
+            "config-import",
+            "network-reset",
+            "version",
+        )
+    }
+
     private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+    }
+    private val prettyJson = Json {
+        prettyPrint = true
         ignoreUnknownKeys = true
         isLenient = true
         coerceInputValues = true
@@ -456,6 +477,15 @@ class DaemonClient @Inject constructor(
                                 protocol = probe.protocol,
                                 tcpMs = probe.tcpDirect?.toInt(),
                                 urlMs = probe.tunnelDelay?.toInt(),
+                                tcpStatus = probe.tcpStatus.ifBlank {
+                                    if (probe.tcpDirect != null) "ok" else "fail"
+                                },
+                                urlStatus = probe.urlStatus.ifBlank {
+                                    if (probe.tunnelDelay != null) "ok" else "not_run"
+                                },
+                                verdict = probe.verdict.ifBlank {
+                                    if (probe.tunnelDelay != null) "usable" else "unknown"
+                                },
                                 status = null,
                                 tcpError = if (probe.errorClass == "tcp_direct_failed") probe.errorClass else null,
                                 urlError = when (probe.errorClass) {
@@ -509,6 +539,9 @@ class DaemonClient @Inject constructor(
                         protocol = result["protocol"]?.jsonPrimitive?.content.orEmpty(),
                         tcpMs = result["tcp_ms"]?.jsonPrimitive?.intOrNull,
                         urlMs = result["url_ms"]?.jsonPrimitive?.intOrNull,
+                        tcpStatus = result["tcp_status"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                        urlStatus = result["url_status"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                        verdict = result["verdict"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                         status = result["status"]?.jsonPrimitive?.intOrNull,
                         tcpError = result["tcp_error"]?.jsonPrimitive?.contentOrNull,
                         urlError = result["url_error"]?.jsonPrimitive?.contentOrNull,
@@ -621,6 +654,28 @@ class DaemonClient @Inject constructor(
         }
     }
 
+    suspend fun diagnosticBundle(lines: Int = 220): DaemonClientResult<String> {
+        val params = buildJsonObject {
+            put("lines", lines)
+        }
+        val doctorResult = call("doctor", params, timeoutMs = 30_000L) { element ->
+            prettyJson.encodeToString(JsonElement.serializer(), element)
+        }
+        return when (doctorResult) {
+            is DaemonClientResult.Ok -> doctorResult
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(doctorResult)) {
+                    when (val fallback = runtimeLogs(lines)) {
+                        is DaemonClientResult.Ok -> DaemonClientResult.Ok(fallback.data.text)
+                        else -> fallback.asFailure()
+                    }
+                } else {
+                    doctorResult.asFailure()
+                }
+            else -> doctorResult.asFailure()
+        }
+    }
+
     // ---- App management ----
 
     suspend fun resolveUid(uid: Int): DaemonClientResult<AppInfo> {
@@ -690,7 +745,13 @@ class DaemonClient @Inject constructor(
             VersionInfo(
                 daemonVersion = obj["daemon"]?.jsonPrimitive?.content ?: "unknown",
                 coreVersion = obj["core"]?.jsonPrimitive?.content ?: "unknown",
-                privctlVersion = obj["privctl"]?.jsonPrimitive?.content ?: "unknown"
+                privctlVersion = obj["privctl"]?.jsonPrimitive?.content ?: "unknown",
+                controlProtocolVersion = obj["control_protocol_version"]?.jsonPrimitive?.intOrNull
+                    ?: obj["control_protocol"]?.jsonPrimitive?.intOrNull
+                    ?: 0,
+                supportedMethods = obj["supported_methods"]?.jsonArray?.mapNotNull {
+                    it.jsonPrimitive.contentOrNull
+                }.orEmpty(),
             )
         }
 
@@ -903,8 +964,15 @@ data class ProfileSummary(
 data class VersionInfo(
     val daemonVersion: String,
     val coreVersion: String,
-    val privctlVersion: String
-)
+    val privctlVersion: String,
+    val controlProtocolVersion: Int = 0,
+    val supportedMethods: List<String> = emptyList(),
+) {
+    fun missingRequiredMethods(required: Collection<String>): List<String> {
+        if (supportedMethods.isEmpty()) return required.toList()
+        return required.filterNot { it in supportedMethods }
+    }
+}
 
 data class UpdateCheckInfo(
     val currentVersion: String,
@@ -974,6 +1042,9 @@ data class NodeTestResult(
     val protocol: String,
     val tcpMs: Int?,
     val urlMs: Int?,
+    val tcpStatus: String = "",
+    val urlStatus: String = "",
+    val verdict: String = "",
     val status: Int?,
     val tcpError: String?,
     val urlError: String?,

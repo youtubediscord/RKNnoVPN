@@ -228,12 +228,14 @@ func main() {
 
 	// ---- Autostart ---------------------------------------------------------
 
-	if cfg.Autostart {
+	if cfg.Autostart && fileMissing(filepath.Join(*dataDir, "config", "manual")) {
 		log.Printf("autostart enabled, starting proxy")
 		d.syncRuntimeV2DesiredState()
 		if _, err := d.runtimeV2.Start(); err != nil {
 			log.Printf("autostart failed: %v", err)
 		}
+	} else if cfg.Autostart {
+		log.Printf("autostart skipped: manual reset flag is present")
 	}
 
 	// ---- Signal handling ---------------------------------------------------
@@ -358,6 +360,11 @@ func writePID(path string) error {
 	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0644)
 }
 
+func fileMissing(path string) bool {
+	_, err := os.Stat(path)
+	return os.IsNotExist(err)
+}
+
 // --------------------------------------------------------------------------
 // IPC handler registration
 // --------------------------------------------------------------------------
@@ -376,6 +383,7 @@ func (d *daemon) registerHandlers() {
 	d.ipcServer.Register("stop", d.handleStop)
 	d.ipcServer.Register("reload", d.handleReload)
 	d.ipcServer.Register("network-reset", d.handleNetworkReset)
+	d.ipcServer.Register("network.reset", d.handleNetworkReset)
 	d.ipcServer.Register("health", d.handleHealth)
 	d.ipcServer.Register("audit", d.handleAudit)
 	d.ipcServer.Register("app.list", d.handleAppList)
@@ -387,8 +395,11 @@ func (d *daemon) registerHandlers() {
 	d.ipcServer.Register("config-set-many", d.handleConfigSetMany)
 	d.ipcServer.Register("config-list", d.handleConfigList)
 	d.ipcServer.Register("config-import", d.handleConfigImport)
+	d.ipcServer.Register("config.import", d.handleConfigImport)
 	d.ipcServer.Register("subscription-fetch", d.handleSubscriptionFetch)
 	d.ipcServer.Register("node-test", d.handleNodeTest)
+	d.ipcServer.Register("node.test", d.handleNodeTest)
+	d.ipcServer.Register("doctor", d.handleDoctor)
 	d.ipcServer.Register("logs", d.handleLogs)
 	d.ipcServer.Register("version", d.handleVersion)
 	d.ipcServer.Register("update-check", d.handleUpdateCheck)
@@ -1291,9 +1302,6 @@ func localPortProtectionPresent(cfg *config.Config) bool {
 	if ports[2] == 0 {
 		ports[2] = 9090
 	}
-	if ports[3] == 0 {
-		ports[3] = 10809
-	}
 
 	v4, err4 := core.ExecCommand("iptables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
 	v6, err6 := core.ExecCommand("ip6tables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
@@ -1301,6 +1309,9 @@ func localPortProtectionPresent(cfg *config.Config) bool {
 		return false
 	}
 	for _, port := range ports {
+		if port <= 0 {
+			continue
+		}
 		if !portProtectionOutputContains(v4, port) || !portProtectionOutputContains(v6, port) {
 			return false
 		}
@@ -1449,27 +1460,38 @@ func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCE
 			continue
 		}
 		result := map[string]interface{}{
-			"id":       profile.ID,
-			"name":     firstNonEmpty(profile.Name, profile.Tag, profile.Address),
-			"tag":      profile.Tag,
-			"server":   profile.Address,
-			"port":     profile.Port,
-			"protocol": profile.Protocol,
+			"id":         profile.ID,
+			"name":       firstNonEmpty(profile.Name, profile.Tag, profile.Address),
+			"tag":        profile.Tag,
+			"server":     profile.Address,
+			"port":       profile.Port,
+			"protocol":   profile.Protocol,
+			"url_status": "not_run",
+			"verdict":    "unknown",
 		}
 
 		tcpMS, tcpErr := testTCPConnect(profile.Address, profile.Port, timeout)
 		if tcpErr != nil {
+			result["tcp_status"] = "fail"
 			result["tcp_error"] = tcpErr.Error()
 		} else {
+			result["tcp_status"] = "ok"
 			result["tcp_ms"] = tcpMS
 		}
 
 		urlMS, statusCode, urlErr := testClashDelay(apiPort, profile.Tag, testURL, p.TimeoutMS)
 		if urlErr != nil {
+			result["url_status"] = "fail"
+			result["verdict"] = "unusable"
 			result["url_error"] = urlErr.Error()
 		} else {
+			result["url_status"] = "ok"
+			result["verdict"] = "usable"
 			result["url_ms"] = urlMS
 			result["status"] = statusCode
+		}
+		if result["tcp_status"] == "fail" && result["url_status"] != "ok" {
+			result["verdict"] = "unusable"
 		}
 		results = append(results, result)
 	}
@@ -1782,10 +1804,13 @@ func readLogTail(path string, maxLines int, maxBytes int64) ([]string, error) {
 }
 
 func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	return map[string]string{
-		"daemon":  Version,
-		"core":    Version,
-		"privctl": Version,
+	return map[string]interface{}{
+		"daemon":                   Version,
+		"core":                     Version,
+		"privctl":                  Version,
+		"control_protocol":         controlProtocolVersion,
+		"control_protocol_version": controlProtocolVersion,
+		"supported_methods":        supportedRPCMethods(),
 		// Keep legacy keys for backward compatibility.
 		"version": Version,
 		"go":      "1.22+",
@@ -2115,6 +2140,9 @@ func (d *daemon) cachedEgressIP(state core.State, httpPort int) *string {
 	if state != core.StateRunning && state != core.StateDegraded {
 		return nil
 	}
+	if httpPort <= 0 {
+		return nil
+	}
 
 	now := time.Now()
 	d.metricsMu.Lock()
@@ -2181,8 +2209,8 @@ func queryClashTraffic(apiPort int, timeout time.Duration) (int64, int64, error)
 }
 
 func fetchProxyEgressIP(httpPort int, timeout time.Duration) (string, error) {
-	if httpPort == 0 {
-		httpPort = 10809
+	if httpPort <= 0 {
+		return "", fmt.Errorf("http helper inbound is disabled")
 	}
 	proxyURL, err := neturl.Parse(fmt.Sprintf("http://127.0.0.1:%d", httpPort))
 	if err != nil {

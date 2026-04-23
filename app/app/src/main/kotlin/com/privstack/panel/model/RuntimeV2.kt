@@ -90,6 +90,8 @@ data class ResetReport(
     val status: String = "ok",
     val steps: List<ResetStep> = emptyList(),
     val errors: List<String> = emptyList(),
+    val leftovers: List<String> = emptyList(),
+    val rebootRequired: Boolean = false,
 )
 
 @Serializable
@@ -102,5 +104,8 @@ data class NodeProbeResultV2(
     val tcpDirect: Long? = null,
     val tunnelDelay: Long? = null,
     val dnsBootstrap: Boolean = false,
+    val tcpStatus: String = "",
+    val urlStatus: String = "",
+    val verdict: String = "",
     val errorClass: String = "",
 )
