@@ -22,3 +22,4 @@ daemon/privctl
 .DS_Store
 Thumbs.db
 *.Zone.Identifier
+/app/.kotlin
