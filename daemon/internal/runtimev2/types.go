@@ -59,6 +59,7 @@ type HealthSnapshot struct {
 	DNSReady     bool      `json:"dnsReady"`
 	RoutingReady bool      `json:"routingReady"`
 	EgressReady  bool      `json:"egressReady"`
+	LastCode     string    `json:"lastCode,omitempty"`
 	LastError    string    `json:"lastError,omitempty"`
 	CheckedAt    time.Time `json:"checkedAt,omitempty"`
 }
