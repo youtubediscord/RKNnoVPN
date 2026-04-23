@@ -929,17 +929,22 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 		}
 
 		result := runtimev2.NodeProbeResult{
-			ID:       profile.ID,
-			Name:     firstNonEmpty(profile.Name, profile.Tag, profile.Address),
-			Protocol: profile.Protocol,
-			Server:   profile.Address,
-			Port:     profile.Port,
+			ID:        profile.ID,
+			Name:      firstNonEmpty(profile.Name, profile.Tag, profile.Address),
+			Protocol:  profile.Protocol,
+			Server:    profile.Address,
+			Port:      profile.Port,
+			TCPStatus: "not_run",
+			URLStatus: "not_run",
+			Verdict:   "unknown",
 		}
 
 		tcpMS, tcpErr := testTCPConnect(profile.Address, profile.Port, timeout)
 		if tcpErr == nil {
 			result.TCPDirect = &tcpMS
+			result.TCPStatus = "ok"
 		} else {
+			result.TCPStatus = "fail"
 			result.ErrorClass = "tcp_direct_failed"
 		}
 
@@ -952,14 +957,26 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 			urlMS, _, urlErr := testClashDelay(apiPort, profile.Tag, testURL, timeoutMS)
 			if urlErr == nil {
 				result.TunnelDelay = &urlMS
+				result.URLStatus = "ok"
+				result.Verdict = "usable"
+				result.ErrorClass = "ok"
+			} else {
+				result.URLStatus = "fail"
+				result.Verdict = "unusable"
 				if result.ErrorClass == "" {
-					result.ErrorClass = "ok"
+					result.ErrorClass = classifyRuntimeURLTestFailure(urlErr, runtimeHealth)
 				}
-			} else if result.ErrorClass == "" {
-				result.ErrorClass = classifyRuntimeURLTestFailure(urlErr, runtimeHealth)
 			}
-		} else if result.ErrorClass == "" {
-			result.ErrorClass = "tunnel_unavailable"
+		} else {
+			result.URLStatus = "fail"
+			result.Verdict = "unusable"
+			if result.ErrorClass == "" {
+				result.ErrorClass = "tunnel_unavailable"
+			}
+		}
+
+		if result.TCPStatus == "ok" && result.URLStatus != "ok" {
+			result.Verdict = "unusable"
 		}
 
 		results = append(results, result)

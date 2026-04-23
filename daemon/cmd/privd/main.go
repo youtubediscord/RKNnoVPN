@@ -1806,10 +1806,13 @@ func readLogTail(path string, maxLines int, maxBytes int64) ([]string, error) {
 }
 
 func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	singBoxPath := filepath.Join(d.dataDir, "bin", "sing-box")
 	return map[string]interface{}{
 		"daemon":                   Version,
 		"core":                     Version,
 		"privctl":                  Version,
+		"module":                   readModuleVersion(),
+		"sing_box":                 d.singBoxVersion(singBoxPath, 20),
 		"control_protocol":         controlProtocolVersion,
 		"control_protocol_version": controlProtocolVersion,
 		"supported_methods":        supportedRPCMethods(),
@@ -2000,9 +2003,18 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 	traffic := d.buildTrafficPayload(state, apiPort)
 	latencyMs := d.cachedLatencyMs(state, cfg, apiPort)
 	egressIP := d.cachedEgressIP(state, panelInbounds.HTTPPort)
+	healthPayload := buildHealthPayload(state, healthResult, d.hasRecentEgress())
+	connectionState := mapCoreStateToConnectionState(status.State)
+	if connectionState == "CONNECTED" {
+		if healthResult == nil {
+			connectionState = "CONNECTING"
+		} else if operational, _ := healthPayload["operationalHealthy"].(bool); !operational {
+			connectionState = "ERROR"
+		}
+	}
 
 	return map[string]interface{}{
-		"state":                mapCoreStateToConnectionState(status.State),
+		"state":                connectionState,
 		"active_node_id":       activeNodeID,
 		"active_node_name":     activeNodeName,
 		"active_node_protocol": activeNodeProtocol,
@@ -2011,7 +2023,7 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 		"uptime":               uptimeSeconds(status.StartedAt),
 		"traffic":              traffic,
 		"latency_ms":           latencyMs,
-		"health":               buildHealthPayload(state, healthResult, d.hasRecentEgress()),
+		"health":               healthPayload,
 
 		// Keep the legacy fields for older clients and debugging tools.
 		"pid":             status.PID,
@@ -2311,7 +2323,6 @@ func buildHealthPayload(state core.State, result *health.HealthResult, egressRea
 	payload["checkedAt"] = result.Timestamp.Unix()
 
 	dnsOK := false
-	tproxyOK := false
 	iptablesOK := false
 	routingOK := false
 	if check, ok := result.Checks["dns"]; ok {
@@ -2319,9 +2330,6 @@ func buildHealthPayload(state core.State, result *health.HealthResult, egressRea
 	}
 	if check, ok := result.Checks["dns_listener"]; ok {
 		dnsOK = dnsOK && check.Pass
-	}
-	if check, ok := result.Checks["tproxy_port"]; ok {
-		tproxyOK = check.Pass
 	}
 	if check, ok := result.Checks["iptables"]; ok {
 		iptablesOK = check.Pass
@@ -2331,7 +2339,7 @@ func buildHealthPayload(state core.State, result *health.HealthResult, egressRea
 	}
 
 	payload["dnsOperational"] = dnsOK
-	payload["tunActive"] = tproxyOK && iptablesOK && routingOK
+	payload["tunActive"] = false
 	payload["routingReady"] = iptablesOK && routingOK
 	payload["operationalHealthy"] = result.Overall && dnsOK && egressReady
 	if firstError := firstHealthError(result.Checks, result.Overall, egressReady); firstError != "" {

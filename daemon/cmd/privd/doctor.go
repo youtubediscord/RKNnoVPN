@@ -110,6 +110,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 		"backend_status": backendStatus,
 		"ports":          doctorPortStatuses(cfg),
 		"leftovers":      d.collectNetworkLeftovers(cfg),
+		"node_tests":     redactNodeProbeResults(d.testNodeProbesV2(cfg.Health.URL, 2500, nil)),
 		"logs":           d.doctorLogs(lines),
 		"config": map[string]doctorJSONSection{
 			"daemon":           readRedactedJSONFile(cfgPath),
@@ -283,6 +284,34 @@ func readModuleVersion() map[string]string {
 		return result
 	}
 	return map[string]string{"version": "unknown"}
+}
+
+func redactNodeProbeResults(results interface{}) interface{} {
+	data, err := json.Marshal(results)
+	if err != nil {
+		return results
+	}
+	var value interface{}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return results
+	}
+	if items, ok := value.([]interface{}); ok {
+		for _, item := range items {
+			probe, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			server, _ := probe["server"].(string)
+			if server == "" {
+				continue
+			}
+			if name, _ := probe["name"].(string); name == server {
+				probe["name"] = "[redacted]"
+			}
+			probe["server"] = "[redacted]"
+		}
+	}
+	return redactDiagnosticValue("", value)
 }
 
 func readRedactedJSONFile(path string) doctorJSONSection {

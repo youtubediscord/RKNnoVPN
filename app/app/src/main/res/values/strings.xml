@@ -345,7 +345,7 @@
     <string name="audit_check_selinux_status_detail">SELinux is in enforcing mode with daemon-specific policy loaded.</string>
     <string name="audit_check_selinux_status_remediation">No action required.</string>
     <string name="audit_check_module_integrity_title">Kernel module hashes verified</string>
-    <string name="audit_check_module_integrity_detail">wintun.ko and tun.ko match expected SHA-256 digests.</string>
+    <string name="audit_check_module_integrity_detail">privd, privctl, and sing-box match expected SHA-256 digests.</string>
     <string name="audit_check_module_integrity_remediation">No action required.</string>
     <string name="audit_check_private_dns_unchanged_title">Private DNS was modified by daemon</string>
     <string name="audit_check_private_dns_unchanged_detail">The system Private DNS setting was changed, which apps can detect.</string>

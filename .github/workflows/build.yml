@@ -18,6 +18,18 @@ env:
 
 jobs:
   # ============================================================
+  # Job -1: Privacy/static policy guardrails
+  # ============================================================
+  privacy-lint:
+    name: Privacy Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check APK privacy surface
+        run: bash .github/scripts/check_apk_privacy.sh
+
+  # ============================================================
   # Job 0: Resolve sing-box release tag
   # ============================================================
   resolve-singbox:
@@ -236,6 +248,7 @@ jobs:
   build-apk:
     name: Build APK
     runs-on: ubuntu-latest
+    needs: [privacy-lint]
     steps:
       - uses: actions/checkout@v4
 

@@ -51,6 +51,7 @@ private val bridgeJson = Json {
 }
 
 private const val METHOD_NOT_FOUND_CODE = -32601
+private const val COMPATIBILITY_ERROR_CODE = -32090
 
 /**
  * Typed, high-level client for daemon IPC methods.
@@ -70,9 +71,14 @@ class DaemonClient @Inject constructor(
             "backend.status",
             "backend.start",
             "backend.stop",
+            "backend.restart",
             "backend.reset",
+            "backend.applyDesiredState",
             "diagnostics.health",
             "diagnostics.testNodes",
+            "config-set-many",
+            "panel-get",
+            "panel-set",
             "config-import",
             "network-reset",
             "version",
@@ -115,50 +121,40 @@ class DaemonClient @Inject constructor(
 
     /** Start the proxy connection using the active profile. */
     suspend fun start(): DaemonClientResult<Unit> {
+        requireCompatible("backend.start", "backend.status")?.let { return it }
         return when (val result = backendStart()) {
             is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
-            is DaemonClientResult.DaemonError ->
-                if (isMethodNotFound(result)) callVoid("start") else result.asFailure()
+            is DaemonClientResult.DaemonError -> result.asFailure()
             else -> result.asFailure()
         }
     }
 
     /** Stop the proxy connection (keeps daemon alive). */
     suspend fun stop(): DaemonClientResult<Unit> {
+        requireCompatible("backend.stop", "backend.status")?.let { return it }
         return when (val result = backendStop()) {
             is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
-            is DaemonClientResult.DaemonError ->
-                if (isMethodNotFound(result)) callVoid("stop") else result.asFailure()
+            is DaemonClientResult.DaemonError -> result.asFailure()
             else -> result.asFailure()
         }
     }
 
     /** Reload the active configuration without full restart. */
     suspend fun reload(): DaemonClientResult<Unit> {
+        requireCompatible("backend.restart", "backend.status")?.let { return it }
         return when (val result = backendRestart()) {
             is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
-            is DaemonClientResult.DaemonError ->
-                if (isMethodNotFound(result)) callVoid("reload") else result.asFailure()
+            is DaemonClientResult.DaemonError -> result.asFailure()
             else -> result.asFailure()
         }
     }
 
     /** Force-remove PrivStack network rules and stop the proxy core. */
     suspend fun networkReset(): DaemonClientResult<ResetReport> {
+        requireCompatible("backend.reset", "network-reset")?.let { return it.asFailure() }
         return when (val result = backendReset()) {
             is DaemonClientResult.Ok -> result
-            is DaemonClientResult.DaemonError ->
-                if (isMethodNotFound(result)) {
-                    call("network-reset", timeoutMs = 60_000L) {
-                        val obj = it.jsonObject
-                        ResetReport(
-                            status = obj["status"]?.jsonPrimitive?.content ?: "ok",
-                            errors = obj["errors"]?.jsonArray?.map { item -> item.jsonPrimitive.content }.orEmpty(),
-                        )
-                    }
-                } else {
-                    result.asFailure()
-                }
+            is DaemonClientResult.DaemonError -> result.asFailure()
             else -> result.asFailure()
         }
     }
@@ -288,6 +284,7 @@ class DaemonClient @Inject constructor(
         config: ProfileConfig,
         reload: Boolean = true,
     ): DaemonClientResult<Unit> {
+        requireCompatible("config-set-many")?.let { return it }
         val activeNode = config.nodes.find { it.id == config.activeNodeId } ?: config.nodes.firstOrNull()
         val daemonNode = activeNode?.toDaemonNodeSection() ?: DaemonNodeSection()
         val daemonTransport = activeNode?.toDaemonTransportSection() ?: DaemonTransportSection()
@@ -323,23 +320,25 @@ class DaemonClient @Inject constructor(
     suspend fun panelSet(
         config: ProfileConfig,
         reload: Boolean = true,
-    ): DaemonClientResult<Unit> = when (val result = callVoid(
-        "panel-set",
-        buildJsonObject {
-            put(
-                "panel",
-                json.encodeToJsonElement(
-                    DaemonPanelSection.serializer(),
-                    config.toDaemonPanelSection(),
+    ): DaemonClientResult<Unit> {
+        requireCompatible("panel-set")?.let { return it }
+        return when (val result = callVoid(
+            "panel-set",
+            buildJsonObject {
+                put(
+                    "panel",
+                    json.encodeToJsonElement(
+                        DaemonPanelSection.serializer(),
+                        config.toDaemonPanelSection(),
+                    )
                 )
-            )
-            put("reload", reload)
-        },
-        timeoutMs = 60_000L,
-    )) {
-        is DaemonClientResult.DaemonError ->
-            if (isMethodNotFound(result)) legacyPanelSet(config, reload) else result
-        else -> result
+                put("reload", reload)
+            },
+            timeoutMs = 60_000L,
+        )) {
+            is DaemonClientResult.DaemonError -> result
+            else -> result
+        }
     }
 
     private fun buildConfigSetValues(
@@ -435,6 +434,7 @@ class DaemonClient @Inject constructor(
      * The repository now performs imports itself, so callers should prefer that.
      */
     suspend fun configImport(links: String): DaemonClientResult<List<Node>> {
+        requireCompatible("config-import")?.let { return it.asFailure() }
         val params = buildJsonObject { put("links", links) }
         return call("config-import", params) {
             json.decodeFromJsonElement(ListSerializer(Node.serializer()), it)
@@ -462,6 +462,7 @@ class DaemonClient @Inject constructor(
         url: String = "",
         timeoutMs: Int = 5_000,
     ): DaemonClientResult<NodeTestInfo> {
+        requireCompatible("diagnostics.testNodes")?.let { return it.asFailure() }
         when (val result = diagnosticsTestNodes(nodeIds, url, timeoutMs)) {
             is DaemonClientResult.Ok -> {
                 return DaemonClientResult.Ok(
@@ -503,51 +504,12 @@ class DaemonClient @Inject constructor(
                     )
                 )
             }
-            is DaemonClientResult.DaemonError -> {
-                if (!isMethodNotFound(result)) {
-                    return result.asFailure()
-                }
-            }
+            is DaemonClientResult.DaemonError -> return result.asFailure()
             is DaemonClientResult.RootDenied -> return result.asFailure()
             is DaemonClientResult.Timeout -> return result.asFailure()
             is DaemonClientResult.DaemonNotFound -> return result.asFailure()
             is DaemonClientResult.ParseError -> return result.asFailure()
             is DaemonClientResult.Failure -> return result.asFailure()
-        }
-
-        val params = buildJsonObject {
-            putJsonArray("node_ids") {
-                nodeIds.forEach { add(it) }
-            }
-            if (url.isNotBlank()) {
-                put("url", url)
-            }
-            put("timeout_ms", timeoutMs)
-        }
-        return call("node-test", params, timeoutMs = timeoutMs.toLong() + 5_000L) { element ->
-            val obj = element.jsonObject
-            NodeTestInfo(
-                url = obj["url"]?.jsonPrimitive?.content.orEmpty(),
-                results = obj["results"]?.jsonArray?.map { item ->
-                    val result = item.jsonObject
-                    NodeTestResult(
-                        id = result["id"]?.jsonPrimitive?.content.orEmpty(),
-                        name = result["name"]?.jsonPrimitive?.content.orEmpty(),
-                        tag = result["tag"]?.jsonPrimitive?.content.orEmpty(),
-                        server = result["server"]?.jsonPrimitive?.content.orEmpty(),
-                        port = result["port"]?.jsonPrimitive?.intOrNull ?: 0,
-                        protocol = result["protocol"]?.jsonPrimitive?.content.orEmpty(),
-                        tcpMs = result["tcp_ms"]?.jsonPrimitive?.intOrNull,
-                        urlMs = result["url_ms"]?.jsonPrimitive?.intOrNull,
-                        tcpStatus = result["tcp_status"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                        urlStatus = result["url_status"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                        verdict = result["verdict"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                        status = result["status"]?.jsonPrimitive?.intOrNull,
-                        tcpError = result["tcp_error"]?.jsonPrimitive?.contentOrNull,
-                        urlError = result["url_error"]?.jsonPrimitive?.contentOrNull,
-                    )
-                }.orEmpty(),
-            )
         }
     }
 
@@ -801,6 +763,46 @@ class DaemonClient @Inject constructor(
         result.code == METHOD_NOT_FOUND_CODE ||
             result.message.contains("unknown command", ignoreCase = true) ||
             result.message.contains("method not found", ignoreCase = true)
+
+    private suspend fun requireCompatible(vararg requiredMethods: String): DaemonClientResult<Unit>? {
+        return when (val result = version()) {
+            is DaemonClientResult.Ok -> {
+                val info = result.data
+                when {
+                    info.controlProtocolVersion < MIN_CONTROL_PROTOCOL_VERSION ->
+                        DaemonClientResult.DaemonError(
+                            COMPATIBILITY_ERROR_CODE,
+                            "APK и модуль несовместимы: control protocol ${info.controlProtocolVersion}, нужен $MIN_CONTROL_PROTOCOL_VERSION",
+                        )
+                    else -> {
+                        val missing = info.missingRequiredMethods(requiredMethods.toList() + "version")
+                        if (missing.isEmpty()) {
+                            null
+                        } else {
+                            DaemonClientResult.DaemonError(
+                                COMPATIBILITY_ERROR_CODE,
+                                "APK и модуль несовместимы: нет методов ${missing.joinToString(", ")}",
+                            )
+                        }
+                    }
+                }
+            }
+            is DaemonClientResult.DaemonError ->
+                DaemonClientResult.DaemonError(
+                    COMPATIBILITY_ERROR_CODE,
+                    "APK и модуль несовместимы: daemon не сообщает capabilities (${result.message})",
+                    result.details,
+                )
+            is DaemonClientResult.RootDenied -> result
+            is DaemonClientResult.Timeout -> result
+            is DaemonClientResult.DaemonNotFound -> result
+            is DaemonClientResult.ParseError -> DaemonClientResult.DaemonError(
+                COMPATIBILITY_ERROR_CODE,
+                "APK и модуль несовместимы: некорректный ответ version",
+            )
+            is DaemonClientResult.Failure -> result
+        }
+    }
 
     private fun buildNodeFromSections(
         node: DaemonNodeSection,
@@ -1056,12 +1058,10 @@ private fun BackendStatusV2.toDaemonStatus(
     val effectiveHealth = healthOverride ?: health
     val connectionState = when (appliedState.phase) {
         com.privstack.panel.model.BackendPhase.HEALTHY ->
-            if (effectiveHealth.healthy) com.privstack.panel.model.ConnectionState.CONNECTED
+            if (effectiveHealth.operationalHealthy) com.privstack.panel.model.ConnectionState.CONNECTED
             else com.privstack.panel.model.ConnectionState.ERROR
         com.privstack.panel.model.BackendPhase.APPLYING -> com.privstack.panel.model.ConnectionState.CONNECTING
-        com.privstack.panel.model.BackendPhase.DEGRADED ->
-            if (effectiveHealth.healthy) com.privstack.panel.model.ConnectionState.CONNECTED
-            else com.privstack.panel.model.ConnectionState.ERROR
+        com.privstack.panel.model.BackendPhase.DEGRADED -> com.privstack.panel.model.ConnectionState.ERROR
         com.privstack.panel.model.BackendPhase.STOPPED -> com.privstack.panel.model.ConnectionState.DISCONNECTED
     }
 
@@ -1072,7 +1072,7 @@ private fun BackendStatusV2.toDaemonStatus(
         health = com.privstack.panel.model.HealthResult(
             healthy = effectiveHealth.healthy,
             coreRunning = effectiveHealth.coreReady,
-            tunActive = effectiveHealth.healthy,
+            tunActive = false,
             dnsOperational = effectiveHealth.dnsReady,
             routingReady = effectiveHealth.routingReady,
             egressReady = effectiveHealth.egressReady,

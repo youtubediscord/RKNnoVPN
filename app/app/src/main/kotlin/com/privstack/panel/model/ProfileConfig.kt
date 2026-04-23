@@ -86,7 +86,7 @@ data class HealthConfig(
 
 @Serializable
 data class TunConfig(
-    val enabled: Boolean = true,
+    val enabled: Boolean = false,
     /** TUN interface MTU. */
     val mtu: Int = 9000,
     /** IPv4 address assigned to the TUN interface. */

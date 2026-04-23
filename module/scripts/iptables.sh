@@ -7,9 +7,9 @@
 # Supports: start | stop
 #
 # Architecture:
-#   All traffic -> TUN/routing -> iptables mangle PREROUTING (TPROXY)
-#   Selected UIDs get their packets marked in OUTPUT, then TPROXY'd
-#   in PREROUTING. DNS is redirected via nat OUTPUT REDIRECT.
+#   No Android VpnService, no tun0. Selected app UIDs are marked in
+#   mangle OUTPUT, policy-routed back to local delivery, and then handled
+#   by sing-box's TPROXY inbound. DNS is redirected via nat OUTPUT REDIRECT.
 #   sing-box runs under GID $CORE_GID to prevent routing loops.
 #
 # POSIX sh compatible. No bashisms.

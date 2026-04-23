@@ -12,6 +12,10 @@ import javax.inject.Singleton
 class UserMessageFormatter @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
+    private companion object {
+        const val COMPATIBILITY_ERROR_CODE = -32090
+    }
+
     fun get(@StringRes resId: Int, vararg args: Any): String = context.getString(resId, *args)
 
     fun defaultGroupName(): String = get(R.string.default_group_name)
@@ -23,11 +27,16 @@ class UserMessageFormatter @Inject constructor(
     }
 
     fun formatDaemonFailure(result: DaemonClientResult<*>): String = when (result) {
-        is DaemonClientResult.DaemonError -> get(
-            R.string.error_daemon_with_code,
-            result.code,
-            result.message,
-        )
+        is DaemonClientResult.DaemonError ->
+            if (result.code == COMPATIBILITY_ERROR_CODE) {
+                result.message
+            } else {
+                get(
+                    R.string.error_daemon_with_code,
+                    result.code,
+                    result.message,
+                )
+            }
         is DaemonClientResult.RootDenied -> get(R.string.error_root_access_denied)
         is DaemonClientResult.Timeout -> get(R.string.error_request_timed_out_with_method, result.method)
         is DaemonClientResult.DaemonNotFound -> get(R.string.error_daemon_not_installed)

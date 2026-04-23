@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
 func TestDoctorRedactsSensitiveJSON(t *testing.T) {
@@ -45,6 +47,24 @@ func TestSupportedRPCMethodsAdvertiseCompatibilityAliases(t *testing.T) {
 		if !slices.Contains(methods, method) {
 			t.Fatalf("supported methods missing %s: %#v", method, methods)
 		}
+	}
+}
+
+func TestDoctorRedactsNodeProbeServer(t *testing.T) {
+	value := redactNodeProbeResults([]runtimev2.NodeProbeResult{
+		{
+			ID:     "node-1",
+			Name:   "secret.example.com",
+			Server: "secret.example.com",
+			Port:   443,
+		},
+	})
+	text := mustMarshalForTest(t, value)
+	if strings.Contains(text, "secret.example.com") {
+		t.Fatalf("node probe server/name was not redacted from %s", text)
+	}
+	if !strings.Contains(text, `"port":443`) {
+		t.Fatalf("non-secret node probe fields should remain available, got %s", text)
 	}
 }
 

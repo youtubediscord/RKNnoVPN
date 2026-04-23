@@ -345,7 +345,7 @@
     <string name="audit_check_selinux_status_detail">SELinux включён в enforcing и использует политику, связанную с демоном.</string>
     <string name="audit_check_selinux_status_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_module_integrity_title">Хэши модулей ядра совпадают</string>
-    <string name="audit_check_module_integrity_detail">wintun.ko и tun.ko совпадают с ожидаемыми SHA-256.</string>
+    <string name="audit_check_module_integrity_detail">privd, privctl и sing-box совпадают с ожидаемыми SHA-256.</string>
     <string name="audit_check_module_integrity_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_private_dns_unchanged_title">Приватный DNS был изменён демоном</string>
     <string name="audit_check_private_dns_unchanged_detail">Системная настройка Private DNS была изменена, и приложения могут это заметить.</string>

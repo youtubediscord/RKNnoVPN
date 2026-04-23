@@ -528,28 +528,46 @@ func (m *CoreManager) killProcess() error {
 		return nil
 	}
 
+	waitCh := make(chan error, 1)
+	go func(proc *os.Process) {
+		_, err := proc.Wait()
+		waitCh <- err
+	}(m.process)
+
 	m.logger.Printf("sending SIGTERM to pid %d", m.pid)
 	if err := m.process.Signal(syscall.SIGTERM); err != nil {
 		// Process may have already exited — not fatal.
 		m.logger.Printf("SIGTERM failed (may be already dead): %v", err)
+		select {
+		case <-waitCh:
+		default:
+		}
 		return nil
 	}
 
-	// Poll for exit over 5 seconds.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if err := m.process.Signal(syscall.Signal(0)); err != nil {
-			// kill -0 failed ⇒ process is gone.
+	select {
+	case err := <-waitCh:
+		if err != nil {
+			m.logger.Printf("wait after SIGTERM returned: %v", err)
+		} else {
 			m.logger.Printf("pid %d exited after SIGTERM", m.pid)
-			return nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		return nil
+	case <-time.After(5 * time.Second):
 	}
 
 	// Still alive — escalate.
 	m.logger.Printf("pid %d did not exit, sending SIGKILL", m.pid)
 	if err := m.process.Signal(syscall.SIGKILL); err != nil {
 		return fmt.Errorf("SIGKILL pid %d: %w", m.pid, err)
+	}
+	select {
+	case err := <-waitCh:
+		if err != nil {
+			m.logger.Printf("wait after SIGKILL returned: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		return fmt.Errorf("pid %d did not exit after SIGKILL", m.pid)
 	}
 	return nil
 }
