@@ -313,6 +313,13 @@ private fun NodeCard(
 
             // Name + protocol + server
             Column(modifier = Modifier.weight(1f)) {
+                val okStatus = stringResource(R.string.node_test_status_ok)
+                val tcpOkStatus = stringResource(R.string.node_test_status_tcp_ok)
+                val testSummary = listOfNotNull(
+                    node.latencyMs?.takeIf { it >= 0 }?.let { stringResource(R.string.node_test_tcp_ms, it) },
+                    node.responseMs?.let { stringResource(R.string.node_test_url_ms, it) },
+                    node.testStatus?.takeIf { it != okStatus && it != tcpOkStatus },
+                ).joinToString(" | ")
                 Text(
                     text = node.name,
                     style = MaterialTheme.typography.bodyLarge,
@@ -329,17 +336,7 @@ private fun NodeCard(
                 )
                 if (node.responseMs != null || node.testStatus != null) {
                     Text(
-                        text = buildString {
-                            node.latencyMs?.takeIf { it >= 0 }?.let { append("TCP ${it}ms") }
-                            node.responseMs?.let {
-                                if (isNotEmpty()) append(" | ")
-                                append("URL ${it}ms")
-                            }
-                            node.testStatus?.takeIf { it != "OK" && it != "TCP OK" }?.let {
-                                if (isNotEmpty()) append(" | ")
-                                append(it)
-                            }
-                        },
+                        text = testSummary,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -458,14 +455,18 @@ private fun NodeCard(
     }
 
     @Composable
-    private fun LatencyChip(ms: Int) {
+private fun LatencyChip(ms: Int) {
     val color = when {
         ms < 0 -> MaterialTheme.colorScheme.outline
         ms < 200 -> MaterialTheme.colorScheme.primary // green/teal
         ms < 500 -> MaterialTheme.colorScheme.tertiary // yellow/amber
         else -> MaterialTheme.colorScheme.error // red
     }
-    val text = if (ms < 0) "ERR" else "${ms}ms"
+    val text = if (ms < 0) {
+        stringResource(R.string.node_latency_error)
+    } else {
+        stringResource(R.string.ms_format, ms)
+    }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.15f)),

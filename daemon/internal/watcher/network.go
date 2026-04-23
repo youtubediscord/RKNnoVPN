@@ -13,7 +13,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -34,24 +33,26 @@ type NetworkWatcher struct {
 	dataDir string // e.g. /data/adb/privstack
 	env     map[string]string
 
-	stopCh    chan struct{}
-	done      chan struct{}
-	cmd       *exec.Cmd
-	logger    *log.Logger
+	stopCh   chan struct{}
+	done     chan struct{}
+	cmd      *exec.Cmd
+	logger   *log.Logger
+	onChange func() error
 
 	mu sync.Mutex
 }
 
 // NewNetworkWatcher creates a watcher that will invoke
-// <dataDir>/scripts/net_handler.sh on network changes.
-func NewNetworkWatcher(dataDir string, env map[string]string, logger *log.Logger) *NetworkWatcher {
+// a daemon-owned callback on network changes.
+func NewNetworkWatcher(dataDir string, env map[string]string, onChange func() error, logger *log.Logger) *NetworkWatcher {
 	if logger == nil {
 		logger = log.New(os.Stderr, "[netwatch] ", log.LstdFlags)
 	}
 	return &NetworkWatcher{
-		dataDir: dataDir,
-		env:     env,
-		logger:  logger,
+		dataDir:  dataDir,
+		env:      env,
+		onChange: onChange,
+		logger:   logger,
 	}
 }
 
@@ -170,33 +171,18 @@ func (w *NetworkWatcher) Stop() {
 	w.logger.Println("stopped")
 }
 
-// handleNetworkChange runs the net_handler.sh script with the configured
-// environment. The script is expected to re-check routes and re-apply
-// iptables if the active network interface changed.
+// handleNetworkChange reports the event to the daemon-owned callback so
+// one place owns rule mutation and rollback.
 func (w *NetworkWatcher) handleNetworkChange() {
-	scriptPath := filepath.Join(w.dataDir, "scripts", "net_handler.sh")
-	if _, err := os.Stat(scriptPath); err != nil {
-		w.logger.Printf("net_handler.sh not found at %s: %v", scriptPath, err)
+	if w.onChange == nil {
+		w.logger.Println("network change callback is not configured")
 		return
 	}
-
-	shell := "/system/bin/sh"
-	if _, err := os.Stat(shell); err != nil {
-		shell = "/bin/sh"
-	}
-
-	cmd := exec.Command(shell, scriptPath)
-	cmd.Env = os.Environ()
-	for k, v := range w.env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
-
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		w.logger.Printf("net_handler.sh failed: %v\noutput: %s", err, strings.TrimSpace(string(out)))
+	if err := w.onChange(); err != nil {
+		w.logger.Printf("network change reconciliation failed: %v", err)
 		return
 	}
-	w.logger.Println("net_handler.sh completed successfully")
+	w.logger.Println("network change reconciliation completed successfully")
 }
 
 // findInotifyd locates the inotifyd binary and returns the binary path

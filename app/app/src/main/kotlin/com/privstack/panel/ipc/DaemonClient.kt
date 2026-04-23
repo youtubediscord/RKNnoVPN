@@ -3,10 +3,15 @@ package com.privstack.panel.ipc
 import com.privstack.panel.`import`.UriExporter
 import com.privstack.panel.model.AppInfo
 import com.privstack.panel.model.AuditReport
+import com.privstack.panel.model.BackendHealthSnapshot
+import com.privstack.panel.model.BackendStatusV2
 import com.privstack.panel.model.DaemonStatus
+import com.privstack.panel.model.DesiredStateV2
 import com.privstack.panel.model.HealthConfig
 import com.privstack.panel.model.Node
+import com.privstack.panel.model.NodeProbeResultV2
 import com.privstack.panel.model.ProfileConfig
+import com.privstack.panel.model.ResetReport
 import com.privstack.panel.model.InboundsConfig
 import com.privstack.panel.model.Protocol
 import com.privstack.panel.model.TunConfig
@@ -45,6 +50,8 @@ private val bridgeJson = Json {
     coerceInputValues = true
 }
 
+private const val METHOD_NOT_FOUND_CODE = -32601
+
 /**
  * Typed, high-level client for daemon IPC methods.
  *
@@ -66,28 +73,95 @@ class DaemonClient @Inject constructor(
     // ---- Connection lifecycle ----
 
     /** Get daemon runtime status (connection state, active node, health). */
-    suspend fun status(): DaemonClientResult<DaemonStatus> =
-        call("status") { json.decodeFromJsonElement(DaemonStatus.serializer(), it) }
+    suspend fun status(): DaemonClientResult<DaemonStatus> {
+        return when (val result = backendStatus()) {
+            is DaemonClientResult.Ok -> {
+                val v2Status = result.data.toDaemonStatus()
+                when (val legacy = legacyStatus()) {
+                    is DaemonClientResult.Ok -> DaemonClientResult.Ok(legacy.data.withV2Status(v2Status))
+                    else -> DaemonClientResult.Ok(v2Status)
+                }
+            }
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) {
+                    legacyStatus()
+                } else {
+                    result
+                }
+            else -> result.asFailure()
+        }
+    }
 
     /** Start the proxy connection using the active profile. */
-    suspend fun start(): DaemonClientResult<Unit> =
-        callVoid("start")
+    suspend fun start(): DaemonClientResult<Unit> {
+        return when (val result = backendStart()) {
+            is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) callVoid("start") else result.asFailure()
+            else -> result.asFailure()
+        }
+    }
 
     /** Stop the proxy connection (keeps daemon alive). */
-    suspend fun stop(): DaemonClientResult<Unit> =
-        callVoid("stop")
+    suspend fun stop(): DaemonClientResult<Unit> {
+        return when (val result = backendStop()) {
+            is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) callVoid("stop") else result.asFailure()
+            else -> result.asFailure()
+        }
+    }
 
     /** Reload the active configuration without full restart. */
-    suspend fun reload(): DaemonClientResult<Unit> =
-        callVoid("reload")
+    suspend fun reload(): DaemonClientResult<Unit> {
+        return when (val result = backendRestart()) {
+            is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) callVoid("reload") else result.asFailure()
+            else -> result.asFailure()
+        }
+    }
 
     /** Force-remove PrivStack network rules and stop the proxy core. */
-    suspend fun networkReset(): DaemonClientResult<Unit> =
-        callVoid("network-reset", timeoutMs = 60_000L)
+    suspend fun networkReset(): DaemonClientResult<ResetReport> {
+        return when (val result = backendReset()) {
+            is DaemonClientResult.Ok -> result
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) {
+                    call("network-reset", timeoutMs = 60_000L) {
+                        val obj = it.jsonObject
+                        ResetReport(
+                            status = obj["status"]?.jsonPrimitive?.content ?: "ok",
+                            errors = obj["errors"]?.jsonArray?.map { item -> item.jsonPrimitive.content }.orEmpty(),
+                        )
+                    }
+                } else {
+                    result.asFailure()
+                }
+            else -> result.asFailure()
+        }
+    }
 
     /** Run a full health check and return the result in the dashboard shape. */
-    suspend fun health(): DaemonClientResult<DaemonStatus> =
-        call("health") { json.decodeFromJsonElement(DaemonStatus.serializer(), it) }
+    suspend fun health(): DaemonClientResult<DaemonStatus> {
+        return when (val statusResult = backendStatus()) {
+            is DaemonClientResult.Ok -> when (val healthResult = diagnosticsHealth()) {
+                is DaemonClientResult.Ok -> {
+                    val v2Status = statusResult.data.toDaemonStatus(healthOverride = healthResult.data)
+                    when (val legacy = legacyStatus()) {
+                        is DaemonClientResult.Ok -> DaemonClientResult.Ok(legacy.data.withV2Status(v2Status))
+                        else -> DaemonClientResult.Ok(v2Status)
+                    }
+                }
+                is DaemonClientResult.DaemonError ->
+                    if (isMethodNotFound(healthResult)) legacyHealth() else healthResult.asFailure()
+                else -> healthResult.asFailure()
+            }
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(statusResult)) legacyHealth() else statusResult.asFailure()
+            else -> statusResult.asFailure()
+        }
+    }
 
     /** Run a privacy/security audit. */
     suspend fun audit(): DaemonClientResult<AuditReport> =
@@ -103,6 +177,7 @@ class DaemonClient @Inject constructor(
         val appsResult = fetchSection("apps")
         val dnsResult = fetchSection("dns")
         val healthResult = fetchSection("health")
+        val runtimeResult = fetchSection("runtime_v2")
 
         val node = nodeResult.dataOrReturnFailure() ?: return nodeResult.asFailure()
         val transport = transportResult.dataOrReturnFailure() ?: return transportResult.asFailure()
@@ -118,6 +193,16 @@ class DaemonClient @Inject constructor(
                     return healthResult
                 }
             else -> return healthResult.asFailure()
+        }
+        val runtime = when (runtimeResult) {
+            is DaemonClientResult.Ok -> runtimeResult.data
+            is DaemonClientResult.DaemonError ->
+                if (runtimeResult.message.contains("unknown config key: runtime_v2", ignoreCase = true)) {
+                    json.encodeToJsonElement(DaemonRuntimeV2Section.serializer(), DaemonRuntimeV2Section())
+                } else {
+                    return runtimeResult
+                }
+            else -> return runtimeResult.asFailure()
         }
 
         val panelResult = fetchSection("panel")
@@ -138,6 +223,7 @@ class DaemonClient @Inject constructor(
         val appsSection = json.decodeFromJsonElement(DaemonAppsSection.serializer(), apps)
         val dnsSection = json.decodeFromJsonElement(DaemonDnsSection.serializer(), dns)
         val healthSection = json.decodeFromJsonElement(DaemonHealthSection.serializer(), health)
+        val runtimeSection = json.decodeFromJsonElement(DaemonRuntimeV2Section.serializer(), runtime)
 
         val storedNodes = panel.nodes
         val effectiveNodes = if (storedNodes.isNotEmpty()) {
@@ -167,6 +253,7 @@ class DaemonClient @Inject constructor(
                 name = panel.name.ifBlank { "Default" },
                 activeNodeId = activeNodeId,
                 nodes = effectiveNodes,
+                runtime = runtimeSection.toPanelRuntime(),
                 routing = routingSection.toPanelRouting(appsSection),
                 dns = dnsSection.toPanelDns(),
                 health = healthSection.toPanelHealth(),
@@ -187,6 +274,7 @@ class DaemonClient @Inject constructor(
         val daemonApps = config.routing.toDaemonAppsSection()
         val daemonDns = config.dns.toDaemonDnsSection(extra?.obj("dns_raw"))
         val daemonHealth = config.health.toDaemonHealthSection(extra?.obj("health_raw"))
+        val daemonRuntime = config.runtime.toDaemonRuntimeSection()
         val daemonPanel = DaemonPanelSection(
             id = config.id,
             name = config.name,
@@ -205,6 +293,7 @@ class DaemonClient @Inject constructor(
             put("apps", json.encodeToJsonElement(DaemonAppsSection.serializer(), daemonApps))
             put("dns", json.encodeToJsonElement(DaemonDnsSection.serializer(), daemonDns))
             put("health", json.encodeToJsonElement(DaemonHealthSection.serializer(), daemonHealth))
+            put("runtime_v2", json.encodeToJsonElement(DaemonRuntimeV2Section.serializer(), daemonRuntime))
         }
         val params = buildJsonObject {
             put("values", values)
@@ -258,6 +347,44 @@ class DaemonClient @Inject constructor(
         url: String = "",
         timeoutMs: Int = 5_000,
     ): DaemonClientResult<NodeTestInfo> {
+        when (val result = diagnosticsTestNodes(nodeIds, url, timeoutMs)) {
+            is DaemonClientResult.Ok -> {
+                return DaemonClientResult.Ok(
+                    NodeTestInfo(
+                        url = url,
+                        results = result.data.map { probe ->
+                            NodeTestResult(
+                                id = probe.id,
+                                name = probe.name,
+                                tag = probe.id,
+                                server = probe.server,
+                                port = probe.port,
+                                protocol = probe.protocol,
+                                tcpMs = probe.tcpDirect?.toInt(),
+                                urlMs = probe.tunnelDelay?.toInt(),
+                                status = null,
+                                tcpError = if (probe.errorClass == "tcp_direct_failed") probe.errorClass else null,
+                                urlError = when (probe.errorClass) {
+                                    "tunnel_delay_failed", "tunnel_unavailable", "dns_bootstrap_failed" -> probe.errorClass
+                                    else -> null
+                                },
+                            )
+                        },
+                    )
+                )
+            }
+            is DaemonClientResult.DaemonError -> {
+                if (!isMethodNotFound(result)) {
+                    return result.asFailure()
+                }
+            }
+            is DaemonClientResult.RootDenied -> return result.asFailure()
+            is DaemonClientResult.Timeout -> return result.asFailure()
+            is DaemonClientResult.DaemonNotFound -> return result.asFailure()
+            is DaemonClientResult.ParseError -> return result.asFailure()
+            is DaemonClientResult.Failure -> return result.asFailure()
+        }
+
         val params = buildJsonObject {
             putJsonArray("node_ids") {
                 nodeIds.forEach { add(it) }
@@ -288,6 +415,65 @@ class DaemonClient @Inject constructor(
                     )
                 }.orEmpty(),
             )
+        }
+    }
+
+    suspend fun backendStatus(): DaemonClientResult<BackendStatusV2> =
+        call("backend.status") { json.decodeFromJsonElement(BackendStatusV2.serializer(), it) }
+
+    suspend fun backendStart(): DaemonClientResult<BackendStatusV2> =
+        call("backend.start", timeoutMs = 30_000L) {
+            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
+        }
+
+    suspend fun backendStop(): DaemonClientResult<BackendStatusV2> =
+        call("backend.stop", timeoutMs = 30_000L) {
+            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
+        }
+
+    suspend fun backendRestart(): DaemonClientResult<BackendStatusV2> =
+        call("backend.restart", timeoutMs = 60_000L) {
+            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
+        }
+
+    suspend fun backendReset(): DaemonClientResult<ResetReport> =
+        call("backend.reset", timeoutMs = 60_000L) {
+            json.decodeFromJsonElement(ResetReport.serializer(), it)
+        }
+
+    suspend fun backendApplyDesiredState(desiredState: DesiredStateV2): DaemonClientResult<BackendStatusV2> =
+        call(
+            method = "backend.applyDesiredState",
+            params = json.encodeToJsonElement(DesiredStateV2.serializer(), desiredState).jsonObject,
+            timeoutMs = 15_000L,
+        ) {
+            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
+        }
+
+    suspend fun diagnosticsHealth(): DaemonClientResult<BackendHealthSnapshot> =
+        call("diagnostics.health", timeoutMs = 30_000L) {
+            json.decodeFromJsonElement(BackendHealthSnapshot.serializer(), it)
+        }
+
+    suspend fun diagnosticsTestNodes(
+        nodeIds: List<String> = emptyList(),
+        url: String = "",
+        timeoutMs: Int = 5_000,
+    ): DaemonClientResult<List<NodeProbeResultV2>> {
+        val params = buildJsonObject {
+            putJsonArray("node_ids") {
+                nodeIds.forEach { add(it) }
+            }
+            if (url.isNotBlank()) {
+                put("url", url)
+            }
+            put("timeout_ms", timeoutMs)
+        }
+        return call("diagnostics.testNodes", params, timeoutMs = timeoutMs.toLong() + 5_000L) {
+            val obj = it.jsonObject
+            obj["results"]?.jsonArray?.map { item ->
+                json.decodeFromJsonElement(NodeProbeResultV2.serializer(), item)
+            }.orEmpty()
         }
     }
 
@@ -350,8 +536,19 @@ class DaemonClient @Inject constructor(
             )
         }
 
-    suspend fun updateInstall(): DaemonClientResult<UpdateInstallInfo> =
-        call("update-install", timeoutMs = 120_000L) { element ->
+    suspend fun updateInstall(
+        modulePath: String = "",
+        apkPath: String = "",
+    ): DaemonClientResult<UpdateInstallInfo> {
+        val params = buildJsonObject {
+            if (modulePath.isNotBlank()) {
+                put("module_path", modulePath)
+            }
+            if (apkPath.isNotBlank()) {
+                put("apk_path", apkPath)
+            }
+        }
+        return call("update-install", params, timeoutMs = 120_000L) { element ->
             val obj = element as JsonObject
             UpdateInstallInfo(
                 moduleInstalled = obj["module_installed"]?.jsonPrimitive?.booleanOrNull ?: false,
@@ -359,6 +556,7 @@ class DaemonClient @Inject constructor(
                 apkError = obj["apk_error"]?.jsonPrimitive?.content,
             )
         }
+    }
 
     // ---- Meta ----
 
@@ -373,6 +571,12 @@ class DaemonClient @Inject constructor(
         }
 
     // ---- Internal helpers ----
+
+    private suspend fun legacyStatus(): DaemonClientResult<DaemonStatus> =
+        call("status") { json.decodeFromJsonElement(DaemonStatus.serializer(), it) }
+
+    private suspend fun legacyHealth(): DaemonClientResult<DaemonStatus> =
+        call("health") { json.decodeFromJsonElement(DaemonStatus.serializer(), it) }
 
     private suspend fun fetchSection(key: String): DaemonClientResult<JsonElement> {
         val params = buildJsonObject { put("key", key) }
@@ -407,6 +611,11 @@ class DaemonClient @Inject constructor(
         params: JsonObject = emptyJsonObject(),
         timeoutMs: Long = 5_000L
     ): DaemonClientResult<Unit> = call(method, params, timeoutMs) { }
+
+    private fun isMethodNotFound(result: DaemonClientResult.DaemonError): Boolean =
+        result.code == METHOD_NOT_FOUND_CODE ||
+            result.message.contains("unknown command", ignoreCase = true) ||
+            result.message.contains("method not found", ignoreCase = true)
 
     private fun buildNodeFromSections(
         node: DaemonNodeSection,
@@ -618,6 +827,56 @@ data class NodeTestResult(
     val tcpError: String?,
     val urlError: String?,
 )
+
+private fun BackendStatusV2.toDaemonStatus(
+    healthOverride: BackendHealthSnapshot? = null,
+): DaemonStatus {
+    val effectiveHealth = healthOverride ?: health
+    val connectionState = when (appliedState.phase) {
+        com.privstack.panel.model.BackendPhase.HEALTHY ->
+            if (effectiveHealth.healthy) com.privstack.panel.model.ConnectionState.CONNECTED
+            else com.privstack.panel.model.ConnectionState.ERROR
+        com.privstack.panel.model.BackendPhase.APPLYING -> com.privstack.panel.model.ConnectionState.CONNECTING
+        com.privstack.panel.model.BackendPhase.DEGRADED -> com.privstack.panel.model.ConnectionState.ERROR
+        com.privstack.panel.model.BackendPhase.STOPPED -> com.privstack.panel.model.ConnectionState.DISCONNECTED
+    }
+
+    return DaemonStatus(
+        state = connectionState,
+        activeNodeId = desiredState.activeProfileId,
+        uptime = 0L,
+        health = com.privstack.panel.model.HealthResult(
+            healthy = effectiveHealth.healthy,
+            coreRunning = effectiveHealth.coreReady,
+            tunActive = false,
+            dnsOperational = effectiveHealth.dnsReady,
+            routingReady = effectiveHealth.routingReady,
+            egressReady = effectiveHealth.egressReady,
+            backendKind = appliedState.backendKind,
+            phase = appliedState.phase,
+            lastError = effectiveHealth.lastError.ifBlank { null },
+            checkedAt = effectiveHealth.checkedAt?.let(::epochSeconds) ?: 0L,
+        ),
+    )
+}
+
+private fun parseBackendKind(raw: String): com.privstack.panel.model.BackendKind =
+    runCatching { com.privstack.panel.model.BackendKind.valueOf(raw) }
+        .getOrDefault(com.privstack.panel.model.BackendKind.ROOT_TPROXY)
+
+private fun parseFallbackPolicy(raw: String): com.privstack.panel.model.FallbackPolicy =
+    runCatching { com.privstack.panel.model.FallbackPolicy.valueOf(raw) }
+        .getOrDefault(com.privstack.panel.model.FallbackPolicy.OFFER_RESET)
+
+private fun epochSeconds(raw: String): Long =
+    runCatching { java.time.Instant.parse(raw).epochSecond }.getOrDefault(0L)
+
+private fun DaemonStatus.withV2Status(v2: DaemonStatus): DaemonStatus =
+    copy(
+        state = v2.state,
+        activeNodeId = v2.activeNodeId ?: activeNodeId,
+        health = v2.health,
+    )
 
 @Serializable
 private data class DaemonPanelSection(
@@ -889,6 +1148,20 @@ private data class DaemonHealthSection(
         )
 }
 
+@Serializable
+private data class DaemonRuntimeV2Section(
+    @SerialName("backend_kind")
+    val backendKind: String = "ROOT_TPROXY",
+    @SerialName("fallback_policy")
+    val fallbackPolicy: String = "OFFER_RESET",
+) {
+    fun toPanelRuntime(): com.privstack.panel.model.RuntimeConfig =
+        com.privstack.panel.model.RuntimeConfig(
+            backendKind = parseBackendKind(backendKind),
+            fallbackPolicy = parseFallbackPolicy(fallbackPolicy),
+        )
+}
+
 private fun DaemonClientResult<JsonElement>.dataOrReturnFailure(): JsonElement? =
     (this as? DaemonClientResult.Ok)?.data
 
@@ -966,6 +1239,12 @@ private fun HealthConfig.toDaemonHealthSection(base: JsonObject?): DaemonHealthS
     }
     return bridgeJson.decodeFromJsonElement(DaemonHealthSection.serializer(), merged)
 }
+
+private fun com.privstack.panel.model.RuntimeConfig.toDaemonRuntimeSection(): DaemonRuntimeV2Section =
+    DaemonRuntimeV2Section(
+        backendKind = backendKind.name,
+        fallbackPolicy = fallbackPolicy.name,
+    )
 
 private fun Node.toDaemonNodeSection(): DaemonNodeSection {
     val settings = outbound["settings"]?.jsonObject

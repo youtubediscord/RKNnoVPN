@@ -45,8 +45,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.privstack.panel.R
 import com.privstack.panel.advisor.AppCategory
 import com.privstack.panel.advisor.PlacementRecommendation
 import com.privstack.panel.advisor.PlacementUrgency
@@ -64,12 +66,6 @@ private fun urgencyColor(urgency: PlacementUrgency): Color = when (urgency) {
     PlacementUrgency.CORRECT -> GreenCorrect
     PlacementUrgency.CONSIDER -> YellowConsider
     PlacementUrgency.MISPLACED -> RedMisplaced
-}
-
-private fun urgencyLabel(urgency: PlacementUrgency): String = when (urgency) {
-    PlacementUrgency.CORRECT -> "OK"
-    PlacementUrgency.CONSIDER -> "Consider"
-    PlacementUrgency.MISPLACED -> "Misplaced"
 }
 
 // ───────────────────────────────────────────────────────────────────── //
@@ -161,7 +157,7 @@ private fun AdvisorSummaryCard(
                 CircularProgressIndicator(modifier = Modifier.size(40.dp))
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "Analyzing installed apps...",
+                    text = stringResource(R.string.advisor_loading),
                     style = MaterialTheme.typography.bodyLarge,
                 )
             } else if (state.hasLoaded) {
@@ -174,15 +170,15 @@ private fun AdvisorSummaryCard(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = if (state.attentionCount == 0)
-                        "All apps are properly placed"
+                        stringResource(R.string.advisor_all_good)
                     else
-                        "${state.attentionCount} app${if (state.attentionCount > 1) "s" else ""} may need attention",
+                        stringResource(R.string.advisor_attention_count, state.attentionCount),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${state.recommendations.size} apps analyzed",
+                    text = stringResource(R.string.advisor_analyzed_count, state.recommendations.size),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -195,13 +191,13 @@ private fun AdvisorSummaryCard(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "App Placement Advisor",
+                    text = stringResource(R.string.advisor_title),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Analyze installed apps and get profile placement recommendations.",
+                    text = stringResource(R.string.advisor_description),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -227,7 +223,13 @@ private fun AdvisorSummaryCard(
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(if (state.hasLoaded) "Re-analyze" else "Analyze Apps")
+                Text(
+                    if (state.hasLoaded) {
+                        stringResource(R.string.advisor_reanalyze_button)
+                    } else {
+                        stringResource(R.string.advisor_analyze_button)
+                    }
+                )
             }
         }
     }
@@ -246,7 +248,7 @@ private fun CategoryHeader(category: AppCategory, count: Int) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = category.displayName,
+            text = advisorCategoryLabel(category),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
         )
@@ -292,7 +294,7 @@ private fun RecommendationCard(recommendation: PlacementRecommendation) {
                         ProfilePlacement.WORK -> Icons.Filled.Work
                         ProfilePlacement.PERSONAL -> Icons.Filled.PhoneAndroid
                     },
-                    contentDescription = recommendation.recommended.displayName,
+                    contentDescription = profilePlacementLabel(recommendation.recommended),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(24.dp),
                 )
@@ -318,7 +320,11 @@ private fun RecommendationCard(recommendation: PlacementRecommendation) {
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    contentDescription = if (expanded) {
+                        stringResource(R.string.audit_collapse)
+                    } else {
+                        stringResource(R.string.audit_expand)
+                    },
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
                 )
@@ -341,16 +347,23 @@ private fun RecommendationCard(recommendation: PlacementRecommendation) {
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Recommended: ${recommendation.recommended.displayName}",
+                            text = stringResource(
+                                R.string.advisor_recommended,
+                                profilePlacementLabel(recommendation.recommended),
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                         )
                     }
 
                     if (recommendation.current != null) {
+                        val currentPlacement = recommendation.current
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Currently in: ${recommendation.current.displayName}",
+                            text = stringResource(
+                                R.string.advisor_currently_in,
+                                profilePlacementLabel(currentPlacement),
+                            ),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -395,7 +408,7 @@ private fun UrgencyBadge(urgency: PlacementUrgency) {
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
-                text = urgencyLabel(urgency),
+                text = advisorUrgencyLabel(urgency),
                 color = color,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
@@ -432,13 +445,13 @@ private fun SetupGuideCard() {
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Work Profile Setup Guide",
+                        text = stringResource(R.string.advisor_setup_guide_title),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onTertiaryContainer,
                     )
                     Text(
-                        text = "Isolate sensitive apps from proxy detection",
+                        text = stringResource(R.string.advisor_setup_guide_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f),
                     )
@@ -451,7 +464,13 @@ private fun SetupGuideCard() {
                 onClick = { expanded = !expanded },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(if (expanded) "Hide Guide" else "Setup Guide")
+                Text(
+                    if (expanded) {
+                        stringResource(R.string.advisor_setup_guide_hide)
+                    } else {
+                        stringResource(R.string.advisor_setup_guide_show)
+                    }
+                )
             }
 
             AnimatedVisibility(
@@ -461,14 +480,12 @@ private fun SetupGuideCard() {
             ) {
                 Column(modifier = Modifier.padding(top = 16.dp)) {
                     val steps = listOf(
-                        "1. Install Shelter or Island from F-Droid / Play Store.",
-                        "2. Create a Work Profile when the app prompts you.",
-                        "3. Clone banking and government apps into the Work Profile.",
-                        "4. In the Work Profile, do NOT install the proxy/VPN app.",
-                        "5. Work Profile apps will use the system's direct connection, " +
-                            "completely isolated from the TUN interface in the Personal profile.",
-                        "6. Verify by opening a banking app in the Work Profile -- " +
-                            "it should no longer detect a VPN.",
+                        stringResource(R.string.advisor_setup_step_1),
+                        stringResource(R.string.advisor_setup_step_2),
+                        stringResource(R.string.advisor_setup_step_3),
+                        stringResource(R.string.advisor_setup_step_4),
+                        stringResource(R.string.advisor_setup_step_5),
+                        stringResource(R.string.advisor_setup_step_6),
                     )
 
                     steps.forEach { step ->
@@ -486,9 +503,7 @@ private fun SetupGuideCard() {
                         shape = MaterialTheme.shapes.small,
                     ) {
                         Text(
-                            text = "Tip: Shelter is open-source and lightweight. " +
-                                "It creates a standard Android Work Profile without " +
-                                "requiring device owner or root.",
+                            text = stringResource(R.string.advisor_setup_tip),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onTertiaryContainer,
                             modifier = Modifier.padding(10.dp),
@@ -498,4 +513,30 @@ private fun SetupGuideCard() {
             }
         }
     }
+}
+
+@Composable
+private fun advisorUrgencyLabel(urgency: PlacementUrgency): String = when (urgency) {
+    PlacementUrgency.CORRECT -> stringResource(R.string.advisor_urgency_ok)
+    PlacementUrgency.CONSIDER -> stringResource(R.string.advisor_urgency_consider)
+    PlacementUrgency.MISPLACED -> stringResource(R.string.advisor_urgency_misplaced)
+}
+
+@Composable
+private fun advisorCategoryLabel(category: AppCategory): String = when (category) {
+    AppCategory.BROWSER -> stringResource(R.string.advisor_category_browser)
+    AppCategory.SOCIAL_MESSAGING -> stringResource(R.string.advisor_category_social)
+    AppCategory.STREAMING -> stringResource(R.string.advisor_category_streaming)
+    AppCategory.BANKING -> stringResource(R.string.advisor_category_banking)
+    AppCategory.TELECOM -> stringResource(R.string.advisor_category_telecom)
+    AppCategory.GOVERNMENT -> stringResource(R.string.advisor_category_government)
+    AppCategory.VPN_PROXY -> stringResource(R.string.advisor_category_vpn_proxy)
+    AppCategory.SYSTEM -> stringResource(R.string.advisor_category_system)
+    AppCategory.OTHER -> stringResource(R.string.advisor_category_other)
+}
+
+@Composable
+private fun profilePlacementLabel(placement: ProfilePlacement): String = when (placement) {
+    ProfilePlacement.PERSONAL -> stringResource(R.string.advisor_profile_personal)
+    ProfilePlacement.WORK -> stringResource(R.string.advisor_profile_work)
 }

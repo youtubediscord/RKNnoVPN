@@ -41,8 +41,8 @@ private const val GITHUB_RELEASES_URL =
  *
  * Shows current version, a "Check for updates" button, and -- when an
  * update is available -- the changelog, download progress, and install
- * button.  All network activity goes through the root daemon via IPC
- * because the APK has NO INTERNET permission.
+ * button. Update checks/downloads are performed by the APK control-plane,
+ * while installation still goes through the rooted backend.
  */
 @Composable
 fun UpdateSection(

@@ -73,6 +73,10 @@ data class HealthResult(
     val coreRunning: Boolean = false,
     val tunActive: Boolean = false,
     val dnsOperational: Boolean = false,
+    val routingReady: Boolean = false,
+    val egressReady: Boolean = false,
+    val backendKind: BackendKind = BackendKind.ROOT_TPROXY,
+    val phase: BackendPhase = BackendPhase.STOPPED,
     val lastError: String? = null,
     val checkedAt: Long = 0L
 )

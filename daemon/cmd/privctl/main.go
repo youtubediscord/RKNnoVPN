@@ -11,30 +11,38 @@ import (
 
 const defaultSocket = "/data/adb/privstack/run/daemon.sock"
 
-var Version = "0.2.0"
+var Version = "1.6.0"
 
 var commands = map[string]string{
-	"status":             "Get proxy status",
-	"start":              "Start proxy",
-	"stop":               "Stop proxy",
-	"reload":             "Reload config and restart proxy",
-	"network-reset":      "Force-remove PrivStack iptables/DNS/routing rules",
-	"health":             "Get health check status",
-	"audit":              "Run privacy/security audit",
-	"app.list":           "List installed apps known to the daemon",
-	"app.resolveUid":     "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
-	"config-get":         "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
-	"config-set":         "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
-	"config-set-many":    "Set multiple config values atomically: privctl config-set-many '{\"values\":{...},\"reload\":true}'",
-	"config-list":        "List config sections",
-	"config-import":      "Import full config: privctl config-import '{...}'",
-	"subscription-fetch": "Fetch subscription URL via daemon network access",
-	"node-test":          "Test saved nodes: TCP connect + URL delay via sing-box",
-	"logs":               "Get recent log lines: privctl logs '{\"lines\":100}'",
-	"version":            "Get daemon version",
-	"update-check":       "Check for updates from GitHub Releases",
-	"update-download":    "Download latest module + APK",
-	"update-install":     "Install previously downloaded update",
+	"backend.status":            "Get v2 backend status",
+	"backend.start":             "Start the selected v2 backend",
+	"backend.stop":              "Stop the selected v2 backend",
+	"backend.restart":           "True restart of the selected v2 backend",
+	"backend.reset":             "Reset backend networking with structured step results",
+	"backend.applyDesiredState": "Apply persisted v2 desired backend state",
+	"diagnostics.health":        "Run v2 health diagnostics",
+	"diagnostics.testNodes":     "Run v2 node probes (TCP direct, tunnel delay, DNS bootstrap)",
+	"status":                    "Get proxy status",
+	"start":                     "Start proxy",
+	"stop":                      "Stop proxy",
+	"reload":                    "Reload config and restart proxy",
+	"network-reset":             "Force-remove PrivStack iptables/DNS/routing rules",
+	"health":                    "Get health check status",
+	"audit":                     "Run privacy/security audit",
+	"app.list":                  "List installed apps known to the daemon",
+	"app.resolveUid":            "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
+	"config-get":                "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
+	"config-set":                "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
+	"config-set-many":           "Set multiple config values atomically: privctl config-set-many '{\"values\":{...},\"reload\":true}'",
+	"config-list":               "List config sections",
+	"config-import":             "Import full config: privctl config-import '{...}'",
+	"subscription-fetch":        "Fetch subscription URL via daemon network access",
+	"node-test":                 "Test saved nodes: TCP connect + URL delay via sing-box",
+	"logs":                      "Get recent log lines: privctl logs '{\"lines\":100}'",
+	"version":                   "Get daemon version",
+	"update-check":              "Check for updates from GitHub Releases",
+	"update-download":           "Download latest module + APK",
+	"update-install":            "Install previously downloaded update",
 }
 
 func main() {
@@ -182,6 +190,8 @@ func printUsage() {
 	}
 
 	order := []string{
+		"backend.status", "backend.start", "backend.stop", "backend.restart", "backend.reset", "backend.applyDesiredState",
+		"diagnostics.health", "diagnostics.testNodes",
 		"status", "start", "stop", "reload", "network-reset", "health", "audit",
 		"app.list", "app.resolveUid",
 		"config-get", "config-set", "config-set-many", "config-list", "config-import", "subscription-fetch", "node-test",

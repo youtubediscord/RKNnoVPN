@@ -61,9 +61,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.privstack.panel.R
 import kotlinx.coroutines.launch
 
 // ───────────────────────────────────────────────────────────────────── //
@@ -106,7 +108,10 @@ private fun riskBgColor(risk: RiskLevel): Color = when (risk) {
 fun AuditScreen(
     viewModel: AuditViewModel = hiltViewModel(),
 ) {
-    val tabs = listOf("Audit", "Advisor")
+    val tabs = listOf(
+        stringResource(R.string.audit_tab_title),
+        stringResource(R.string.advisor_tab_title),
+    )
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
 
@@ -225,7 +230,7 @@ private fun RiskCard(
                 LoadingIndicator()
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "Running audit checks...",
+                    text = stringResource(R.string.audit_running),
                     style = MaterialTheme.typography.bodyLarge,
                 )
             } else if (state.hasRun) {
@@ -235,39 +240,44 @@ private fun RiskCard(
                         RiskLevel.YELLOW -> Icons.Filled.Warning
                         RiskLevel.RED -> Icons.Filled.Error
                     },
-                    contentDescription = state.riskLevel.label,
+                    contentDescription = riskLabel(state.riskLevel),
                     tint = riskColor(state.riskLevel),
                     modifier = Modifier.size(48.dp),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = state.riskLevel.label,
+                    text = riskLabel(state.riskLevel),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     color = riskColor(state.riskLevel),
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${state.passedCount} passed / ${state.failedCount} failed of ${state.findings.size} checks",
+                    text = stringResource(
+                        R.string.audit_summary_counts,
+                        state.passedCount,
+                        state.failedCount,
+                        state.findings.size,
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
                 Icon(
                     imageVector = Icons.Filled.Shield,
-                    contentDescription = "Audit",
+                    contentDescription = stringResource(R.string.audit_content_description),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(48.dp),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Security Audit",
+                    text = stringResource(R.string.audit_title),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Run 14 checks against the daemon to detect leaks and misconfigurations.",
+                    text = stringResource(R.string.audit_description),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -296,7 +306,13 @@ private fun RiskCard(
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(if (state.hasRun) "Re-run Audit" else "Run Audit")
+                Text(
+                    if (state.hasRun) {
+                        stringResource(R.string.audit_rerun_button)
+                    } else {
+                        stringResource(R.string.audit_run_button)
+                    }
+                )
             }
         }
     }
@@ -321,7 +337,7 @@ private fun LoadingIndicator() {
 
     Icon(
         imageVector = Icons.Filled.Shield,
-        contentDescription = "Scanning",
+        contentDescription = stringResource(R.string.audit_scanning),
         tint = MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .size(48.dp)
@@ -363,7 +379,11 @@ private fun FindingCard(finding: AuditFinding) {
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    contentDescription = if (expanded) {
+                        stringResource(R.string.audit_collapse)
+                    } else {
+                        stringResource(R.string.audit_expand)
+                    },
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
                 )
@@ -388,7 +408,7 @@ private fun FindingCard(finding: AuditFinding) {
                             shape = MaterialTheme.shapes.small,
                         ) {
                             Text(
-                                text = "Remediation: ${finding.remediation}",
+                                text = stringResource(R.string.audit_remediation_prefix, finding.remediation),
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -421,11 +441,27 @@ private fun SeverityBadge(severity: Severity) {
         shape = CircleShape,
     ) {
         Text(
-            text = severity.label,
+            text = severityLabel(severity),
             color = color,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
         )
     }
+}
+
+@Composable
+private fun severityLabel(severity: Severity): String = when (severity) {
+    Severity.CRITICAL -> stringResource(R.string.audit_severity_critical)
+    Severity.HIGH -> stringResource(R.string.audit_severity_high)
+    Severity.MEDIUM -> stringResource(R.string.audit_severity_medium)
+    Severity.LOW -> stringResource(R.string.audit_severity_low)
+    Severity.PASS -> stringResource(R.string.audit_severity_pass)
+}
+
+@Composable
+private fun riskLabel(risk: RiskLevel): String = when (risk) {
+    RiskLevel.GREEN -> stringResource(R.string.audit_risk_low)
+    RiskLevel.YELLOW -> stringResource(R.string.audit_risk_moderate)
+    RiskLevel.RED -> stringResource(R.string.audit_risk_high)
 }

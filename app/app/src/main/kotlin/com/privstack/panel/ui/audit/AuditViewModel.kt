@@ -3,8 +3,10 @@ package com.privstack.panel.ui.audit
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.privstack.panel.R
 import com.privstack.panel.advisor.AppCategory
 import com.privstack.panel.advisor.PlacementAdvisor
 import com.privstack.panel.advisor.PlacementRecommendation
@@ -30,29 +32,59 @@ import javax.inject.Inject
 //  Audit finding model
 // ───────────────────────────────────────────────────────────────────── //
 
-enum class Severity(val label: String, val weight: Int) {
-    CRITICAL("Critical", 4),
-    HIGH("High", 3),
-    MEDIUM("Medium", 2),
-    LOW("Low", 1),
-    PASS("Pass", 0),
+enum class Severity(val weight: Int) {
+    CRITICAL(4),
+    HIGH(3),
+    MEDIUM(2),
+    LOW(1),
+    PASS(0),
 }
 
-enum class AuditCheckId(val displayName: String, val category: String, val severity: Severity) {
-    VPN_API_SURFACE("VPN API Surface", "API", Severity.CRITICAL),
-    TUN_INTERFACE("TUN Interface Visibility", "Network", Severity.HIGH),
-    NOT_VPN_CAPABILITY("NOT_VPN Capability", "API", Severity.CRITICAL),
-    API_PORT_PROTECTED("API Port Protection", "API", Severity.MEDIUM),
-    DNS_LEAK("DNS Leak Test", "DNS", Severity.MEDIUM),
-    PACKAGE_VISIBILITY("Package Visibility", "Privacy", Severity.HIGH),
-    IPTABLES_LOOP_SAFE("iptables Loop Guard", "Firewall", Severity.HIGH),
-    PROC_NET_LEAK("/proc/net Leak", "Privacy", Severity.HIGH),
-    IPV6_RULES_MIRROR("IPv6 Rules Mirror", "Firewall", Severity.HIGH),
-    ICMP_HANDLING("ICMP Handling", "Network", Severity.MEDIUM),
-    SELINUX_STATUS("SELinux Status", "System", Severity.HIGH),
-    MODULE_INTEGRITY("Module Integrity", "System", Severity.MEDIUM),
-    PRIVATE_DNS_UNCHANGED("Private DNS Unchanged", "DNS", Severity.MEDIUM),
-    NETWORK_CHANGE_HANDLER("Network Change Handler", "Network", Severity.MEDIUM),
+enum class AuditCategoryKey {
+    API,
+    NETWORK,
+    DNS,
+    PRIVACY,
+    FIREWALL,
+    SYSTEM,
+    ROUTING,
+    ENCRYPTION,
+    CONFIG,
+}
+
+enum class AuditCheckId(
+    val codes: Set<String>,
+    val category: AuditCategoryKey,
+    val defaultSeverity: Severity,
+) {
+    VPN_API_SURFACE(setOf("VPN_API_SURFACE"), AuditCategoryKey.API, Severity.CRITICAL),
+    TUN_INTERFACE(setOf("TUN_INTERFACE"), AuditCategoryKey.NETWORK, Severity.HIGH),
+    NOT_VPN_CAPABILITY(setOf("NOT_VPN_CAPABILITY"), AuditCategoryKey.API, Severity.CRITICAL),
+    API_PORT_PROTECTED(setOf("API_PORT_PROTECTED"), AuditCategoryKey.API, Severity.MEDIUM),
+    DNS_LEAK(setOf("DNS_LEAK"), AuditCategoryKey.DNS, Severity.MEDIUM),
+    PACKAGE_VISIBILITY(setOf("PACKAGE_VISIBILITY"), AuditCategoryKey.PRIVACY, Severity.HIGH),
+    IPTABLES_LOOP_SAFE(setOf("IPTABLES_LOOP_SAFE"), AuditCategoryKey.FIREWALL, Severity.HIGH),
+    PROC_NET_LEAK(setOf("PROC_NET_LEAK"), AuditCategoryKey.PRIVACY, Severity.HIGH),
+    IPV6_RULES_MIRROR(setOf("IPV6_RULES_MIRROR"), AuditCategoryKey.FIREWALL, Severity.HIGH),
+    ICMP_HANDLING(setOf("ICMP_HANDLING"), AuditCategoryKey.NETWORK, Severity.MEDIUM),
+    SELINUX_STATUS(setOf("SELINUX_STATUS"), AuditCategoryKey.SYSTEM, Severity.HIGH),
+    MODULE_INTEGRITY(setOf("MODULE_INTEGRITY"), AuditCategoryKey.SYSTEM, Severity.MEDIUM),
+    PRIVATE_DNS_UNCHANGED(setOf("PRIVATE_DNS_UNCHANGED"), AuditCategoryKey.DNS, Severity.MEDIUM),
+    NETWORK_CHANGE_HANDLER(setOf("NETWORK_CHANGE_HANDLER"), AuditCategoryKey.NETWORK, Severity.MEDIUM),
+    NODE_NOT_CONFIGURED(setOf("NODE_NOT_CONFIGURED"), AuditCategoryKey.CONFIG, Severity.CRITICAL),
+    PROXY_DNS_EMPTY(setOf("PROXY_DNS_EMPTY"), AuditCategoryKey.DNS, Severity.HIGH),
+    DIRECT_DNS_EMPTY(setOf("DIRECT_DNS_EMPTY"), AuditCategoryKey.DNS, Severity.MEDIUM),
+    TRANSPORT_NOT_ENCRYPTED(setOf("TRANSPORT_NOT_ENCRYPTED"), AuditCategoryKey.ENCRYPTION, Severity.MEDIUM),
+    PER_APP_ROUTING_DISABLED(setOf("PER_APP_ROUTING_DISABLED"), AuditCategoryKey.ROUTING, Severity.LOW),
+    DIRECT_MODE_NOT_HARD_BYPASS(setOf("DIRECT_MODE_NOT_HARD_BYPASS"), AuditCategoryKey.ROUTING, Severity.HIGH),
+    SENSITIVE_FILE_PERMISSIONS(setOf("SENSITIVE_FILE_PERMISSIONS"), AuditCategoryKey.CONFIG, Severity.MEDIUM),
+    LOCAL_PORT_PROTECTION_MISSING(setOf("LOCAL_PORT_PROTECTION_MISSING"), AuditCategoryKey.PRIVACY, Severity.HIGH),
+    HEALTH_DNS(setOf("HEALTH_DNS"), AuditCategoryKey.DNS, Severity.HIGH),
+    HEALTH_IPTABLES(setOf("HEALTH_IPTABLES"), AuditCategoryKey.ROUTING, Severity.HIGH),
+    HEALTH_ROUTING(setOf("HEALTH_ROUTING"), AuditCategoryKey.ROUTING, Severity.HIGH),
+    HEALTH_TPROXY_PORT(setOf("HEALTH_TPROXY_PORT"), AuditCategoryKey.SYSTEM, Severity.CRITICAL),
+    HEALTH_SINGBOX_ALIVE(setOf("HEALTH_SINGBOX_ALIVE"), AuditCategoryKey.SYSTEM, Severity.CRITICAL),
+    HEALTH_GENERIC(setOf("HEALTH_GENERIC"), AuditCategoryKey.SYSTEM, Severity.HIGH),
 }
 
 data class AuditFinding(
@@ -61,25 +93,18 @@ data class AuditFinding(
     val title: String,
     val detail: String,
     val remediation: String,
-) {
-    val severity: Severity
-        get() = if (passed) Severity.PASS else checkId.severity
-
-    val category: String
-        get() = checkId.category
-}
+    val category: String,
+    val severity: Severity,
+)
 
 // ───────────────────────────────────────────────────────────────────── //
 //  Overall risk level
 // ───────────────────────────────────────────────────────────────────── //
 
-enum class RiskLevel(val label: String) {
-    /** All checks passed. */
-    GREEN("Low Risk"),
-    /** Medium-severity findings exist. */
-    YELLOW("Moderate Risk"),
-    /** High or Critical findings exist. */
-    RED("High Risk"),
+enum class RiskLevel {
+    GREEN,
+    YELLOW,
+    RED,
 }
 
 // ───────────────────────────────────────────────────────────────────── //
@@ -123,6 +148,9 @@ class AuditViewModel @Inject constructor(
     private val _advisor = MutableStateFlow(AdvisorUiState())
     val advisorState: StateFlow<AdvisorUiState> = _advisor.asStateFlow()
 
+    private fun string(@StringRes resId: Int, vararg args: Any): String =
+        context.getString(resId, *args)
+
     // ---------------------------------------------------------------- //
     //  Audit
     // ---------------------------------------------------------------- //
@@ -148,23 +176,27 @@ class AuditViewModel @Inject constructor(
                             delay(1_200L)
                             buildAuditState(executeChecks())
                         } else {
-                            throw IllegalStateException("Daemon audit failed: ${result.message}")
+                            throw IllegalStateException(
+                                string(R.string.audit_error_daemon_failed, result.message)
+                            )
                         }
                     }
                     is DaemonClientResult.RootDenied -> {
-                        throw IllegalStateException("Root access denied")
+                        throw IllegalStateException(string(R.string.audit_error_root_denied))
                     }
                     is DaemonClientResult.Timeout -> {
-                        throw IllegalStateException("Audit timed out")
+                        throw IllegalStateException(string(R.string.audit_error_timed_out))
                     }
                     is DaemonClientResult.DaemonNotFound -> {
-                        throw IllegalStateException("Daemon not installed")
+                        throw IllegalStateException(string(R.string.audit_error_daemon_not_installed))
                     }
                     is DaemonClientResult.ParseError -> {
-                        throw IllegalStateException("Invalid audit response from daemon")
+                        throw IllegalStateException(string(R.string.audit_error_invalid_response))
                     }
                     is DaemonClientResult.Failure -> {
-                        throw IllegalStateException(result.throwable.message ?: "Audit failed")
+                        throw IllegalStateException(
+                            result.throwable.message ?: string(R.string.audit_error_failed)
+                        )
                     }
                 }
 
@@ -181,7 +213,7 @@ class AuditViewModel @Inject constructor(
                         findingsByCategory = emptyMap(),
                         passedCount = 0,
                         failedCount = 0,
-                        errorMessage = e.message ?: "Audit failed",
+                        errorMessage = e.message ?: string(R.string.audit_error_failed),
                     )
                 }
             }
@@ -205,7 +237,7 @@ class AuditViewModel @Inject constructor(
                     queryInstalledApps()
                 }
 
-                val recommendations = advisor.advise(installedApps)
+                val recommendations = advisor.advise(installedApps).map(::localizeRecommendation)
                 val grouped = advisor.groupByCategory(recommendations)
                 val attention = advisor.countNeedingAttention(recommendations)
 
@@ -224,7 +256,7 @@ class AuditViewModel @Inject constructor(
                     it.copy(
                         isLoading = false,
                         hasLoaded = false,
-                        errorMessage = e.message ?: "Failed to load installed apps",
+                        errorMessage = e.message ?: string(R.string.advisor_error_load_failed),
                     )
                 }
             }
@@ -284,30 +316,42 @@ class AuditViewModel @Inject constructor(
     private fun mapDaemonFinding(finding: DaemonAuditFinding): AuditFinding {
         val severity = finding.severity.toUiSeverity()
         val passed = severity == Severity.PASS
+        val checkId = mapDaemonFindingToCheckId(finding)
         return AuditFinding(
-            checkId = mapDaemonFindingToCheckId(finding),
+            checkId = checkId,
             passed = passed,
             title = finding.title,
             detail = finding.description,
-            remediation = finding.recommendation ?: "No remediation provided.",
+            remediation = finding.recommendation ?: string(R.string.audit_no_remediation),
+            category = localizedAuditCategory(checkId.category),
+            severity = severity,
         )
     }
 
     private fun mapDaemonFindingToCheckId(finding: DaemonAuditFinding): AuditCheckId {
         val severity = finding.severity.toUiSeverity()
-        return AuditCheckId.entries.firstOrNull { check ->
-            check.displayName.equals(finding.title, ignoreCase = true)
-        } ?: when (finding.category) {
+        AuditCheckId.entries.firstOrNull { finding.code in it.codes }?.let { return it }
+        if (finding.code.startsWith("HEALTH_", ignoreCase = true)) {
+            return when (finding.code) {
+                "HEALTH_DNS" -> AuditCheckId.HEALTH_DNS
+                "HEALTH_IPTABLES" -> AuditCheckId.HEALTH_IPTABLES
+                "HEALTH_ROUTING" -> AuditCheckId.HEALTH_ROUTING
+                "HEALTH_TPROXY_PORT" -> AuditCheckId.HEALTH_TPROXY_PORT
+                "HEALTH_SINGBOX_ALIVE" -> AuditCheckId.HEALTH_SINGBOX_ALIVE
+                else -> AuditCheckId.HEALTH_GENERIC
+            }
+        }
+        return when (finding.category) {
             DaemonAuditCategory.DNS -> if (severity.weight >= Severity.HIGH.weight) {
                 AuditCheckId.DNS_LEAK
             } else {
                 AuditCheckId.PRIVATE_DNS_UNCHANGED
             }
-            DaemonAuditCategory.ROUTING -> AuditCheckId.IPTABLES_LOOP_SAFE
-            DaemonAuditCategory.ENCRYPTION -> AuditCheckId.API_PORT_PROTECTED
+            DaemonAuditCategory.ROUTING -> AuditCheckId.HEALTH_ROUTING
+            DaemonAuditCategory.ENCRYPTION -> AuditCheckId.TRANSPORT_NOT_ENCRYPTED
             DaemonAuditCategory.LEAK -> AuditCheckId.PROC_NET_LEAK
             DaemonAuditCategory.CONFIG -> AuditCheckId.MODULE_INTEGRITY
-            DaemonAuditCategory.SYSTEM -> AuditCheckId.SELINUX_STATUS
+            DaemonAuditCategory.SYSTEM -> AuditCheckId.HEALTH_GENERIC
         }
     }
 
@@ -320,110 +364,110 @@ class AuditViewModel @Inject constructor(
     }
 
     private fun executeChecks(): List<AuditFinding> = listOf(
-        AuditFinding(
-            checkId = AuditCheckId.VPN_API_SURFACE,
-            passed = true,
-            title = "VPN Service API not exposed",
-            detail = "The daemon does not register a VpnService, making it invisible to VPN-detection APIs.",
-            remediation = "No action required.",
+        simulatedFinding(
+            AuditCheckId.VPN_API_SURFACE,
+            true,
+            R.string.audit_check_vpn_api_surface_title,
+            R.string.audit_check_vpn_api_surface_detail,
+            R.string.audit_check_vpn_api_surface_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.TUN_INTERFACE,
-            passed = false,
-            title = "TUN interface is visible in /sys/class/net",
-            detail = "A tun0 interface is listed and can be enumerated by any app with filesystem access.",
-            remediation = "Enable SELinux policy to restrict /sys/class/net enumeration from untrusted apps.",
+        simulatedFinding(
+            AuditCheckId.TUN_INTERFACE,
+            false,
+            R.string.audit_check_tun_interface_title,
+            R.string.audit_check_tun_interface_detail,
+            R.string.audit_check_tun_interface_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.NOT_VPN_CAPABILITY,
-            passed = true,
-            title = "NOT_VPN capability set on active network",
-            detail = "ConnectivityManager reports NOT_VPN for the default network, hiding proxy presence.",
-            remediation = "No action required.",
+        simulatedFinding(
+            AuditCheckId.NOT_VPN_CAPABILITY,
+            true,
+            R.string.audit_check_not_vpn_capability_title,
+            R.string.audit_check_not_vpn_capability_detail,
+            R.string.audit_check_not_vpn_capability_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.API_PORT_PROTECTED,
-            passed = true,
-            title = "Daemon API port is localhost-only",
-            detail = "The management API binds to 127.0.0.1 and is not reachable from LAN.",
-            remediation = "No action required.",
+        simulatedFinding(
+            AuditCheckId.API_PORT_PROTECTED,
+            true,
+            R.string.audit_check_api_port_protected_title,
+            R.string.audit_check_api_port_protected_detail,
+            R.string.audit_check_api_port_protected_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.DNS_LEAK,
-            passed = false,
-            title = "DNS queries may leak to system resolver",
-            detail = "Some queries bypass the tunnel DNS and reach the ISP resolver directly.",
-            remediation = "Enable fake-DNS or force all DNS through the tunnel's remote DNS server.",
+        simulatedFinding(
+            AuditCheckId.DNS_LEAK,
+            false,
+            R.string.audit_check_dns_leak_title,
+            R.string.audit_check_dns_leak_detail,
+            R.string.audit_check_dns_leak_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.PACKAGE_VISIBILITY,
-            passed = false,
-            title = "Proxy package visible to other apps",
-            detail = "Apps can query PackageManager and discover the proxy app is installed.",
-            remediation = "Use a randomized package name or enable Android 11+ package visibility filtering.",
+        simulatedFinding(
+            AuditCheckId.PACKAGE_VISIBILITY,
+            false,
+            R.string.audit_check_package_visibility_title,
+            R.string.audit_check_package_visibility_detail,
+            R.string.audit_check_package_visibility_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.IPTABLES_LOOP_SAFE,
-            passed = true,
-            title = "iptables rules prevent routing loops",
-            detail = "OUTPUT chain marks daemon packets to skip re-routing through the TUN.",
-            remediation = "No action required.",
+        simulatedFinding(
+            AuditCheckId.IPTABLES_LOOP_SAFE,
+            true,
+            R.string.audit_check_iptables_loop_safe_title,
+            R.string.audit_check_iptables_loop_safe_detail,
+            R.string.audit_check_iptables_loop_safe_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.PROC_NET_LEAK,
-            passed = false,
-            title = "/proc/net exposes proxy connections",
-            detail = "tcp/tcp6 files show the SOCKS inbound port, detectable by other apps.",
-            remediation = "Apply SELinux policy to restrict /proc/net reads from third-party apps.",
+        simulatedFinding(
+            AuditCheckId.PROC_NET_LEAK,
+            false,
+            R.string.audit_check_proc_net_leak_title,
+            R.string.audit_check_proc_net_leak_detail,
+            R.string.audit_check_proc_net_leak_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.IPV6_RULES_MIRROR,
-            passed = true,
-            title = "IPv6 iptables rules mirror IPv4",
-            detail = "ip6tables rules are consistent with iptables, preventing IPv6 bypass.",
-            remediation = "No action required.",
+        simulatedFinding(
+            AuditCheckId.IPV6_RULES_MIRROR,
+            true,
+            R.string.audit_check_ipv6_rules_mirror_title,
+            R.string.audit_check_ipv6_rules_mirror_detail,
+            R.string.audit_check_ipv6_rules_mirror_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.ICMP_HANDLING,
-            passed = true,
-            title = "ICMP routed through tunnel",
-            detail = "Ping traffic is captured and routed correctly.",
-            remediation = "No action required.",
+        simulatedFinding(
+            AuditCheckId.ICMP_HANDLING,
+            true,
+            R.string.audit_check_icmp_handling_title,
+            R.string.audit_check_icmp_handling_detail,
+            R.string.audit_check_icmp_handling_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.SELINUX_STATUS,
-            passed = true,
-            title = "SELinux is enforcing",
-            detail = "SELinux is in enforcing mode with daemon-specific policy loaded.",
-            remediation = "No action required.",
+        simulatedFinding(
+            AuditCheckId.SELINUX_STATUS,
+            true,
+            R.string.audit_check_selinux_status_title,
+            R.string.audit_check_selinux_status_detail,
+            R.string.audit_check_selinux_status_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.MODULE_INTEGRITY,
-            passed = true,
-            title = "Kernel module hashes verified",
-            detail = "wintun.ko and tun.ko match expected SHA-256 digests.",
-            remediation = "No action required.",
+        simulatedFinding(
+            AuditCheckId.MODULE_INTEGRITY,
+            true,
+            R.string.audit_check_module_integrity_title,
+            R.string.audit_check_module_integrity_detail,
+            R.string.audit_check_module_integrity_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.PRIVATE_DNS_UNCHANGED,
-            passed = false,
-            title = "Private DNS was modified by daemon",
-            detail = "The system Private DNS setting was changed, which apps can detect.",
-            remediation = "Restore the original Private DNS setting and route DNS at the iptables level instead.",
+        simulatedFinding(
+            AuditCheckId.PRIVATE_DNS_UNCHANGED,
+            false,
+            R.string.audit_check_private_dns_unchanged_title,
+            R.string.audit_check_private_dns_unchanged_detail,
+            R.string.audit_check_private_dns_unchanged_remediation,
         ),
-        AuditFinding(
-            checkId = AuditCheckId.NETWORK_CHANGE_HANDLER,
-            passed = true,
-            title = "Network change listener active",
-            detail = "The daemon re-establishes routes and DNS after connectivity changes.",
-            remediation = "No action required.",
+        simulatedFinding(
+            AuditCheckId.NETWORK_CHANGE_HANDLER,
+            true,
+            R.string.audit_check_network_change_handler_title,
+            R.string.audit_check_network_change_handler_detail,
+            R.string.audit_check_network_change_handler_remediation,
         ),
     )
 
     private fun computeRisk(findings: List<AuditFinding>): RiskLevel {
         val maxSeverity = findings
             .filter { !it.passed }
-            .maxOfOrNull { it.checkId.severity.weight }
+            .maxOfOrNull { it.severity.weight }
             ?: return RiskLevel.GREEN
 
         return when {
@@ -432,4 +476,47 @@ class AuditViewModel @Inject constructor(
             else -> RiskLevel.GREEN
         }
     }
+
+    private fun simulatedFinding(
+        checkId: AuditCheckId,
+        passed: Boolean,
+        @StringRes titleRes: Int,
+        @StringRes detailRes: Int,
+        @StringRes remediationRes: Int,
+    ): AuditFinding = AuditFinding(
+        checkId = checkId,
+        passed = passed,
+        title = string(titleRes),
+        detail = string(detailRes),
+        remediation = string(remediationRes),
+        category = localizedAuditCategory(checkId.category),
+        severity = if (passed) Severity.PASS else checkId.defaultSeverity,
+    )
+
+    private fun localizedAuditCategory(category: AuditCategoryKey): String = when (category) {
+        AuditCategoryKey.API -> string(R.string.audit_category_api)
+        AuditCategoryKey.NETWORK -> string(R.string.audit_category_network)
+        AuditCategoryKey.DNS -> string(R.string.audit_category_dns)
+        AuditCategoryKey.PRIVACY -> string(R.string.audit_category_privacy)
+        AuditCategoryKey.FIREWALL -> string(R.string.audit_category_firewall)
+        AuditCategoryKey.SYSTEM -> string(R.string.audit_category_system)
+        AuditCategoryKey.ROUTING -> string(R.string.audit_category_routing)
+        AuditCategoryKey.ENCRYPTION -> string(R.string.audit_category_encryption)
+        AuditCategoryKey.CONFIG -> string(R.string.audit_category_config)
+    }
+
+    private fun localizedReason(category: AppCategory): String = when (category) {
+        AppCategory.BANKING -> string(R.string.advisor_reason_banking)
+        AppCategory.GOVERNMENT -> string(R.string.advisor_reason_government)
+        AppCategory.TELECOM -> string(R.string.advisor_reason_telecom)
+        AppCategory.BROWSER -> string(R.string.advisor_reason_browser)
+        AppCategory.SOCIAL_MESSAGING -> string(R.string.advisor_reason_social)
+        AppCategory.STREAMING -> string(R.string.advisor_reason_streaming)
+        AppCategory.VPN_PROXY -> string(R.string.advisor_reason_vpn_proxy)
+        AppCategory.SYSTEM -> string(R.string.advisor_reason_system)
+        AppCategory.OTHER -> string(R.string.advisor_reason_other)
+    }
+
+    private fun localizeRecommendation(recommendation: PlacementRecommendation): PlacementRecommendation =
+        recommendation.copy(reason = localizedReason(recommendation.app.category))
 }

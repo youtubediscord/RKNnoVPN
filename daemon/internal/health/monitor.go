@@ -301,27 +301,27 @@ func (h *HealthMonitor) tick() {
 // kill(pid, 0).
 func (h *HealthMonitor) checkProcessAlive(pid int) CheckResult {
 	if pid <= 0 {
-		return CheckResult{Pass: false, Detail: "no PID recorded"}
+		return CheckResult{Pass: false, Detail: "PID не записан"}
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("FindProcess: %v", err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка FindProcess: %v", err)}
 	}
 	// Signal 0 tests existence without actually sending a signal.
 	err = proc.Signal(syscall.Signal(0))
 	if err != nil {
 		return CheckResult{Pass: false, Detail: fmt.Sprintf("kill -0 %d: %v", pid, err)}
 	}
-	return CheckResult{Pass: true, Detail: fmt.Sprintf("pid %d alive", pid)}
+	return CheckResult{Pass: true, Detail: fmt.Sprintf("PID %d активен", pid)}
 }
 
 // checkPortListening verifies the tproxy port accepts TCP connections.
 func (h *HealthMonitor) checkPortListening(port int) CheckResult {
 	err := core.WaitForPort("127.0.0.1", port, 2*time.Second)
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("port %d: %v", port, err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("порт %d: %v", port, err)}
 	}
-	return CheckResult{Pass: true, Detail: fmt.Sprintf("port %d open", port)}
+	return CheckResult{Pass: true, Detail: fmt.Sprintf("порт %d открыт", port)}
 }
 
 // checkIptablesIntact verifies the PRIVSTACK_PRE chain is still hooked in
@@ -329,9 +329,9 @@ func (h *HealthMonitor) checkPortListening(port int) CheckResult {
 func (h *HealthMonitor) checkIptablesIntact() CheckResult {
 	err := core.ExecIptables("-t", "mangle", "-C", "PREROUTING", "-j", "PRIVSTACK_PRE")
 	if err != nil {
-		return CheckResult{Pass: false, Detail: "PRIVSTACK_PRE not in PREROUTING"}
+		return CheckResult{Pass: false, Detail: "цепочка PRIVSTACK_PRE не подключена к PREROUTING"}
 	}
-	return CheckResult{Pass: true, Detail: "iptables chain intact"}
+	return CheckResult{Pass: true, Detail: "цепочка iptables на месте"}
 }
 
 // checkRoutingIntact verifies that the configured fwmark rule is present for
@@ -346,26 +346,26 @@ func (h *HealthMonitor) checkRoutingIntact() CheckResult {
 
 	out, err := core.ExecCommand("ip", "rule", "show")
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("ip rule show: %v", err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка ip rule show: %v", err)}
 	}
 
 	out6, err := core.ExecCommand("ip", "-6", "rule", "show")
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("ip -6 rule show: %v", err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка ip -6 rule show: %v", err)}
 	}
 
 	hasV4 := strings.Contains(out, markHex) || strings.Contains(out, markDec)
 	hasV6 := strings.Contains(out6, markHex) || strings.Contains(out6, markDec)
 	if hasV4 && hasV6 {
-		return CheckResult{Pass: true, Detail: fmt.Sprintf("fwmark rule %s present for IPv4 and IPv6", markHex)}
+		return CheckResult{Pass: true, Detail: fmt.Sprintf("правило fwmark %s есть для IPv4 и IPv6", markHex)}
 	}
 	if hasV4 {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("fwmark rule %s missing for IPv6", markHex)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует для IPv6", markHex)}
 	}
 	if hasV6 {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("fwmark rule %s missing for IPv4", markHex)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует для IPv4", markHex)}
 	}
-	return CheckResult{Pass: false, Detail: fmt.Sprintf("fwmark %s rule missing", markHex)}
+	return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует", markHex)}
 }
 
 // checkDNS attempts a trivial DNS lookup via the system resolver.
@@ -398,12 +398,12 @@ func (h *HealthMonitor) checkDNS() CheckResult {
 	}
 	addrs, err := resolver.LookupHost(ctx, host)
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s via 127.0.0.1:%d failed: %v", host, port, err)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s через 127.0.0.1:%d завершился ошибкой: %v", host, port, err)}
 	}
 	if len(addrs) == 0 {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s via 127.0.0.1:%d returned no answers", host, port)}
+		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s через 127.0.0.1:%d не вернул ответов", host, port)}
 	}
-	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS resolution OK for %s via 127.0.0.1:%d", host, port)}
+	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS для %s через 127.0.0.1:%d работает", host, port)}
 }
 
 // --------------------------------------------------------------------------

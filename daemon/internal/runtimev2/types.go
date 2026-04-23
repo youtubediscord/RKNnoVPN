@@ -1,0 +1,112 @@
+package runtimev2
+
+import "time"
+
+type BackendKind string
+
+const (
+	BackendRootTProxy BackendKind = "ROOT_TPROXY"
+)
+
+type Phase string
+
+const (
+	PhaseStopped  Phase = "STOPPED"
+	PhaseApplying Phase = "APPLYING"
+	PhaseHealthy  Phase = "HEALTHY"
+	PhaseDegraded Phase = "DEGRADED"
+)
+
+type FallbackPolicy string
+
+const (
+	FallbackOfferReset FallbackPolicy = "OFFER_RESET"
+	FallbackStayRoot   FallbackPolicy = "STAY_ON_SELECTED"
+	FallbackAutoReset  FallbackPolicy = "AUTO_RESET_ROOTED"
+)
+
+type DesiredState struct {
+	BackendKind     BackendKind    `json:"backendKind"`
+	ActiveProfileID string         `json:"activeProfileId,omitempty"`
+	RoutingMode     string         `json:"routingMode,omitempty"`
+	AppSelection    AppSelection   `json:"appSelection,omitempty"`
+	DNSPolicy       DNSPolicy      `json:"dnsPolicy,omitempty"`
+	FallbackPolicy  FallbackPolicy `json:"fallbackPolicy,omitempty"`
+}
+
+type AppSelection struct {
+	ProxyPackages  []string `json:"proxyPackages,omitempty"`
+	BypassPackages []string `json:"bypassPackages,omitempty"`
+}
+
+type DNSPolicy struct {
+	RemoteDNS string `json:"remoteDns,omitempty"`
+	DirectDNS string `json:"directDns,omitempty"`
+	FakeDNS   bool   `json:"fakeDns"`
+	IPv6Mode  string `json:"ipv6Mode,omitempty"`
+}
+
+type AppliedState struct {
+	BackendKind     BackendKind `json:"backendKind"`
+	Phase           Phase       `json:"phase"`
+	ActiveProfileID string      `json:"activeProfileId,omitempty"`
+	StartedAt       time.Time   `json:"startedAt,omitempty"`
+	Generation      int64       `json:"generation"`
+}
+
+type HealthSnapshot struct {
+	CoreReady    bool      `json:"coreReady"`
+	DNSReady     bool      `json:"dnsReady"`
+	RoutingReady bool      `json:"routingReady"`
+	EgressReady  bool      `json:"egressReady"`
+	LastError    string    `json:"lastError,omitempty"`
+	CheckedAt    time.Time `json:"checkedAt,omitempty"`
+}
+
+func (h HealthSnapshot) Healthy() bool {
+	return h.CoreReady && h.DNSReady && h.RoutingReady && h.EgressReady
+}
+
+type ResetStep struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type ResetReport struct {
+	BackendKind BackendKind `json:"backendKind"`
+	Generation  int64       `json:"generation"`
+	Status      string      `json:"status"`
+	Steps       []ResetStep `json:"steps"`
+	Errors      []string    `json:"errors,omitempty"`
+}
+
+type NodeProbeResult struct {
+	ID           string `json:"id,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Protocol     string `json:"protocol,omitempty"`
+	Server       string `json:"server,omitempty"`
+	Port         int    `json:"port,omitempty"`
+	TCPDirect    *int64 `json:"tcpDirect,omitempty"`
+	TunnelDelay  *int64 `json:"tunnelDelay,omitempty"`
+	DNSBootstrap bool   `json:"dnsBootstrap"`
+	ErrorClass   string `json:"errorClass,omitempty"`
+}
+
+type DiagnosticsSnapshot struct {
+	Health HealthSnapshot    `json:"health"`
+	Nodes  []NodeProbeResult `json:"nodes,omitempty"`
+}
+
+type BackendCapability struct {
+	Kind      BackendKind `json:"kind"`
+	Supported bool        `json:"supported"`
+	Reason    string      `json:"reason,omitempty"`
+}
+
+type Status struct {
+	DesiredState DesiredState        `json:"desiredState"`
+	AppliedState AppliedState        `json:"appliedState"`
+	Health       HealthSnapshot      `json:"health"`
+	Capabilities []BackendCapability `json:"capabilities"`
+}

@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.privstack.panel.R
+import com.privstack.panel.model.FallbackPolicy
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,6 +124,21 @@ fun SettingsScreen(
             TextButton(onClick = viewModel::applyCustomDns) {
                 Text(stringResource(R.string.apply))
             }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // ===== RECOVERY =====
+        SectionHeader(
+            title = stringResource(R.string.settings_recovery),
+            icon = { Icon(Icons.Filled.Memory, contentDescription = null) },
+        )
+
+        SettingsCard {
+            FallbackPolicyPicker(
+                currentPolicy = state.fallbackPolicy,
+                onPolicyChange = viewModel::setFallbackPolicy,
+            )
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -231,7 +247,11 @@ fun SettingsScreen(
                         Text(stringResource(R.string.reset_network_rules))
                     }
                 },
-                supportingContent = { Text(stringResource(R.string.reset_network_rules_desc)) },
+                supportingContent = {
+                    Text(
+                        state.lastResetSummary ?: stringResource(R.string.reset_network_rules_desc)
+                    )
+                },
                 colors = transparentListItemColors(),
             )
 
@@ -243,7 +263,7 @@ fun SettingsScreen(
                             contentDescription = null,
                             modifier = Modifier.padding(end = 4.dp),
                         )
-                        Text("Security Audit")
+                        Text(stringResource(R.string.settings_audit))
                     }
                 },
                 colors = transparentListItemColors(),
@@ -406,13 +426,14 @@ private fun LogLevelPicker(
     onLevelChange: (LogLevel) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val currentLabel = logLevelLabel(currentLevel)
 
     ListItem(
         headlineContent = { Text(stringResource(R.string.log_level)) },
-        supportingContent = { Text(currentLevel.name) },
+        supportingContent = { Text(currentLabel) },
         trailingContent = {
             TextButton(onClick = { expanded = true }) {
-                Text(currentLevel.name)
+                Text(currentLabel)
             }
             DropdownMenu(
                 expanded = expanded,
@@ -420,9 +441,53 @@ private fun LogLevelPicker(
             ) {
                 LogLevel.entries.forEach { level ->
                     DropdownMenuItem(
-                        text = { Text(level.name) },
+                        text = { Text(logLevelLabel(level)) },
                         onClick = {
                             onLevelChange(level)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        },
+        colors = transparentListItemColors(),
+    )
+}
+
+@Composable
+private fun FallbackPolicyPicker(
+    currentPolicy: FallbackPolicy,
+    onPolicyChange: (FallbackPolicy) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    val currentLabel = when (currentPolicy) {
+        FallbackPolicy.OFFER_RESET -> stringResource(R.string.fallback_offer_reset)
+        FallbackPolicy.STAY_ON_SELECTED -> stringResource(R.string.fallback_stay_selected)
+        FallbackPolicy.AUTO_RESET_ROOTED -> stringResource(R.string.fallback_auto_reset)
+    }
+
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.backend_fallback_policy)) },
+        supportingContent = { Text(currentLabel) },
+        trailingContent = {
+            TextButton(onClick = { expanded = true }) {
+                Text(currentLabel)
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                FallbackPolicy.entries.forEach { policy ->
+                    val label = when (policy) {
+                        FallbackPolicy.OFFER_RESET -> stringResource(R.string.fallback_offer_reset)
+                        FallbackPolicy.STAY_ON_SELECTED -> stringResource(R.string.fallback_stay_selected)
+                        FallbackPolicy.AUTO_RESET_ROOTED -> stringResource(R.string.fallback_auto_reset)
+                    }
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = {
+                            onPolicyChange(policy)
                             expanded = false
                         },
                     )
@@ -465,3 +530,12 @@ private fun ThemeModeSelector(
 private fun transparentListItemColors() = ListItemDefaults.colors(
     containerColor = Color.Transparent,
 )
+
+@Composable
+private fun logLevelLabel(level: LogLevel): String = when (level) {
+    LogLevel.DEBUG -> stringResource(R.string.log_level_debug)
+    LogLevel.INFO -> stringResource(R.string.log_level_info)
+    LogLevel.WARNING -> stringResource(R.string.log_level_warning)
+    LogLevel.ERROR -> stringResource(R.string.log_level_error)
+    LogLevel.NONE -> stringResource(R.string.log_level_none)
+}

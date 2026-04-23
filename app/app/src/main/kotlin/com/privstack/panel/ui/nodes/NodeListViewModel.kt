@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.privstack.panel.`import`.ClipboardWatcher
 import com.privstack.panel.`import`.LinkParser
+import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.Node
@@ -23,8 +24,8 @@ enum class NodeSortMode { NAME, LATENCY, COUNTRY }
 enum class ImportSheetTab { PASTE_URI, SCAN_QR, SUBSCRIPTION }
 
 data class NodeListUiState(
-    val groups: List<String> = listOf("Default"),
-    val selectedGroup: String = "Default",
+    val groups: List<String> = emptyList(),
+    val selectedGroup: String = "",
     val nodes: List<Node> = emptyList(),
     val activeNodeId: String? = null,
     val sortMode: NodeSortMode = NodeSortMode.NAME,
@@ -48,6 +49,7 @@ data class ImportCandidate(
 class NodeListViewModel @Inject constructor(
     private val profileRepository: ProfileRepository,
     private val daemonClient: DaemonClient,
+    private val messages: UserMessageFormatter,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(NodeListUiState())
@@ -70,38 +72,14 @@ class NodeListViewModel @Inject constructor(
             _uiState.update { it.copy(activeNodeId = nodeId, errorMessage = null) }
             val ok = profileRepository.setActiveNode(nodeId)
             if (ok) {
-                Log.d(TAG, "Active node set to $nodeId, applying connection state")
-                when (val result = daemonClient.start()) {
+                Log.d(TAG, "Active node set to $nodeId, applying backend restart")
+                when (val result = daemonClient.backendRestart()) {
                     is DaemonClientResult.Ok -> {
-                        Log.d(TAG, "Start succeeded for node $nodeId")
-                    }
-                    is DaemonClientResult.DaemonError -> {
-                        // If the core is already running, a reload hot-swaps the
-                        // active node without forcing the user to disconnect first.
-                        if (result.code == -32002 ||
-                            result.message.contains("already", ignoreCase = true)
-                        ) {
-                            when (val reload = daemonClient.reload()) {
-                                is DaemonClientResult.Ok -> {
-                                    Log.d(TAG, "Reload succeeded for node $nodeId")
-                                }
-                                else -> {
-                                    val msg = describeError(reload)
-                                    Log.w(TAG, "Reload failed for node $nodeId: $msg")
-                                    profileRepository.refresh()
-                                    _uiState.update { it.copy(activeNodeId = previousNodeId, errorMessage = msg) }
-                                }
-                            }
-                        } else {
-                            val msg = describeError(result)
-                            Log.w(TAG, "Start failed for node $nodeId: $msg")
-                            profileRepository.refresh()
-                            _uiState.update { it.copy(activeNodeId = previousNodeId, errorMessage = msg) }
-                        }
+                        Log.d(TAG, "Backend restart succeeded for node $nodeId")
                     }
                     else -> {
                         val msg = describeError(result)
-                        Log.w(TAG, "Start failed for node $nodeId: $msg")
+                        Log.w(TAG, "Backend restart failed for node $nodeId: $msg")
                         profileRepository.refresh()
                         _uiState.update { it.copy(activeNodeId = previousNodeId, errorMessage = msg) }
                     }
@@ -110,7 +88,10 @@ class NodeListViewModel @Inject constructor(
                 val err = profileRepository.error.value
                 profileRepository.refresh()
                 _uiState.update {
-                    it.copy(activeNodeId = previousNodeId, errorMessage = err ?: "Failed to set active node")
+                    it.copy(
+                        activeNodeId = previousNodeId,
+                        errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_set_active_failed),
+                    )
                 }
             }
         }
@@ -132,7 +113,7 @@ class NodeListViewModel @Inject constructor(
             if (!ok) {
                 val err = profileRepository.error.value
                 _uiState.update {
-                    it.copy(errorMessage = err ?: "Failed to delete node")
+                    it.copy(errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_delete_failed))
                 }
             }
             // UI updates via the profile observer
@@ -141,9 +122,11 @@ class NodeListViewModel @Inject constructor(
 
     fun updateNodeMetadata(nodeId: String, name: String, group: String) {
         val cleanName = name.trim()
-        val cleanGroup = group.trim().ifBlank { "Default" }
+        val cleanGroup = group.trim().ifBlank { messages.defaultGroupName() }
         if (cleanName.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Node name must not be empty") }
+            _uiState.update {
+                it.copy(errorMessage = messages.get(com.privstack.panel.R.string.node_name_required))
+            }
             return
         }
 
@@ -151,7 +134,9 @@ class NodeListViewModel @Inject constructor(
             _uiState.update { it.copy(errorMessage = null) }
             val current = _uiState.value.nodes.firstOrNull { it.id == nodeId }
             if (current == null) {
-                _uiState.update { it.copy(errorMessage = "Node not found") }
+                _uiState.update {
+                    it.copy(errorMessage = messages.get(com.privstack.panel.R.string.node_not_found))
+                }
                 return@launch
             }
 
@@ -164,7 +149,7 @@ class NodeListViewModel @Inject constructor(
             if (!ok) {
                 val err = profileRepository.error.value
                 _uiState.update {
-                    it.copy(errorMessage = err ?: "Failed to update node")
+                    it.copy(errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_update_failed))
                 }
             } else {
                 _uiState.update { state ->
@@ -202,10 +187,18 @@ class NodeListViewModel @Inject constructor(
                                     latencyMs = test.tcpMs ?: -1,
                                     responseMs = test.urlMs,
                                     testStatus = when {
-                                        test.tcpError != null -> "TCP: ${test.tcpError}"
-                                        test.urlError != null -> "URL: ${test.urlError}"
-                                        test.urlMs != null -> "OK"
-                                        else -> "TCP OK"
+                                        test.tcpError != null -> messages.get(
+                                            com.privstack.panel.R.string.node_test_status_tcp_error,
+                                            messages.formatNodeTestIssue(test.tcpError),
+                                        )
+                                        test.urlError != null -> messages.get(
+                                            com.privstack.panel.R.string.node_test_status_url_error,
+                                            messages.formatNodeTestIssue(test.urlError),
+                                        )
+                                        test.urlMs != null ->
+                                            messages.get(com.privstack.panel.R.string.node_test_status_ok)
+                                        else ->
+                                            messages.get(com.privstack.panel.R.string.node_test_status_tcp_ok)
                                     },
                                 )
                             },
@@ -292,7 +285,9 @@ class NodeListViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     importCandidates = emptyList(),
-                    errorMessage = "No valid proxy URIs detected in the pasted text",
+                    errorMessage = messages.get(
+                        com.privstack.panel.R.string.node_no_valid_proxy_uris_detected
+                    ),
                 )
             }
             return
@@ -303,7 +298,9 @@ class NodeListViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     importCandidates = emptyList(),
-                    errorMessage = "Detected proxy URIs, but none could be parsed",
+                    errorMessage = messages.get(
+                        com.privstack.panel.R.string.node_detected_uris_unparsed
+                    ),
                 )
             }
             return
@@ -342,7 +339,9 @@ class NodeListViewModel @Inject constructor(
                     val err = profileRepository.error.value
                     _uiState.update {
                         it.copy(
-                            errorMessage = err ?: "Import failed -- is the daemon running?",
+                            errorMessage = err ?: messages.get(
+                                com.privstack.panel.R.string.node_import_failed
+                            ),
                             isLoading = false,
                         )
                     }
@@ -364,7 +363,9 @@ class NodeListViewModel @Inject constructor(
             } else {
                 _uiState.update {
                     it.copy(
-                        errorMessage = "No valid links to import",
+                        errorMessage = messages.get(
+                            com.privstack.panel.R.string.node_no_valid_links_to_import
+                        ),
                         isLoading = false,
                     )
                 }
@@ -387,7 +388,9 @@ class NodeListViewModel @Inject constructor(
                 val err = profileRepository.error.value
                 _uiState.update {
                     it.copy(
-                        errorMessage = err ?: "Subscription fetch failed",
+                        errorMessage = err ?: messages.get(
+                            com.privstack.panel.R.string.subscription_fetch_failed
+                        ),
                         isLoading = false,
                     )
                 }
@@ -415,8 +418,9 @@ class NodeListViewModel @Inject constructor(
         viewModelScope.launch {
             profileRepository.profile.collect { config ->
                 if (config != null) {
-                    val nodes = config.nodes
-                    val groups = nodes.map { it.group }.distinct().ifEmpty { listOf("Default") }
+                    val nodes = config.nodes.map(::normalizeNode)
+                    val groups = nodes.map { it.group }.distinct()
+                        .ifEmpty { listOf(messages.defaultGroupName()) }
                     _uiState.update { state ->
                         val selectedGroup = state.selectedGroup.takeIf { it in groups } ?: groups.first()
                         state.copy(
@@ -460,17 +464,18 @@ class NodeListViewModel @Inject constructor(
         NodeSortMode.COUNTRY -> nodes.sortedBy { extractCountryFromName(it.name) }
     }
 
+    private fun normalizeNode(node: Node): Node = if (messages.isDefaultGroupName(node.group)) {
+        node.copy(group = messages.defaultGroupName())
+    } else {
+        node
+    }
+
     private fun extractCountryFromName(name: String): String {
         // Simple heuristic: first word before dash/space
         return name.split(Regex("[\\s-]")).firstOrNull()?.lowercase() ?: ""
     }
     private fun <T> describeError(result: DaemonClientResult<T>): String = when (result) {
-        is DaemonClientResult.DaemonError -> "Daemon error ${result.code}: ${result.message}"
-        is DaemonClientResult.RootDenied -> "Root access denied"
-        is DaemonClientResult.Timeout -> "Request timed out"
-        is DaemonClientResult.DaemonNotFound -> "Daemon not installed"
-        is DaemonClientResult.ParseError -> "Invalid daemon response"
-        is DaemonClientResult.Failure -> "Error: ${result.throwable.message}"
-        is DaemonClientResult.Ok -> "OK"
+        is DaemonClientResult.Ok -> messages.get(com.privstack.panel.R.string.node_test_status_ok)
+        else -> messages.formatDaemonFailure(result)
     }
 }

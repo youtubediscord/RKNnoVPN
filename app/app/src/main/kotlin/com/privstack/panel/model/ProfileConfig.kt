@@ -16,6 +16,7 @@ data class ProfileConfig(
     /** ID of the active node within this profile. */
     val activeNodeId: String? = null,
     val nodes: List<Node> = emptyList(),
+    val runtime: RuntimeConfig = RuntimeConfig(),
     val routing: RoutingConfig = RoutingConfig(),
     val dns: DnsConfig = DnsConfig(),
     val health: HealthConfig = HealthConfig(),

@@ -1,6 +1,7 @@
 package com.privstack.panel.ipc
 
 import android.util.Log
+import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.model.ConnectionState
 import com.privstack.panel.model.DaemonConnectionState
 import com.privstack.panel.model.DaemonStatus
@@ -29,7 +30,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class PollingStatusSource @Inject constructor(
-    private val client: DaemonClient
+    private val client: DaemonClient,
+    private val messages: UserMessageFormatter,
 ) {
     companion object {
         private const val TAG = "PollingStatusSource"
@@ -115,37 +117,43 @@ class PollingStatusSource @Inject constructor(
             is DaemonClientResult.RootDenied -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = "Нет root-доступа к daemon"
+                _lastError.value = messages.get(com.privstack.panel.R.string.error_root_access_denied)
                 Log.w(TAG, "Root denied during status poll")
             }
             is DaemonClientResult.Timeout -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = "Daemon не ответил вовремя на status"
+                _lastError.value = messages.get(
+                    com.privstack.panel.R.string.error_request_timed_out_with_method,
+                    result.method,
+                )
                 Log.w(TAG, "Status poll timed out")
             }
             is DaemonClientResult.DaemonNotFound -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = "Daemon не найден"
+                _lastError.value = messages.get(com.privstack.panel.R.string.error_daemon_not_found)
                 Log.w(TAG, "Daemon binary not found")
             }
             is DaemonClientResult.DaemonError -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = "Daemon error ${result.code}: ${result.message}"
+                _lastError.value = messages.formatDaemonFailure(result)
                 Log.w(TAG, "Daemon error: ${result.code} ${result.message}")
             }
             is DaemonClientResult.ParseError -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = "Неверный ответ daemon"
+                _lastError.value = messages.get(com.privstack.panel.R.string.error_invalid_daemon_response)
                 Log.w(TAG, "Failed to parse status response", result.cause)
             }
             is DaemonClientResult.Failure -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = result.throwable.message ?: "Неожиданная ошибка polling"
+                _lastError.value = messages.formatControlPlaneFailure(
+                    result.throwable.message,
+                    com.privstack.panel.R.string.error_unexpected_with_reason,
+                )
                 Log.e(TAG, "Unexpected failure during poll", result.throwable)
             }
         }

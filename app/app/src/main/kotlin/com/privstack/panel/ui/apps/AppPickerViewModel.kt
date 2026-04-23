@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.util.Log
+import com.privstack.panel.i18n.UserMessageFormatter
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.privstack.panel.advisor.AlwaysDirectApps
@@ -100,6 +101,7 @@ private val BANK_PACKAGES = setOf(
 class AppPickerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val profileRepository: ProfileRepository,
+    private val messages: UserMessageFormatter,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AppPickerUiState())
@@ -218,7 +220,11 @@ class AppPickerViewModel @Inject constructor(
 
             if (!routingMode.usesPerAppSelection()) {
                 _uiState.update {
-                    it.copy(errorMessage = "Per-app selection is unavailable in the current routing mode")
+                    it.copy(
+                        errorMessage = messages.get(
+                            com.privstack.panel.R.string.app_picker_error_selection_unavailable
+                        )
+                    )
                 }
                 return@launch
             }
@@ -236,7 +242,11 @@ class AppPickerViewModel @Inject constructor(
                 Log.w(TAG, "Failed to save app selection: $err")
                 profileRepository.refresh()
                 _uiState.update {
-                    it.copy(errorMessage = err ?: "Failed to save app selection")
+                    it.copy(
+                        errorMessage = err ?: messages.get(
+                            com.privstack.panel.R.string.app_picker_error_save_selection
+                        )
+                    )
                 }
             } else {
                 Log.d(TAG, "Saved ${selectedPackages.size} apps for routing mode $routingMode")
@@ -291,7 +301,10 @@ class AppPickerViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = "Failed to load apps: ${e.message}",
+                        errorMessage = messages.get(
+                            com.privstack.panel.R.string.app_picker_error_load_apps,
+                            e.message ?: messages.get(com.privstack.panel.R.string.daemon_status_unknown_text),
+                        ),
                     )
                 }
             }

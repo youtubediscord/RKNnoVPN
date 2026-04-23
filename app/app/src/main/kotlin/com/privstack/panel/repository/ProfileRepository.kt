@@ -1,8 +1,10 @@
 package com.privstack.panel.repository
 
 import android.util.Log
+import com.privstack.panel.controlplane.ControlPlaneClient
 import com.privstack.panel.`import`.LinkParser
 import com.privstack.panel.`import`.SubscriptionHandler
+import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.Node
@@ -35,7 +37,9 @@ import javax.inject.Singleton
  */
 @Singleton
 class ProfileRepository @Inject constructor(
-    private val client: DaemonClient
+    private val client: DaemonClient,
+    private val controlPlaneClient: ControlPlaneClient,
+    private val messages: UserMessageFormatter,
 ) {
     companion object {
         private const val TAG = "ProfileRepository"
@@ -126,7 +130,7 @@ class ProfileRepository @Inject constructor(
             try {
                 val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                     if (_error.value.isNullOrBlank()) {
-                        _error.value = "No profile loaded"
+                        _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
                     }
                     return@withLock emptyList()
                 }
@@ -188,7 +192,7 @@ class ProfileRepository @Inject constructor(
         try {
             val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                 if (_error.value.isNullOrBlank()) {
-                    _error.value = "No profile loaded"
+                    _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
                 }
                 return@withLock false
             }
@@ -264,13 +268,13 @@ class ProfileRepository @Inject constructor(
     ): List<Node> {
         val detectedUris = LinkParser.detectUris(rawInput)
         if (detectedUris.isEmpty()) {
-            _error.value = "No valid proxy links detected"
+            _error.value = messages.get(com.privstack.panel.R.string.node_no_valid_proxy_links_detected)
             return emptyList()
         }
 
         val parsedNodes = detectedUris.mapNotNull(LinkParser::parse)
         if (parsedNodes.isEmpty()) {
-            _error.value = "No supported proxy links could be parsed"
+            _error.value = messages.get(com.privstack.panel.R.string.node_no_supported_proxy_links_parsed)
             return emptyList()
         }
 
@@ -286,22 +290,24 @@ class ProfileRepository @Inject constructor(
         current: ProfileConfig,
         url: String
     ): List<Node> {
-        val fetched = when (val result = client.subscriptionFetch(url)) {
-            is DaemonClientResult.Ok -> result.data
-            else -> {
-                val msg = describeFailure(result)
-                Log.w(TAG, "subscriptionFetch failed: $msg")
-                _error.value = msg
-                return emptyList()
-            }
+        val fetched = try {
+            controlPlaneClient.fetchSubscription(url)
+        } catch (t: Throwable) {
+            val msg = messages.formatControlPlaneFailure(
+                t.message,
+                com.privstack.panel.R.string.subscription_fetch_failed,
+            )
+            Log.w(TAG, "control-plane subscription fetch failed: $msg")
+            _error.value = msg
+            return emptyList()
         }
 
         val parsed = SubscriptionHandler.parseResponse(fetched.body, fetched.headers)
         if (parsed.nodes.isEmpty()) {
             _error.value = if (parsed.parseFailures > 0) {
-                "Subscription did not contain any supported proxy links"
+                messages.get(com.privstack.panel.R.string.subscription_no_supported_links)
             } else {
-                "Subscription was empty"
+                messages.get(com.privstack.panel.R.string.subscription_empty)
             }
             return emptyList()
         }
@@ -359,15 +365,8 @@ class ProfileRepository @Inject constructor(
         val updatedConfig: ProfileConfig,
     )
 
-    private fun <T> describeFailure(result: DaemonClientResult<T>): String = when (result) {
-        is DaemonClientResult.DaemonError -> "Daemon error ${result.code}: ${result.message}"
-        is DaemonClientResult.RootDenied -> "Root access denied"
-        is DaemonClientResult.Timeout -> "Request timed out (${result.method})"
-        is DaemonClientResult.DaemonNotFound -> "Daemon not installed"
-        is DaemonClientResult.ParseError -> "Invalid response from daemon"
-        is DaemonClientResult.Failure -> "Unexpected error: ${result.throwable.message}"
-        is DaemonClientResult.Ok -> "OK" // unreachable in failure context
-    }
+    private fun <T> describeFailure(result: DaemonClientResult<T>): String =
+        messages.formatDaemonFailure(result)
 
     private fun <T> DaemonClientResult<T>.configWasSaved(): Boolean {
         val error = this as? DaemonClientResult.DaemonError ?: return false

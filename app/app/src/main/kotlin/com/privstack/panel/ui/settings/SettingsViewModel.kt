@@ -4,8 +4,13 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.privstack.panel.BuildConfig
+import com.privstack.panel.controlplane.ControlPlaneClient
+import com.privstack.panel.controlplane.DownloadedUpdate
+import com.privstack.panel.controlplane.ReleaseInfo
+import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
+import com.privstack.panel.model.FallbackPolicy
 import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.repository.CommandOutcome
 import com.privstack.panel.repository.ProfileRepository
@@ -57,15 +62,18 @@ enum class UpdateStatus {
 }
 
 data class UpdateUiState(
-    val currentVersion: String = "unknown",
+    val currentVersion: String = BuildConfig.VERSION_NAME,
     val latestVersion: String = "",
     val status: UpdateStatus = UpdateStatus.IDLE,
     val changelog: String = "",
     val downloadProgress: Float = 0f,
     val errorMessage: String = "",
+    val modulePath: String = "",
+    val apkPath: String = "",
 )
 
 data class SettingsUiState(
+    val fallbackPolicy: FallbackPolicy = FallbackPolicy.OFFER_RESET,
     // Routing
     val routingMode: RoutingMode = RoutingMode.GLOBAL,
     // DNS
@@ -75,8 +83,8 @@ data class SettingsUiState(
     val alwaysDirectPackagesText: String = "",
     val logLevel: LogLevel = LogLevel.WARNING,
     // Module
-    val moduleVersion: String = "0.1.0",
-    val daemonStatusText: String = "Unknown",
+    val moduleVersion: String = BuildConfig.VERSION_NAME,
+    val daemonStatusText: String = "",
     // Theme
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     // About
@@ -84,13 +92,16 @@ data class SettingsUiState(
     val githubUrl: String = "https://github.com/youtubediscord/RKNnoVPN",
     // Error
     val errorMessage: String? = null,
+    val lastResetSummary: String? = null,
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val daemonClient: DaemonClient,
+    private val controlPlaneClient: ControlPlaneClient,
     private val profileRepository: ProfileRepository,
     private val statusRepository: StatusRepository,
+    private val messages: UserMessageFormatter,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -99,12 +110,31 @@ class SettingsViewModel @Inject constructor(
     private val _updateState = MutableStateFlow(UpdateUiState())
     val updateState: StateFlow<UpdateUiState> = _updateState.asStateFlow()
 
+    private var lastReleaseInfo: ReleaseInfo? = null
+    private var lastDownloadedUpdate: DownloadedUpdate? = null
+
     init {
         observeProfile()
         loadVersionInfo()
     }
 
     // ---- Public actions ----
+
+    fun setFallbackPolicy(policy: FallbackPolicy) {
+        val previousPolicy = _uiState.value.fallbackPolicy
+        _uiState.update { it.copy(fallbackPolicy = policy, errorMessage = null) }
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(runtime = config.runtime.copy(fallbackPolicy = policy))
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to set fallback policy: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(fallbackPolicy = previousPolicy, errorMessage = err) }
+            }
+        }
+    }
 
     fun setRoutingMode(mode: RoutingMode) {
         val previousMode = _uiState.value.routingMode
@@ -160,7 +190,9 @@ class SettingsViewModel @Inject constructor(
     fun applyUrlTestUrl() {
         val url = _uiState.value.urlTestUrl.trim()
         if (url.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "URL test endpoint must not be empty") }
+            _uiState.update {
+                it.copy(errorMessage = messages.get(com.privstack.panel.R.string.url_test_endpoint_required))
+            }
             return
         }
         viewModelScope.launch {
@@ -199,18 +231,26 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun restartDaemon() {
-        _uiState.update { it.copy(daemonStatusText = "Restarting...", errorMessage = null) }
+        _uiState.update {
+            it.copy(
+                daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_restarting),
+                errorMessage = null,
+                lastResetSummary = null,
+            )
+        }
         viewModelScope.launch {
             when (val outcome = statusRepository.reload()) {
                 is CommandOutcome.Success -> {
-                    Log.d(TAG, "Daemon reload succeeded")
-                    _uiState.update { it.copy(daemonStatusText = "Running") }
+                    Log.d(TAG, "Backend restart succeeded")
+                    _uiState.update {
+                        it.copy(daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_restarted))
+                    }
                 }
                 is CommandOutcome.Failed -> {
-                    Log.w(TAG, "Daemon reload failed: ${outcome.message}")
+                    Log.w(TAG, "Backend restart failed: ${outcome.message}")
                     _uiState.update {
                         it.copy(
-                            daemonStatusText = "Error",
+                            daemonStatusText = messages.get(com.privstack.panel.R.string.state_error),
                             errorMessage = outcome.message,
                         )
                     }
@@ -220,19 +260,37 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun resetNetworkRules() {
-        _uiState.update { it.copy(daemonStatusText = "Resetting network...", errorMessage = null) }
+        _uiState.update {
+            it.copy(
+                daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_resetting),
+                errorMessage = null,
+                lastResetSummary = null,
+            )
+        }
         viewModelScope.launch {
-            when (val outcome = statusRepository.networkReset()) {
-                is CommandOutcome.Success -> {
-                    Log.d(TAG, "Network reset succeeded")
-                    _uiState.update { it.copy(daemonStatusText = "Stopped") }
-                }
-                is CommandOutcome.Failed -> {
-                    Log.w(TAG, "Network reset failed: ${outcome.message}")
+            when (val result = statusRepository.networkReset()) {
+                is DaemonClientResult.Ok -> {
+                    val report = result.data
+                    Log.d(TAG, "Backend reset finished with status=${report.status}")
                     _uiState.update {
                         it.copy(
-                            daemonStatusText = "Error",
-                            errorMessage = outcome.message,
+                            daemonStatusText = if (report.status == "ok") {
+                                messages.get(com.privstack.panel.R.string.daemon_status_stopped)
+                            } else {
+                                messages.get(com.privstack.panel.R.string.daemon_status_partial_reset)
+                            },
+                            errorMessage = report.errors.takeIf { it.isNotEmpty() }?.joinToString("\n"),
+                            lastResetSummary = summarizeResetReport(report),
+                        )
+                    }
+                }
+                else -> {
+                    val message = formatUpdateError(result)
+                    Log.w(TAG, "Backend reset failed: $message")
+                    _uiState.update {
+                        it.copy(
+                            daemonStatusText = messages.get(com.privstack.panel.R.string.state_error),
+                            errorMessage = message,
                         )
                     }
                 }
@@ -251,45 +309,30 @@ class SettingsViewModel @Inject constructor(
     fun checkForUpdates() {
         _updateState.update { it.copy(status = UpdateStatus.CHECKING, errorMessage = "") }
         viewModelScope.launch {
-            when (val result = daemonClient.updateCheck()) {
-                is DaemonClientResult.Ok -> {
-                    val data = result.data
-                    _updateState.update {
-                        it.copy(
-                            currentVersion = data.currentVersion,
-                            latestVersion = data.latestVersion,
-                            changelog = data.changelog,
-                            status = if (data.hasUpdate) UpdateStatus.AVAILABLE else UpdateStatus.UP_TO_DATE,
-                        )
-                    }
+            runCatching {
+                controlPlaneClient.checkForUpdates(_updateState.value.currentVersion)
+            }.onSuccess { release ->
+                lastReleaseInfo = release
+                lastDownloadedUpdate = null
+                _updateState.update {
+                    it.copy(
+                        currentVersion = release.currentVersion,
+                        latestVersion = release.latestVersion,
+                        changelog = release.changelog,
+                        status = if (release.hasUpdate) UpdateStatus.AVAILABLE else UpdateStatus.UP_TO_DATE,
+                        modulePath = "",
+                        apkPath = "",
+                    )
                 }
-                is DaemonClientResult.DaemonNotFound -> {
-                    _updateState.update {
-                        it.copy(status = UpdateStatus.MODULE_TOO_OLD)
-                    }
-                }
-                is DaemonClientResult.DaemonError -> {
-                    // Detect old daemon/privctl that doesn't support update methods.
-                    if (isMethodNotFound(result)) {
-                        _updateState.update {
-                            it.copy(status = UpdateStatus.MODULE_TOO_OLD)
-                        }
-                    } else {
-                        _updateState.update {
-                            it.copy(
-                                status = UpdateStatus.ERROR,
-                                errorMessage = formatUpdateError(result),
-                            )
-                        }
-                    }
-                }
-                else -> {
-                    _updateState.update {
-                        it.copy(
-                            status = UpdateStatus.ERROR,
-                            errorMessage = formatUpdateError(result),
-                        )
-                    }
+            }.onFailure { throwable ->
+                _updateState.update {
+                    it.copy(
+                        status = UpdateStatus.ERROR,
+                        errorMessage = messages.formatControlPlaneFailure(
+                            throwable.message,
+                            com.privstack.panel.R.string.update_error_check_failed,
+                        ),
+                    )
                 }
             }
         }
@@ -298,39 +341,46 @@ class SettingsViewModel @Inject constructor(
     fun downloadUpdate() {
         _updateState.update { it.copy(status = UpdateStatus.DOWNLOADING, downloadProgress = 0f) }
         viewModelScope.launch {
-            when (val result = daemonClient.updateDownload()) {
-                is DaemonClientResult.Ok -> {
-                    val hasArtifacts = result.data.modulePath.isNotBlank() || result.data.apkPath.isNotBlank()
-                    _updateState.update {
-                        it.copy(
-                            status = if (hasArtifacts) UpdateStatus.DOWNLOADED else UpdateStatus.ERROR,
-                            downloadProgress = if (hasArtifacts) 1f else 0f,
-                            errorMessage = if (hasArtifacts) "" else "Update download finished without any artifacts",
-                        )
-                    }
+            val release = lastReleaseInfo
+            if (release == null || !release.hasUpdate) {
+                _updateState.update {
+                    it.copy(
+                        status = UpdateStatus.ERROR,
+                        errorMessage = messages.get(com.privstack.panel.R.string.update_error_no_checked_update),
+                    )
                 }
-                is DaemonClientResult.DaemonError -> {
-                    if (isMethodNotFound(result)) {
-                        _updateState.update { it.copy(status = UpdateStatus.MODULE_TOO_OLD) }
-                    } else {
-                        _updateState.update {
-                            it.copy(
-                                status = UpdateStatus.ERROR,
-                                errorMessage = formatUpdateError(result),
-                            )
-                        }
-                    }
+                return@launch
+            }
+
+            runCatching {
+                controlPlaneClient.downloadUpdate(release) { progress ->
+                    _updateState.update { current -> current.copy(downloadProgress = progress) }
                 }
-                is DaemonClientResult.DaemonNotFound -> {
-                    _updateState.update { it.copy(status = UpdateStatus.MODULE_TOO_OLD) }
+            }.onSuccess { downloaded ->
+                lastDownloadedUpdate = downloaded
+                val hasArtifacts = downloaded.modulePath.isNotBlank() || downloaded.apkPath.isNotBlank()
+                _updateState.update {
+                    it.copy(
+                        status = if (hasArtifacts) UpdateStatus.DOWNLOADED else UpdateStatus.ERROR,
+                        downloadProgress = if (hasArtifacts) 1f else 0f,
+                        errorMessage = if (hasArtifacts) {
+                            ""
+                        } else {
+                            messages.get(com.privstack.panel.R.string.update_error_no_artifacts)
+                        },
+                        modulePath = downloaded.modulePath,
+                        apkPath = downloaded.apkPath,
+                    )
                 }
-                else -> {
-                    _updateState.update {
-                        it.copy(
-                            status = UpdateStatus.ERROR,
-                            errorMessage = formatUpdateError(result),
-                        )
-                    }
+            }.onFailure { throwable ->
+                _updateState.update {
+                    it.copy(
+                        status = UpdateStatus.ERROR,
+                        errorMessage = messages.formatControlPlaneFailure(
+                            throwable.message,
+                            com.privstack.panel.R.string.update_error_download_failed,
+                        ),
+                    )
                 }
             }
         }
@@ -339,7 +389,21 @@ class SettingsViewModel @Inject constructor(
     fun installUpdate() {
         _updateState.update { it.copy(status = UpdateStatus.INSTALLING) }
         viewModelScope.launch {
-            when (val result = daemonClient.updateInstall()) {
+            val downloaded = lastDownloadedUpdate
+            if (downloaded == null) {
+                _updateState.update {
+                    it.copy(
+                        status = UpdateStatus.ERROR,
+                        errorMessage = messages.get(com.privstack.panel.R.string.update_error_no_downloaded_update),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = daemonClient.updateInstall(
+                modulePath = downloaded.modulePath,
+                apkPath = downloaded.apkPath,
+            )) {
                 is DaemonClientResult.Ok -> {
                     val installedSomething = result.data.moduleInstalled || result.data.apkInstalled
                     _updateState.update {
@@ -348,7 +412,9 @@ class SettingsViewModel @Inject constructor(
                             errorMessage = if (installedSomething) {
                                 ""
                             } else {
-                                result.data.apkError ?: "Update install completed without installing module or APK"
+                                result.data.apkError ?: messages.get(
+                                    com.privstack.panel.R.string.update_error_install_without_artifacts
+                                )
                             },
                         )
                     }
@@ -412,6 +478,7 @@ class SettingsViewModel @Inject constructor(
 
         _uiState.update {
             it.copy(
+                fallbackPolicy = config.runtime.fallbackPolicy,
                 routingMode = routingMode,
                 dnsPreset = dnsPreset,
                 customDnsUrl = if (dnsPreset == DnsPreset.CUSTOM) dnsUrl else it.customDnsUrl,
@@ -432,7 +499,10 @@ class SettingsViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             moduleVersion = info.daemonVersion,
-                            daemonStatusText = "Running (core: ${info.coreVersion})",
+                            daemonStatusText = messages.get(
+                                com.privstack.panel.R.string.daemon_status_running_with_core,
+                                info.coreVersion,
+                            ),
                         )
                     }
                     _updateState.update {
@@ -441,22 +511,38 @@ class SettingsViewModel @Inject constructor(
                 }
                 is DaemonClientResult.DaemonNotFound -> {
                     _uiState.update {
-                        it.copy(daemonStatusText = "Module not installed")
+                        it.copy(
+                            daemonStatusText = messages.get(
+                                com.privstack.panel.R.string.daemon_status_module_not_installed
+                            )
+                        )
                     }
                 }
                 is DaemonClientResult.RootDenied -> {
                     _uiState.update {
-                        it.copy(daemonStatusText = "Root access denied")
+                        it.copy(
+                            daemonStatusText = messages.get(
+                                com.privstack.panel.R.string.daemon_status_root_denied
+                            )
+                        )
                     }
                 }
                 is DaemonClientResult.Timeout -> {
                     _uiState.update {
-                        it.copy(daemonStatusText = "Daemon not responding")
+                        it.copy(
+                            daemonStatusText = messages.get(
+                                com.privstack.panel.R.string.daemon_status_not_responding
+                            )
+                        )
                     }
                 }
                 else -> {
                     _uiState.update {
-                        it.copy(daemonStatusText = "Unknown")
+                        it.copy(
+                            daemonStatusText = messages.get(
+                                com.privstack.panel.R.string.daemon_status_unknown_text
+                            )
+                        )
                     }
                 }
             }
@@ -480,19 +566,38 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun <T> formatUpdateError(result: DaemonClientResult<T>): String = when (result) {
-        is DaemonClientResult.DaemonError -> result.message
-        is DaemonClientResult.RootDenied -> "Root denied: ${result.reason}"
-        is DaemonClientResult.Timeout -> "Timeout"
-        is DaemonClientResult.DaemonNotFound -> "Daemon not found"
-        is DaemonClientResult.ParseError -> "Parse error"
-        is DaemonClientResult.Failure -> result.throwable.message ?: "Unknown error"
-        else -> "Unknown error"
-    }
+    private fun <T> formatUpdateError(result: DaemonClientResult<T>): String =
+        messages.formatDaemonFailure(result)
 
     private fun parsePackageList(raw: String): List<String> =
         raw.split('\n', ',', ';', ' ', '\t')
             .map(String::trim)
             .filter(String::isNotBlank)
             .distinct()
+
+    private fun summarizeResetReport(report: com.privstack.panel.model.ResetReport): String {
+        if (report.errors.isEmpty()) {
+            return messages.get(com.privstack.panel.R.string.reset_summary_all_done)
+        }
+        return buildString {
+            append(messages.get(com.privstack.panel.R.string.reset_summary_partial_prefix))
+            append('\n')
+            append(report.steps.filter { it.status != "ok" }.joinToString("\n") { step ->
+                val stepValue = if (step.detail.isBlank()) {
+                    when (step.status.lowercase()) {
+                        "error" -> messages.get(com.privstack.panel.R.string.state_error)
+                        "ok" -> messages.get(com.privstack.panel.R.string.node_test_status_ok)
+                        else -> step.status
+                    }
+                } else {
+                    step.detail
+                }
+                messages.get(
+                    com.privstack.panel.R.string.reset_summary_step,
+                    step.name,
+                    stepValue,
+                )
+            })
+        }
+    }
 }

@@ -3,6 +3,8 @@ package com.privstack.panel.repository
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.ipc.PollingStatusSource
+import com.privstack.panel.i18n.UserMessageFormatter
+import com.privstack.panel.R
 import com.privstack.panel.model.AuditReport
 import com.privstack.panel.model.DaemonConnectionState
 import com.privstack.panel.model.DaemonStatus
@@ -29,7 +31,8 @@ import javax.inject.Singleton
 @Singleton
 class StatusRepository @Inject constructor(
     private val poller: PollingStatusSource,
-    private val client: DaemonClient
+    private val client: DaemonClient,
+    private val messages: UserMessageFormatter,
 ) {
     // ---- Exposed state (delegates to PollingStatusSource) ----
 
@@ -62,7 +65,7 @@ class StatusRepository @Inject constructor(
     suspend fun start(): CommandOutcome {
         val result = client.start()
         poller.pollNow()
-        return result.toOutcome("Start")
+        return toOutcome(result, R.string.operation_start)
     }
 
     /**
@@ -71,7 +74,7 @@ class StatusRepository @Inject constructor(
     suspend fun stop(): CommandOutcome {
         val result = client.stop()
         poller.pollNow()
-        return result.toOutcome("Stop")
+        return toOutcome(result, R.string.operation_stop)
     }
 
     /**
@@ -80,13 +83,13 @@ class StatusRepository @Inject constructor(
     suspend fun reload(): CommandOutcome {
         val result = client.reload()
         poller.pollNow()
-        return result.toOutcome("Reload")
+        return toOutcome(result, R.string.operation_reload)
     }
 
-    suspend fun networkReset(): CommandOutcome {
+    suspend fun networkReset(): DaemonClientResult<com.privstack.panel.model.ResetReport> {
         val result = client.networkReset()
         poller.pollNow()
-        return result.toOutcome("Network reset")
+        return result
     }
 
     /**
@@ -126,6 +129,16 @@ class StatusRepository @Inject constructor(
     val isConnected: Boolean
         get() = connectionState.value == DaemonConnectionState.REACHABLE &&
                 status.value?.state == com.privstack.panel.model.ConnectionState.CONNECTED
+
+    private fun <T> toOutcome(result: DaemonClientResult<T>, operationResId: Int): CommandOutcome = when (result) {
+        is DaemonClientResult.Ok -> CommandOutcome.Success
+        else -> CommandOutcome.Failed(
+            messages.formatOperationFailure(
+                operationResId,
+                messages.formatDaemonFailure(result),
+            )
+        )
+    }
 }
 
 // ---- Result types ----
@@ -138,14 +151,4 @@ sealed class CommandOutcome {
     data class Failed(val message: String) : CommandOutcome()
 
     val isSuccess: Boolean get() = this is Success
-}
-
-private fun <T> DaemonClientResult<T>.toOutcome(label: String): CommandOutcome = when (this) {
-    is DaemonClientResult.Ok -> CommandOutcome.Success
-    is DaemonClientResult.DaemonError -> CommandOutcome.Failed("$label failed: $message (code $code)")
-    is DaemonClientResult.RootDenied -> CommandOutcome.Failed("Root access denied")
-    is DaemonClientResult.Timeout -> CommandOutcome.Failed("$label timed out")
-    is DaemonClientResult.DaemonNotFound -> CommandOutcome.Failed("Daemon not installed")
-    is DaemonClientResult.ParseError -> CommandOutcome.Failed("Invalid daemon response")
-    is DaemonClientResult.Failure -> CommandOutcome.Failed("Unexpected error: ${throwable.message}")
 }

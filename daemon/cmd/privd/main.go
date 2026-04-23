@@ -23,11 +23,12 @@ import (
 	"github.com/privstack/daemon/internal/health"
 	"github.com/privstack/daemon/internal/ipc"
 	"github.com/privstack/daemon/internal/rescue"
+	"github.com/privstack/daemon/internal/runtimev2"
 	"github.com/privstack/daemon/internal/updater"
 	"github.com/privstack/daemon/internal/watcher"
 )
 
-var Version = "0.2.0"
+var Version = "1.6.0"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {
@@ -40,6 +41,7 @@ type daemon struct {
 	rescueMgr  *rescue.RescueManager
 	netWatcher *watcher.NetworkWatcher
 	ipcServer  *ipc.Server
+	runtimeV2  *runtimev2.Orchestrator
 
 	mu         sync.Mutex // protects cfg
 	metricsMu  sync.Mutex
@@ -165,11 +167,18 @@ func main() {
 	}
 	healthMon := health.NewHealthMonitor(coreMgr, healthInterval, healthThreshold, tproxyPort, dnsPort, mark, cfg.Health.URL, healthTimeout, healthLogger)
 	scriptEnv := buildScriptEnv(cfg, *dataDir)
-	netWatcher := watcher.NewNetworkWatcher(*dataDir, scriptEnv, watchLogger)
+	var d *daemon
+	netWatcher := watcher.NewNetworkWatcher(*dataDir, scriptEnv, func() error {
+		if d == nil {
+			return nil
+		}
+		_, err := d.runtimeV2.HandleNetworkChange()
+		return err
+	}, watchLogger)
 
 	socketPath := filepath.Join(*dataDir, "run", "daemon.sock")
 
-	d := &daemon{
+	d = &daemon{
 		cfg:        cfg,
 		cfgPath:    *cfgPath,
 		dataDir:    *dataDir,
@@ -179,6 +188,7 @@ func main() {
 		netWatcher: netWatcher,
 		ipcServer:  ipc.NewServer(socketPath),
 	}
+	d.initRuntimeV2()
 
 	d.healthMon.SetOnDegraded(func() {
 		if err := d.rescueMgr.Attempt(); err != nil {
@@ -217,6 +227,8 @@ func main() {
 		} else {
 			// Proxy is running -- start the supporting subsystems.
 			d.startSubsystems()
+			d.syncRuntimeV2DesiredState()
+			d.runtimeV2.RefreshHealth()
 		}
 	}
 
@@ -347,6 +359,14 @@ func writePID(path string) error {
 // --------------------------------------------------------------------------
 
 func (d *daemon) registerHandlers() {
+	d.ipcServer.Register("backend.status", d.handleBackendStatus)
+	d.ipcServer.Register("backend.start", d.handleBackendStart)
+	d.ipcServer.Register("backend.stop", d.handleBackendStop)
+	d.ipcServer.Register("backend.restart", d.handleBackendRestart)
+	d.ipcServer.Register("backend.reset", d.handleBackendReset)
+	d.ipcServer.Register("backend.applyDesiredState", d.handleBackendApplyDesiredState)
+	d.ipcServer.Register("diagnostics.health", d.handleDiagnosticsHealth)
+	d.ipcServer.Register("diagnostics.testNodes", d.handleDiagnosticsTestNodes)
 	d.ipcServer.Register("status", d.handleStatus)
 	d.ipcServer.Register("start", d.handleStart)
 	d.ipcServer.Register("stop", d.handleStop)
@@ -464,27 +484,10 @@ func (d *daemon) handleReload(params *json.RawMessage) (interface{}, *ipc.RPCErr
 }
 
 func (d *daemon) handleNetworkReset(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	d.stopSubsystems()
-
-	if d.coreMgr.GetState() != core.StateStopped {
-		if err := d.coreMgr.Stop(); err != nil {
-			log.Printf("network-reset: core stop: %v", err)
-		}
+	if d.runtimeV2 == nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "v2 runtime is not initialized"}
 	}
-
-	d.mu.Lock()
-	cfg := d.cfg
-	d.mu.Unlock()
-	errors := d.resetNetworkState(cfg)
-
-	if len(errors) > 0 {
-		return map[string]interface{}{
-			"status": "partial",
-			"errors": errors,
-		}, nil
-	}
-
-	return map[string]string{"status": "reset"}, nil
+	return d.runtimeV2.Reset(), nil
 }
 
 func (d *daemon) handleHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -528,11 +531,11 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	if cfg.Node.Address == "" {
 		appendFinding(
 			"NODE_NOT_CONFIGURED",
-			"No active node configured",
-			"The daemon has no upstream node address, so connections cannot be established.",
+			"Активный сервер не настроен",
+			"У демона не указан адрес upstream-сервера, поэтому соединение не может быть установлено.",
 			"CRITICAL",
 			"CONFIG",
-			"Import or select a valid node before connecting.",
+			"Импортируйте или выберите корректный сервер перед подключением.",
 			"node.address",
 		)
 	}
@@ -540,11 +543,11 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	if cfg.DNS.ProxyDNS == "" {
 		appendFinding(
 			"PROXY_DNS_EMPTY",
-			"Proxy DNS is empty",
-			"The proxy DNS endpoint is not configured, which can cause lookup failures or leaks.",
+			"Proxy DNS не задан",
+			"Не настроен адрес proxy DNS, из-за чего возможны ошибки резолвинга или утечки.",
 			"HIGH",
 			"DNS",
-			"Set a valid DoH endpoint for proxy DNS.",
+			"Укажите корректный DoH-адрес для proxy DNS.",
 			"dns.proxy_dns",
 		)
 	}
@@ -552,11 +555,11 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	if cfg.DNS.DirectDNS == "" {
 		appendFinding(
 			"DIRECT_DNS_EMPTY",
-			"Direct DNS is empty",
-			"The direct DNS endpoint is not configured for bypassed traffic.",
+			"Direct DNS не задан",
+			"Не настроен адрес direct DNS для трафика в обход.",
 			"MEDIUM",
 			"DNS",
-			"Set a valid DoH endpoint for direct DNS.",
+			"Укажите корректный DoH-адрес для direct DNS.",
 			"dns.direct_dns",
 		)
 	}
@@ -570,11 +573,11 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	if (cfg.Node.Protocol == "vless" || cfg.Node.Protocol == "vmess") && transportSecurity == "" {
 		appendFinding(
 			"TRANSPORT_NOT_ENCRYPTED",
-			"Transport security is not enabled",
-			"VLESS/VMess is configured without TLS or REALITY, which weakens transport privacy.",
+			"Защита транспорта не включена",
+			"VLESS или VMess настроен без TLS или REALITY, что ослабляет приватность транспорта.",
 			"MEDIUM",
 			"ENCRYPTION",
-			"Enable TLS or REALITY for the active node.",
+			"Включите TLS или REALITY для активного сервера.",
 			"transport",
 		)
 	}
@@ -582,11 +585,11 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	if cfg.Apps.Mode == "all" {
 		appendFinding(
 			"PER_APP_ROUTING_DISABLED",
-			"Per-app routing is disabled",
-			"All applications are routed the same way, which may increase exposure for sensitive apps.",
+			"Маршрутизация по приложениям отключена",
+			"Все приложения маршрутизируются одинаково, что может повышать риск для чувствительных программ.",
 			"INFO",
 			"ROUTING",
-			"Use whitelist or blacklist mode if you need per-app isolation.",
+			"Если нужна изоляция по приложениям, используйте белый список или исключения.",
 			"apps.mode",
 		)
 	}
@@ -594,11 +597,11 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	if cfg.Routing.Mode == "direct" && cfg.Apps.Mode != "off" {
 		appendFinding(
 			"DIRECT_MODE_NOT_HARD_BYPASS",
-			"Direct mode is not a hard bypass",
-			"Routing mode is direct, but apps.mode still allows marking traffic for interception.",
+			"Прямой режим не является жёстким обходом",
+			"Маршрутизация переведена в direct, но apps.mode всё ещё позволяет помечать трафик для перехвата.",
 			"HIGH",
 			"ROUTING",
-			"Set apps.mode to off for direct mode so iptables and DNS interception are disabled.",
+			"Для direct-режима установите apps.mode = off, чтобы отключить iptables и DNS-перехват.",
 			"apps.mode",
 		)
 	}
@@ -612,11 +615,11 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 		if pathHasGroupOrWorldBits(path) {
 			appendFinding(
 				"SENSITIVE_FILE_PERMISSIONS",
-				"Sensitive file is readable outside root",
-				"Config or log files may expose proxy endpoints, credentials, or runtime diagnostics.",
+				"Чувствительный файл читается вне root",
+				"Файлы конфигурации или логов могут раскрывать адреса proxy, учётные данные или runtime-диагностику.",
 				"MEDIUM",
 				"CONFIG",
-				"Set config and log files to 0600 and their directories to root-only permissions.",
+				"Установите для конфигов и логов права 0600, а для их директорий оставьте доступ только root.",
 				path,
 			)
 			break
@@ -628,11 +631,11 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 		if !localPortProtectionPresent(cfg) {
 			appendFinding(
 				"LOCAL_PORT_PROTECTION_MISSING",
-				"Local PrivStack ports are not fully protected",
-				"Ordinary apps may be able to connect to the TPROXY, DNS, or management listener ports.",
+				"Локальные порты PrivStack защищены не полностью",
+				"Обычные приложения могут получить доступ к TPROXY-, DNS- или управляющим портам.",
 				"HIGH",
 				"LEAK",
-				"Re-apply iptables rules and verify DROP rules for the TPROXY, DNS, and API ports.",
+				"Повторно примените правила iptables и проверьте DROP-правила для портов TPROXY, DNS и API.",
 				"iptables mangle PRIVSTACK_OUT",
 			)
 		}
@@ -659,11 +662,11 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 
 		appendFinding(
 			"HEALTH_"+strings.ToUpper(strings.ReplaceAll(name, "-", "_")),
-			fmt.Sprintf("Health check failed: %s", name),
+			fmt.Sprintf("Проверка состояния не пройдена: %s", name),
 			check.Detail,
 			severity,
 			category,
-			"Resolve the underlying daemon health issue and run the audit again.",
+			"Устраните проблему в состоянии демона и повторите аудит.",
 			name,
 		)
 	}
@@ -1025,6 +1028,7 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 	}
 	d.healthMon.SetConfig(healthInterval, healthThreshold, tproxyPort, dnsPort, routeMark, newCfg.Health.URL, healthTimeout)
 	d.netWatcher.SetEnv(buildScriptEnv(newCfg, d.dataDir))
+	d.syncRuntimeV2DesiredState()
 
 	if reload && wasRunning {
 		d.stopSubsystems()
@@ -1039,6 +1043,7 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 		}
 		d.rescueMgr.Reset()
 		d.startSubsystems()
+		d.runtimeV2.RefreshHealth()
 	}
 
 	return nil

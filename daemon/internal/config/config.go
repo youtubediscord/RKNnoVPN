@@ -14,6 +14,7 @@ type Config struct {
 	Transport TransportConfig `json:"transport"`
 	Node      NodeConfig      `json:"node"`
 	Panel     PanelConfig     `json:"panel,omitempty"`
+	RuntimeV2 RuntimeV2Config `json:"runtime_v2,omitempty"`
 	Routing   RoutingConfig   `json:"routing"`
 	Apps      AppsConfig      `json:"apps"`
 	DNS       DNSConfig       `json:"dns"`
@@ -84,6 +85,13 @@ type PanelConfig struct {
 	Tun          json.RawMessage   `json:"tun,omitempty"`
 	Inbounds     json.RawMessage   `json:"inbounds,omitempty"`
 	Extra        json.RawMessage   `json:"extra,omitempty"`
+}
+
+// RuntimeV2Config stores reliability-first backend selection state for the
+// side-by-side v2 runtime path.
+type RuntimeV2Config struct {
+	BackendKind    string `json:"backend_kind,omitempty"`
+	FallbackPolicy string `json:"fallback_policy,omitempty"`
 }
 
 // PanelInboundsConfig stores APK-owned local inbound settings that the daemon
@@ -199,6 +207,10 @@ func DefaultConfig() *Config {
 		Panel: PanelConfig{
 			ID:   "default",
 			Name: "Default",
+		},
+		RuntimeV2: RuntimeV2Config{
+			BackendKind:    "ROOT_TPROXY",
+			FallbackPolicy: "OFFER_RESET",
 		},
 		Routing: RoutingConfig{
 			Mode:        "whitelist",
@@ -388,6 +400,26 @@ func (c *Config) Validate() error {
 	}
 	if !validAppMode[c.Apps.Mode] {
 		return fmt.Errorf("apps.mode must be all/whitelist/blacklist/off, got %q", c.Apps.Mode)
+	}
+
+	if c.RuntimeV2.BackendKind != "" {
+		validBackend := map[string]bool{
+			"ROOT_TPROXY": true,
+		}
+		if !validBackend[c.RuntimeV2.BackendKind] {
+			return fmt.Errorf("runtime_v2.backend_kind must be ROOT_TPROXY, got %q", c.RuntimeV2.BackendKind)
+		}
+	}
+
+	if c.RuntimeV2.FallbackPolicy != "" {
+		validFallback := map[string]bool{
+			"OFFER_RESET":       true,
+			"STAY_ON_SELECTED":  true,
+			"AUTO_RESET_ROOTED": true,
+		}
+		if !validFallback[c.RuntimeV2.FallbackPolicy] {
+			return fmt.Errorf("runtime_v2.fallback_policy must be OFFER_RESET/STAY_ON_SELECTED/AUTO_RESET_ROOTED, got %q", c.RuntimeV2.FallbackPolicy)
+		}
 	}
 
 	if c.Health.IntervalSec < 0 {

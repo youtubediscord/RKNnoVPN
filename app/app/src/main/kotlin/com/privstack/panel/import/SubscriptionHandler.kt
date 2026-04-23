@@ -12,8 +12,8 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * Handles proxy subscription URLs.
  *
- * Because the panel APK does not hold the INTERNET permission, the actual HTTP fetch
- * is delegated to the daemon process via IPC. This class provides:
+ * In v2 the panel APK owns control-plane HTTP, so subscription bytes are fetched
+ * directly by the app and only parsing/merge logic stays here. This class provides:
  *
  * - Parsing the subscription response body (base64-encoded list of URIs).
  * - Parsing the `subscription-userinfo` response header.

@@ -8,7 +8,7 @@
 
 - Нет Android VPN API: приложения не видят `TRANSPORT_VPN`.
 - Нет `tun0` и системной VPN-иконки.
-- APK не имеет `INTERNET` permission и работает только как панель управления.
+- В `v2` APK получил `INTERNET` только для control-plane операций: подписки, update-check/download и диагностики, не зависящих от rooted data-plane.
 - Можно проксировать только выбранные приложения, оставляя остальные напрямую.
 - Сохранённые серверы рендерятся в `sing-box` как отдельные outbounds.
 - Над несколькими серверами используется `urltest`, чтобы `sing-box` выбирал рабочий и быстрый outbound.
@@ -33,7 +33,7 @@ APK вызывает `privctl` через `su`. `privctl` общается с ro
 | Magisk-модуль | Скрипты установки, boot service, SELinux policy, `privd`, `privctl`, `sing-box` |
 | `privd` | root-демон: config, IPC, запуск core, iptables, DNS, health, update |
 | `privctl` | CLI-клиент для ручной диагностики и IPC-команд |
-| Android APK | Kotlin/Compose панель управления без сетевых разрешений |
+| Android APK | Kotlin/Compose панель управления; в `v2` держит только control-plane сеть |
 | `sing-box` | transport core: tproxy inbound, outbounds, `urltest`, Clash API для delay-тестов |
 
 ## Быстрый старт

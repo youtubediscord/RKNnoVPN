@@ -7,7 +7,7 @@ PrivStack - прозрачный прокси-стек для rooted Android. Ц
 Система состоит из двух частей:
 
 1. Magisk/KernelSU/APatch-модуль с root-демоном `privd`, CLI `privctl`, скриптами iptables и бинарником `sing-box`.
-2. Android APK без сетевых разрешений, который управляет демоном через `su -c privctl`.
+2. Android APK, который управляет демоном через `su -c privctl` и в `v2` использует сеть только для control-plane операций, не зависящих от rooted data-plane.
 
 ## Основной поток трафика
 
@@ -28,7 +28,7 @@ Android app
 
 - Не использовать Android VPN API.
 - Не создавать `tun0`.
-- Не давать APK разрешение `INTERNET`.
+- В `v2` разрешить APK `INTERNET` только для control-plane трафика, не зависящего от rooted data-plane.
 - Не полагаться на Xposed/хуки как основную защиту.
 - Всё сетевое состояние держать в root-слое.
 - Любая ошибка запуска core должна быть диагностируема через `sing-box.log`.
