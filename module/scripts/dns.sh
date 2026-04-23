@@ -28,7 +28,7 @@
 set -eu
 
 TAG="privstack:dns"
-SCRIPT_VERSION="v1.6.0"
+SCRIPT_VERSION="v1.6.1"
 
 # Sane defaults if the caller omitted something.
 DNS_PORT="${DNS_PORT:-10856}"

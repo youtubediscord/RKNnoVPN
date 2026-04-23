@@ -28,7 +28,7 @@ import (
 	"github.com/privstack/daemon/internal/watcher"
 )
 
-var Version = "1.6.0"
+var Version = "1.6.1"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {

@@ -11,7 +11,7 @@ import (
 
 const defaultSocket = "/data/adb/privstack/run/daemon.sock"
 
-var Version = "1.6.0"
+var Version = "1.6.1"
 
 var commands = map[string]string{
 	"backend.status":            "Get v2 backend status",
