@@ -75,6 +75,7 @@ data class HealthResult(
     val dnsOperational: Boolean = false,
     val routingReady: Boolean = false,
     val egressReady: Boolean = false,
+    val operationalHealthy: Boolean = false,
     val backendKind: BackendKind = BackendKind.ROOT_TPROXY,
     val phase: BackendPhase = BackendPhase.STOPPED,
     val lastError: String? = null,

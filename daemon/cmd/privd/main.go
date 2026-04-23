@@ -18,17 +18,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/privstack/daemon/internal/config"
-	"github.com/privstack/daemon/internal/core"
-	"github.com/privstack/daemon/internal/health"
-	"github.com/privstack/daemon/internal/ipc"
-	"github.com/privstack/daemon/internal/rescue"
-	"github.com/privstack/daemon/internal/runtimev2"
-	"github.com/privstack/daemon/internal/updater"
-	"github.com/privstack/daemon/internal/watcher"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/watcher"
 )
 
-var Version = "1.6.3"
+var Version = "1.6.4"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {
@@ -1163,16 +1163,20 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 	d.stopSubsystems()
 	profile := cfg.ResolveProfile()
 	if err := d.coreMgr.HotSwap(profile); err != nil {
-		_ = d.resetNetworkState(cfg)
+		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
 		return fmt.Errorf("%s hot-swap failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
 	}
 	if err := d.reapplyRuntimeRules(cfg); err != nil {
-		_ = d.resetNetworkState(cfg)
+		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
 		return fmt.Errorf("%s rules failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
 	}
 	d.rescueMgr.Reset()
 	d.startSubsystems()
-	d.runtimeV2.RefreshHealth()
+	snapshot := d.runtimeV2.RefreshHealth()
+	if !snapshot.Healthy() {
+		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		return fmt.Errorf("%s readiness gates failed; %s, runtime stopped for safety: %s", context, savedLabel, snapshot.LastError)
+	}
 	return nil
 }
 
@@ -1194,6 +1198,7 @@ func (d *daemon) resetNetworkState(cfg *config.Config) []string {
 	_, _ = core.ExecCommand("killall", "-KILL", "sing-box")
 	d.rescueMgr.Reset()
 	d.coreMgr.ResetState()
+	d.healthMon.Clear()
 	d.resetRuntimeMetrics()
 	return errors
 }
@@ -1650,47 +1655,130 @@ func classifyDaemonApp(packageName string, isSystem bool) string {
 
 func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	n := 50
+	requestedFiles := []string{"privd"}
 	if params != nil {
 		var p struct {
-			Lines int `json:"lines"`
+			Lines int      `json:"lines"`
+			Files []string `json:"files"`
 		}
-		if err := json.Unmarshal(*params, &p); err == nil && p.Lines > 0 {
-			n = p.Lines
+		if err := json.Unmarshal(*params, &p); err == nil {
+			if p.Lines > 0 {
+				n = p.Lines
+			}
+			if len(p.Files) > 0 {
+				requestedFiles = p.Files
+			}
 		}
+	}
+	if n > 500 {
+		n = 500
 	}
 
-	logPaths := []string{
-		filepath.Join(d.dataDir, "logs", "privd.log"),
-		filepath.Join(d.dataDir, "logs", "daemon.log"),
-		filepath.Join(d.dataDir, "log", "daemon.log"),
+	type logSection struct {
+		Name    string   `json:"name"`
+		Path    string   `json:"path"`
+		Lines   []string `json:"lines"`
+		Missing bool     `json:"missing,omitempty"`
+		Error   string   `json:"error,omitempty"`
 	}
 
-	var (
-		data []byte
-		err  error
-	)
-	for _, logPath := range logPaths {
-		data, err = os.ReadFile(logPath)
-		if err == nil {
-			break
+	sections := make([]logSection, 0, len(requestedFiles))
+	combined := make([]string, 0, len(requestedFiles)*n)
+	for _, spec := range d.resolveLogFileSpecs(requestedFiles) {
+		section := logSection{
+			Name: spec.Name,
+			Path: spec.Path,
 		}
-		if !os.IsNotExist(err) {
-			return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+		lines, err := readLogTail(spec.Path, n, 512*1024)
+		switch {
+		case err == nil:
+			section.Lines = lines
+		case os.IsNotExist(err):
+			section.Missing = true
+		default:
+			section.Error = err.Error()
+		}
+		sections = append(sections, section)
+
+		combined = append(combined, "== "+section.Path+" ==")
+		if section.Missing {
+			combined = append(combined, "(missing)")
+			continue
+		}
+		if section.Error != "" {
+			combined = append(combined, "(error: "+section.Error+")")
+			continue
+		}
+		combined = append(combined, section.Lines...)
+	}
+
+	return map[string]interface{}{
+		"lines": combined,
+		"logs":  sections,
+	}, nil
+}
+
+type logFileSpec struct {
+	Name string
+	Path string
+}
+
+func (d *daemon) resolveLogFileSpecs(requested []string) []logFileSpec {
+	seen := make(map[string]bool)
+	specs := make([]logFileSpec, 0, len(requested))
+	for _, raw := range requested {
+		key := strings.ToLower(strings.TrimSpace(raw))
+		var spec logFileSpec
+		switch key {
+		case "privd", "daemon":
+			spec = logFileSpec{Name: "privd", Path: filepath.Join(d.dataDir, "logs", "privd.log")}
+		case "sing-box", "singbox":
+			spec = logFileSpec{Name: "sing-box", Path: filepath.Join(d.dataDir, "logs", "sing-box.log")}
+		default:
+			continue
+		}
+		if !seen[spec.Name] {
+			seen[spec.Name] = true
+			specs = append(specs, spec)
 		}
 	}
+	if len(specs) == 0 {
+		specs = append(specs, logFileSpec{Name: "privd", Path: filepath.Join(d.dataDir, "logs", "privd.log")})
+	}
+	return specs
+}
+
+func readLogTail(path string, maxLines int, maxBytes int64) ([]string, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]interface{}{"lines": []string{}}, nil
-		}
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+		return nil, err
 	}
+	defer file.Close()
 
-	lines := splitLines(string(data))
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	stat, err := file.Stat()
+	if err != nil {
+		return nil, err
 	}
-
-	return map[string]interface{}{"lines": lines}, nil
+	offset := int64(0)
+	if stat.Size() > maxBytes {
+		offset = stat.Size() - maxBytes
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+	text := string(data)
+	lines := splitLines(text)
+	if offset > 0 && len(lines) > 0 {
+		lines = lines[1:]
+	}
+	if maxLines > 0 && len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	return lines, nil
 }
 
 func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1896,7 +1984,7 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 		"uptime":               uptimeSeconds(status.StartedAt),
 		"traffic":              traffic,
 		"latency_ms":           latencyMs,
-		"health":               buildHealthPayload(state, healthResult),
+		"health":               buildHealthPayload(state, healthResult, d.hasRecentEgress()),
 
 		// Keep the legacy fields for older clients and debugging tools.
 		"pid":             status.PID,
@@ -2173,14 +2261,17 @@ func uptimeSeconds(startedAt time.Time) int64 {
 	return int64(time.Since(startedAt).Seconds())
 }
 
-func buildHealthPayload(state core.State, result *health.HealthResult) map[string]interface{} {
+func buildHealthPayload(state core.State, result *health.HealthResult, egressReady bool) map[string]interface{} {
 	payload := map[string]interface{}{
-		"healthy":        false,
-		"coreRunning":    state != core.StateStopped,
-		"tunActive":      false,
-		"dnsOperational": false,
-		"lastError":      nil,
-		"checkedAt":      int64(0),
+		"healthy":            false,
+		"coreRunning":        state != core.StateStopped,
+		"tunActive":          false,
+		"dnsOperational":     false,
+		"routingReady":       false,
+		"egressReady":        egressReady,
+		"operationalHealthy": false,
+		"lastError":          nil,
+		"checkedAt":          int64(0),
 	}
 	if result == nil {
 		return payload
@@ -2190,24 +2281,45 @@ func buildHealthPayload(state core.State, result *health.HealthResult) map[strin
 	payload["checkedAt"] = result.Timestamp.Unix()
 
 	dnsOK := false
-	tunOK := false
-	for name, check := range result.Checks {
-		if name == "dns" {
-			dnsOK = check.Pass
-		}
-		if name == "iptables" || name == "routing" || name == "tproxy_port" {
-			if check.Pass {
-				tunOK = true
-			}
-		}
+	tproxyOK := false
+	iptablesOK := false
+	routingOK := false
+	if check, ok := result.Checks["dns"]; ok {
+		dnsOK = check.Pass
+	}
+	if check, ok := result.Checks["tproxy_port"]; ok {
+		tproxyOK = check.Pass
+	}
+	if check, ok := result.Checks["iptables"]; ok {
+		iptablesOK = check.Pass
+	}
+	if check, ok := result.Checks["routing"]; ok {
+		routingOK = check.Pass
 	}
 
 	payload["dnsOperational"] = dnsOK
-	payload["tunActive"] = tunOK
-	if firstError := firstFailedCheck(result.Checks, "singbox_alive", "tproxy_port", "iptables", "routing", "dns"); firstError != "" {
+	payload["tunActive"] = tproxyOK && iptablesOK && routingOK
+	payload["routingReady"] = iptablesOK && routingOK
+	payload["operationalHealthy"] = result.Overall && dnsOK && egressReady
+	if firstError := firstHealthError(result.Checks, result.Overall, egressReady); firstError != "" {
 		payload["lastError"] = firstError
 	}
 	return payload
+}
+
+func firstHealthError(checks map[string]health.CheckResult, readinessOK bool, egressReady bool) string {
+	if firstError := firstFailedCheck(checks, "singbox_alive", "tproxy_port", "iptables", "routing"); firstError != "" {
+		return firstError
+	}
+	if readinessOK {
+		if check, ok := checks["dns"]; ok && !check.Pass {
+			return fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", check.Detail)
+		}
+		if !egressReady {
+			return "operational degraded: no recent successful egress probe"
+		}
+	}
+	return ""
 }
 
 func firstFailedCheck(checks map[string]health.CheckResult, orderedNames ...string) string {

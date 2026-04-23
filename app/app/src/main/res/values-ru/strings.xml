@@ -32,6 +32,7 @@
     <string name="dns_status">DNS</string>
     <string name="dns_ok">ОК</string>
     <string name="dns_fail">Ошибка</string>
+    <string name="runtime_operational_degraded">Runtime подключён, но operational-проверки ещё с проблемами</string>
     <string name="uptime">Время работы</string>
     <string name="traffic">Трафик</string>
     <string name="upload_short">TX</string>
@@ -134,6 +135,13 @@
     <string name="restart_daemon">Перезапустить</string>
     <string name="reset_network_rules">Сбросить сеть</string>
     <string name="reset_network_rules_desc">Остановить core и убрать правила PrivStack из iptables, DNS и маршрутизации.</string>
+    <string name="runtime_logs">Логи runtime</string>
+    <string name="runtime_logs_desc">Показывает /data/adb/privstack/logs/privd.log и /data/adb/privstack/logs/sing-box.log.</string>
+    <string name="show_logs">Показать логи</string>
+    <string name="loading_logs">Загрузка…</string>
+    <string name="share_logs_telegram">Отправить в Telegram</string>
+    <string name="logs_share_subject">Логи RKNnoVPN runtime</string>
+    <string name="logs_share_chooser">Отправить логи</string>
     <string name="settings_theme">Тема</string>
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Тёмная</string>
@@ -221,6 +229,10 @@
     <string name="node_test_reason_tunnel_delay_failed">не удалось измерить задержку</string>
     <string name="node_test_reason_tunnel_unavailable">туннель недоступен</string>
     <string name="node_test_reason_dns_bootstrap_failed">ошибка DNS bootstrap</string>
+    <string name="node_test_reason_runtime_not_ready">runtime не готов</string>
+    <string name="node_test_reason_runtime_degraded">runtime degraded</string>
+    <string name="node_test_reason_proxy_dns_unavailable">proxy DNS недоступен</string>
+    <string name="node_test_reason_http_helper_unavailable">HTTP helper недоступен</string>
     <string name="node_test_reason_unknown">ошибка</string>
     <string name="node_test_tcp_ms">TCP %1$d мс</string>
     <string name="node_test_url_ms">URL %1$d мс</string>
@@ -239,6 +251,8 @@
     <string name="daemon_status_stopped">Остановлено</string>
     <string name="daemon_status_partial_reset">Частичный сброс</string>
     <string name="daemon_status_running_with_core">Запущено (core: %1$s)</string>
+    <string name="daemon_status_running_degraded">Запущено (degraded: %1$s)</string>
+    <string name="daemon_status_error_with_reason">Ошибка: %1$s</string>
     <string name="daemon_status_module_not_installed">Модуль не установлен</string>
     <string name="daemon_status_root_denied">Root-доступ запрещён</string>
     <string name="daemon_status_not_responding">Демон не отвечает</string>

@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/privstack/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 )
 
 // State represents the daemon's proxy-core lifecycle phase.

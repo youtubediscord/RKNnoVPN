@@ -10,6 +10,8 @@ import com.privstack.panel.controlplane.ReleaseInfo
 import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
+import com.privstack.panel.model.ConnectionState
+import com.privstack.panel.model.DaemonStatus
 import com.privstack.panel.model.FallbackPolicy
 import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.repository.CommandOutcome
@@ -93,6 +95,9 @@ data class SettingsUiState(
     // Error
     val errorMessage: String? = null,
     val lastResetSummary: String? = null,
+    val logsText: String = "",
+    val isLoadingLogs: Boolean = false,
+    val shareLogsText: String? = null,
 )
 
 @HiltViewModel
@@ -115,6 +120,7 @@ class SettingsViewModel @Inject constructor(
 
     init {
         observeProfile()
+        observeRuntimeStatus()
         loadVersionInfo()
     }
 
@@ -304,6 +310,68 @@ class SettingsViewModel @Inject constructor(
         // Not sent to the daemon.
     }
 
+    fun refreshRuntimeLogs() {
+        _uiState.update { it.copy(isLoadingLogs = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = daemonClient.runtimeLogs(lines = 160)) {
+                is DaemonClientResult.Ok -> {
+                    _uiState.update {
+                        it.copy(
+                            logsText = result.data.text,
+                            isLoadingLogs = false,
+                        )
+                    }
+                }
+                else -> {
+                    val message = formatUpdateError(result)
+                    Log.w(TAG, "Failed to load runtime logs: $message")
+                    _uiState.update {
+                        it.copy(
+                            isLoadingLogs = false,
+                            errorMessage = message,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun shareRuntimeLogs() {
+        val current = _uiState.value.logsText
+        if (current.isNotBlank()) {
+            _uiState.update { it.copy(shareLogsText = current) }
+            return
+        }
+        _uiState.update { it.copy(isLoadingLogs = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = daemonClient.runtimeLogs(lines = 220)) {
+                is DaemonClientResult.Ok -> {
+                    _uiState.update {
+                        it.copy(
+                            logsText = result.data.text,
+                            shareLogsText = result.data.text,
+                            isLoadingLogs = false,
+                        )
+                    }
+                }
+                else -> {
+                    val message = formatUpdateError(result)
+                    Log.w(TAG, "Failed to prepare runtime logs: $message")
+                    _uiState.update {
+                        it.copy(
+                            isLoadingLogs = false,
+                            errorMessage = message,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearSharedLogs() {
+        _uiState.update { it.copy(shareLogsText = null) }
+    }
+
     // ---- Update actions ----
 
     fun checkForUpdates() {
@@ -463,6 +531,18 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    private fun observeRuntimeStatus() {
+        viewModelScope.launch {
+            statusRepository.status
+                .filterNotNull()
+                .collect { status ->
+                    _uiState.update {
+                        it.copy(daemonStatusText = formatRuntimeStatus(status, it.daemonStatusText))
+                    }
+                }
+        }
+    }
+
     private fun applyProfileConfig(config: ProfileConfig) {
         val routingMode = when (config.routing.mode) {
             com.privstack.panel.model.RoutingMode.PROXY_ALL -> RoutingMode.GLOBAL
@@ -507,6 +587,19 @@ class SettingsViewModel @Inject constructor(
                     }
                     _updateState.update {
                         it.copy(currentVersion = info.daemonVersion)
+                    }
+                    when (val statusResult = daemonClient.status()) {
+                        is DaemonClientResult.Ok -> {
+                            _uiState.update {
+                                it.copy(
+                                    daemonStatusText = formatRuntimeStatus(
+                                        statusResult.data,
+                                        it.daemonStatusText,
+                                    ),
+                                )
+                            }
+                        }
+                        else -> Unit
                     }
                 }
                 is DaemonClientResult.DaemonNotFound -> {
@@ -563,6 +656,34 @@ class SettingsViewModel @Inject constructor(
                 profileRepository.refresh()
                 _uiState.update { it.copy(dnsPreset = previousPreset, errorMessage = err) }
             }
+        }
+    }
+
+    private fun formatRuntimeStatus(status: DaemonStatus, fallback: String): String {
+        return when (status.state) {
+            ConnectionState.CONNECTED -> {
+                if (status.health.healthy && !status.health.operationalHealthy) {
+                    messages.get(
+                        com.privstack.panel.R.string.daemon_status_running_degraded,
+                        status.health.lastError
+                            ?: messages.get(com.privstack.panel.R.string.runtime_operational_degraded),
+                    )
+                } else {
+                    fallback.ifBlank { messages.get(com.privstack.panel.R.string.state_connected) }
+                }
+            }
+            ConnectionState.CONNECTING ->
+                messages.get(com.privstack.panel.R.string.state_connecting)
+            ConnectionState.DISCONNECTED ->
+                messages.get(com.privstack.panel.R.string.daemon_status_stopped)
+            ConnectionState.ERROR ->
+                messages.get(
+                    com.privstack.panel.R.string.daemon_status_error_with_reason,
+                    status.health.lastError
+                        ?: messages.get(com.privstack.panel.R.string.daemon_status_unknown_text),
+                )
+            ConnectionState.UNKNOWN ->
+                messages.get(com.privstack.panel.R.string.daemon_status_unknown_text)
         }
     }
 

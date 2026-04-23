@@ -65,6 +65,15 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
+            if (state.operationalDegraded) {
+                StatusMessageCard(
+                    text = state.operationalIssueMessage
+                        ?: stringResource(R.string.runtime_operational_degraded),
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // -- Connection indicator --

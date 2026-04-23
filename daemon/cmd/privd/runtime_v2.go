@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/privstack/daemon/internal/config"
-	"github.com/privstack/daemon/internal/core"
-	"github.com/privstack/daemon/internal/health"
-	"github.com/privstack/daemon/internal/ipc"
-	"github.com/privstack/daemon/internal/runtimev2"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
 type rootBackendV2 struct {
@@ -51,7 +51,7 @@ func (b *rootBackendV2) Start(desired runtimev2.DesiredState) error {
 	snapshot := b.RefreshHealth()
 	if !snapshot.Healthy() {
 		b.d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
-		return fmt.Errorf("health gates failed after start: %s", snapshot.LastError)
+		return fmt.Errorf("readiness gates failed after start: %s", snapshot.LastError)
 	}
 	return nil
 }
@@ -192,7 +192,7 @@ func (d *daemon) restartRootBackendV2() error {
 	snapshot := d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), false)
 	if !snapshot.Healthy() {
 		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
-		return fmt.Errorf("restart health gates failed: %s", snapshot.LastError)
+		return fmt.Errorf("restart readiness gates failed: %s", snapshot.LastError)
 	}
 	return nil
 }
@@ -218,7 +218,7 @@ func (d *daemon) reconcileRootRuntime(reason string) error {
 	}
 
 	d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
-	return fmt.Errorf("%s health gates failed: %s", reason, snapshot.LastError)
+	return fmt.Errorf("%s readiness gates failed: %s", reason, snapshot.LastError)
 }
 
 func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allowEgressProbe bool) runtimev2.HealthSnapshot {
@@ -277,20 +277,25 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 
 func firstFailedGate(result *health.HealthResult, snapshot runtimev2.HealthSnapshot) string {
 	if result != nil {
-		for _, name := range []string{"singbox_alive", "tproxy_port", "iptables", "routing", "dns"} {
+		for _, name := range []string{"singbox_alive", "tproxy_port", "iptables", "routing"} {
 			if check, ok := result.Checks[name]; ok && !check.Pass {
 				return fmt.Sprintf("%s: %s", name, check.Detail)
 			}
 		}
-	}
-	if !snapshot.EgressReady {
-		return "egress: no recent successful egress probe"
+		if snapshot.Healthy() {
+			if check, ok := result.Checks["dns"]; ok && !check.Pass {
+				return fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", check.Detail)
+			}
+		}
 	}
 	if !snapshot.Healthy() {
 		return "one or more readiness gates are red"
 	}
+	if !snapshot.EgressReady {
+		return "operational degraded: no recent successful egress probe"
+	}
 	if !snapshot.OperationalHealthy() {
-		return "one or more operational health signals are red"
+		return "operational degraded: one or more operational health signals are red"
 	}
 	return ""
 }
@@ -355,7 +360,7 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 			errs = append(errs, err.Error())
 		}
 		if len(errs) > 0 {
-			return fmt.Errorf(strings.Join(errs, "; "))
+			return fmt.Errorf("%s", strings.Join(errs, "; "))
 		}
 		return nil
 	})
@@ -363,6 +368,7 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 	runStep("clear-runtime-state", func() error {
 		d.rescueMgr.Reset()
 		d.coreMgr.ResetState()
+		d.healthMon.Clear()
 		d.resetRuntimeMetrics()
 		return nil
 	})
@@ -377,7 +383,7 @@ func isIgnorableKillallError(output string, err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.TrimSpace(output) == "" && err.Error() == "exit status 1"
+	return err.Error() == "exit status 1"
 }
 
 func (d *daemon) persistDesiredStateV2(desired runtimev2.DesiredState) error {
@@ -551,6 +557,12 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 	}
 	d.mu.Unlock()
 
+	var runtimeHealth runtimev2.HealthSnapshot
+	runtimeRunning := d.coreMgr.GetState() == core.StateRunning || d.coreMgr.GetState() == core.StateDegraded
+	if runtimeRunning {
+		runtimeHealth = d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), false)
+	}
+
 	results := make([]runtimev2.NodeProbeResult, 0, len(profiles))
 	for _, profile := range profiles {
 		if len(requested) > 0 && !requested[profile.ID] {
@@ -577,7 +589,7 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 			result.ErrorClass = "dns_bootstrap_failed"
 		}
 
-		if d.coreMgr.GetState() == core.StateRunning || d.coreMgr.GetState() == core.StateDegraded {
+		if runtimeRunning {
 			urlMS, _, urlErr := testClashDelay(apiPort, profile.Tag, testURL, timeoutMS)
 			if urlErr == nil {
 				result.TunnelDelay = &urlMS
@@ -585,7 +597,7 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 					result.ErrorClass = "ok"
 				}
 			} else if result.ErrorClass == "" {
-				result.ErrorClass = "tunnel_delay_failed"
+				result.ErrorClass = classifyRuntimeURLTestFailure(urlErr, runtimeHealth)
 			}
 		} else if result.ErrorClass == "" {
 			result.ErrorClass = "tunnel_unavailable"
@@ -595,6 +607,27 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 	}
 
 	return results
+}
+
+func classifyRuntimeURLTestFailure(err error, snapshot runtimev2.HealthSnapshot) string {
+	if !snapshot.Healthy() {
+		return "runtime_not_ready"
+	}
+	if !snapshot.DNSReady {
+		return "proxy_dns_unavailable"
+	}
+	if !snapshot.EgressReady {
+		return "runtime_degraded"
+	}
+	if err != nil {
+		detail := strings.ToLower(err.Error())
+		if strings.Contains(detail, "127.0.0.1") ||
+			strings.Contains(detail, "connection refused") ||
+			strings.Contains(detail, "connect:") {
+			return "http_helper_unavailable"
+		}
+	}
+	return "tunnel_delay_failed"
 }
 
 func (d *daemon) probeNodeBootstrapDNS(cfg *config.Config, host string, timeout time.Duration) bool {

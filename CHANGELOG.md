@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.6.4
+
+- Split hard runtime readiness from soft DNS and egress diagnostics so cold-start DNS timeouts leave the runtime connected but degraded.
+- Added deterministic readiness/operational diagnostics and clearer node-test reasons for runtime, proxy DNS, and HTTP helper failures.
+- Added in-app display and sharing for `/data/adb/privstack/logs/privd.log` and `/data/adb/privstack/logs/sing-box.log`.
+
 ## v1.6.3
 
 - Split hard readiness from soft DNS and egress diagnostics so restart no longer tears the runtime down on a single cold-start DNS timeout.

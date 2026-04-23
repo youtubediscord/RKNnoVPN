@@ -33,6 +33,8 @@ data class DashboardUiState(
     val latencyMs: Int? = null,
     val dnsChecked: Boolean = false,
     val dnsOperational: Boolean = false,
+    val operationalDegraded: Boolean = false,
+    val operationalIssueMessage: String? = null,
     val uptimeSeconds: Long = 0L,
     val isRefreshing: Boolean = false,
     /** Error message from the last daemon operation, or null. */
@@ -198,6 +200,10 @@ class DashboardViewModel @Inject constructor(
         }
 
         _uiState.update {
+            val operationalDegraded = status.state == ConnectionState.CONNECTED &&
+                status.health.healthy &&
+                !status.health.operationalHealthy &&
+                status.health.checkedAt > 0L
             it.copy(
                 connectionState = status.state,
                 activeNodeName = status.activeNodeName,
@@ -209,6 +215,12 @@ class DashboardViewModel @Inject constructor(
                 trafficHistory = _trafficRing.toList(),
                 dnsChecked = status.health.checkedAt > 0L,
                 dnsOperational = status.health.dnsOperational,
+                operationalDegraded = operationalDegraded,
+                operationalIssueMessage = if (operationalDegraded) {
+                    status.health.lastError
+                } else {
+                    null
+                },
                 uptimeSeconds = status.uptime,
                 // Clear error when we get a successful status with a healthy state
                 errorMessage = if (status.state == ConnectionState.ERROR) {

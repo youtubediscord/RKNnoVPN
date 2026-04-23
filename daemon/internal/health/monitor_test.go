@@ -1,0 +1,112 @@
+package health
+
+import (
+	"log"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+)
+
+func TestRunOnceTreatsDNSAsOperationalOnly(t *testing.T) {
+	cfg := config.DefaultConfig()
+	manager := core.NewCoreManager(cfg, t.TempDir(), log.New(os.Stderr, "", 0))
+	monitor := NewHealthMonitor(
+		manager,
+		time.Second,
+		1,
+		cfg.Proxy.TProxyPort,
+		cfg.Proxy.DNSPort,
+		cfg.Proxy.Mark,
+		cfg.Health.URL,
+		time.Second,
+		log.New(os.Stderr, "", 0),
+	)
+	monitor.runProcessAliveCheck = func(pid int) CheckResult {
+		return CheckResult{Pass: true, Detail: "alive"}
+	}
+	monitor.runPortListeningCheck = func(port int) CheckResult {
+		return CheckResult{Pass: true, Detail: "listening"}
+	}
+	monitor.runIptablesCheck = func() CheckResult {
+		return CheckResult{Pass: true, Detail: "iptables"}
+	}
+	monitor.runRoutingCheck = func() CheckResult {
+		return CheckResult{Pass: true, Detail: "routing"}
+	}
+	monitor.runDNSCheck = func() CheckResult {
+		return CheckResult{Pass: false, Detail: "dns timeout"}
+	}
+
+	result := monitor.RunOnce()
+	if !result.Overall {
+		t.Fatalf("DNS failure must not fail hard readiness: %#v", result)
+	}
+	if result.Checks["dns"].Pass {
+		t.Fatalf("DNS check should still be reported as failed")
+	}
+}
+
+func TestRunOnceFailsHardReadinessOnRoutingFailure(t *testing.T) {
+	cfg := config.DefaultConfig()
+	manager := core.NewCoreManager(cfg, t.TempDir(), log.New(os.Stderr, "", 0))
+	monitor := NewHealthMonitor(
+		manager,
+		time.Second,
+		1,
+		cfg.Proxy.TProxyPort,
+		cfg.Proxy.DNSPort,
+		cfg.Proxy.Mark,
+		cfg.Health.URL,
+		time.Second,
+		log.New(os.Stderr, "", 0),
+	)
+	monitor.runProcessAliveCheck = func(pid int) CheckResult {
+		return CheckResult{Pass: true, Detail: "alive"}
+	}
+	monitor.runPortListeningCheck = func(port int) CheckResult {
+		return CheckResult{Pass: true, Detail: "listening"}
+	}
+	monitor.runIptablesCheck = func() CheckResult {
+		return CheckResult{Pass: true, Detail: "iptables"}
+	}
+	monitor.runRoutingCheck = func() CheckResult {
+		return CheckResult{Pass: false, Detail: "routing missing"}
+	}
+	monitor.runDNSCheck = func() CheckResult {
+		return CheckResult{Pass: true, Detail: "dns"}
+	}
+
+	result := monitor.RunOnce()
+	if result.Overall {
+		t.Fatalf("routing failure must fail hard readiness: %#v", result)
+	}
+}
+
+func TestClearDropsStickyHealthState(t *testing.T) {
+	cfg := config.DefaultConfig()
+	manager := core.NewCoreManager(cfg, t.TempDir(), log.New(os.Stderr, "", 0))
+	monitor := NewHealthMonitor(
+		manager,
+		time.Second,
+		1,
+		cfg.Proxy.TProxyPort,
+		cfg.Proxy.DNSPort,
+		cfg.Proxy.Mark,
+		cfg.Health.URL,
+		time.Second,
+		log.New(os.Stderr, "", 0),
+	)
+	monitor.failures = 2
+	monitor.lastResult = &HealthResult{Timestamp: time.Now()}
+
+	monitor.Clear()
+	if monitor.Failures() != 0 {
+		t.Fatalf("failures were not cleared")
+	}
+	if monitor.LastResult() != nil {
+		t.Fatalf("last result was not cleared")
+	}
+}

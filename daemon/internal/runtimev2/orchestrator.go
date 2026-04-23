@@ -78,7 +78,7 @@ func (o *Orchestrator) Start() (Status, error) {
 	}
 	supported, reason := backend.Supported()
 	if !supported {
-		err = fmt.Errorf(reason)
+		err = fmt.Errorf("%s", reason)
 		o.health = HealthSnapshot{LastError: err.Error(), CheckedAt: time.Now()}
 		status := o.statusLocked()
 		o.mu.Unlock()
@@ -188,7 +188,7 @@ func (o *Orchestrator) Restart() (Status, error) {
 	}
 	supported, reason := backend.Supported()
 	if !supported {
-		err = fmt.Errorf(reason)
+		err = fmt.Errorf("%s", reason)
 		o.health = HealthSnapshot{LastError: err.Error(), CheckedAt: time.Now()}
 		status := o.statusLocked()
 		o.mu.Unlock()
@@ -386,7 +386,7 @@ func (o *Orchestrator) validateDesiredLocked(desired DesiredState) error {
 	}
 	supported, reason := backend.Supported()
 	if !supported && desired.BackendKind != BackendRootTProxy {
-		return fmt.Errorf(reason)
+		return fmt.Errorf("%s", reason)
 	}
 	return nil
 }
@@ -436,7 +436,7 @@ func phaseFromHealth(health HealthSnapshot, fallback Phase) Phase {
 	if health.CheckedAt.IsZero() {
 		return fallback
 	}
-	if health.Healthy() {
+	if health.OperationalHealthy() {
 		return PhaseHealthy
 	}
 	return PhaseDegraded

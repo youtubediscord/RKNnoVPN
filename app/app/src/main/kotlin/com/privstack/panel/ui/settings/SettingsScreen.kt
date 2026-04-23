@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
@@ -22,6 +24,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -41,6 +44,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,6 +70,20 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    state.shareLogsText?.let { logs ->
+        LaunchedEffect(logs) {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.logs_share_subject))
+                putExtra(Intent.EXTRA_TEXT, logs)
+            }
+            context.startActivity(
+                Intent.createChooser(intent, context.getString(R.string.logs_share_chooser))
+            )
+            viewModel.clearSharedLogs()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -251,6 +270,61 @@ fun SettingsScreen(
                     Text(
                         state.lastResetSummary ?: stringResource(R.string.reset_network_rules_desc)
                     )
+                },
+                colors = transparentListItemColors(),
+            )
+
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.runtime_logs)) },
+                supportingContent = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.runtime_logs_desc))
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(
+                                onClick = viewModel::refreshRuntimeLogs,
+                                enabled = !state.isLoadingLogs,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(
+                                    Icons.Filled.RestartAlt,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 4.dp),
+                                )
+                                Text(
+                                    if (state.isLoadingLogs) {
+                                        stringResource(R.string.loading_logs)
+                                    } else {
+                                        stringResource(R.string.show_logs)
+                                    }
+                                )
+                            }
+                            FilledTonalButton(
+                                onClick = viewModel::shareRuntimeLogs,
+                                enabled = !state.isLoadingLogs,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Share,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 4.dp),
+                                )
+                                Text(stringResource(R.string.share_logs_telegram))
+                            }
+                        }
+                        if (state.logsText.isNotBlank()) {
+                            SelectionContainer {
+                                Text(
+                                    text = state.logsText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 260.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                )
+                            }
+                        }
+                    }
                 },
                 colors = transparentListItemColors(),
             )

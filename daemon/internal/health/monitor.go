@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/privstack/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 )
 
 // CheckResult is the outcome of a single named check.
@@ -53,6 +53,12 @@ type HealthMonitor struct {
 	logger     *log.Logger
 
 	mu sync.Mutex
+
+	runProcessAliveCheck  func(pid int) CheckResult
+	runPortListeningCheck func(port int) CheckResult
+	runIptablesCheck      func() CheckResult
+	runRoutingCheck       func() CheckResult
+	runDNSCheck           func() CheckResult
 }
 
 // NewHealthMonitor creates a monitor that checks every interval.
@@ -75,7 +81,7 @@ func NewHealthMonitor(
 	if threshold < 1 {
 		threshold = 3
 	}
-	return &HealthMonitor{
+	h := &HealthMonitor{
 		manager:    manager,
 		interval:   interval,
 		threshold:  threshold,
@@ -86,6 +92,12 @@ func NewHealthMonitor(
 		dnsTimeout: normalizedDNSTimeout(timeout),
 		logger:     logger,
 	}
+	h.runProcessAliveCheck = h.checkProcessAlive
+	h.runPortListeningCheck = h.checkPortListening
+	h.runIptablesCheck = h.checkIptablesIntact
+	h.runRoutingCheck = h.checkRoutingIntact
+	h.runDNSCheck = h.checkDNS
+	return h
 }
 
 // SetOnDegraded installs a callback that fires when the monitor crosses the
@@ -181,6 +193,14 @@ func (h *HealthMonitor) Failures() int {
 	return h.failures
 }
 
+// Clear forgets sticky health diagnostics after an explicit runtime reset.
+func (h *HealthMonitor) Clear() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.failures = 0
+	h.lastResult = nil
+}
+
 // RunOnce executes every check and returns the aggregated result.
 // It does NOT update the failure counter or trigger state transitions.
 func (h *HealthMonitor) RunOnce() *HealthResult {
@@ -195,19 +215,19 @@ func (h *HealthMonitor) RunOnce() *HealthResult {
 	pid := status.PID
 
 	// 1. sing-box alive (kill -0).
-	result.Checks["singbox_alive"] = h.checkProcessAlive(pid)
+	result.Checks["singbox_alive"] = h.runProcessAliveCheck(pid)
 
 	// 2. TProxy port listening.
-	result.Checks["tproxy_port"] = h.checkPortListening(h.tproxyPort)
+	result.Checks["tproxy_port"] = h.runPortListeningCheck(h.tproxyPort)
 
 	// 3. iptables chain hooked.
-	result.Checks["iptables"] = h.checkIptablesIntact()
+	result.Checks["iptables"] = h.runIptablesCheck()
 
 	// 4. Routing policy rule (fwmark).
-	result.Checks["routing"] = h.checkRoutingIntact()
+	result.Checks["routing"] = h.runRoutingCheck()
 
 	// 5. DNS resolution (best-effort, not a hard health gate).
-	result.Checks["dns"] = h.checkDNS()
+	result.Checks["dns"] = h.runDNSCheck()
 
 	// Hard health only depends on the core process, the local listener, and
 	// routing hooks. DNS is intentionally diagnostic-only here: it may fail
@@ -415,8 +435,8 @@ func (h *HealthMonitor) checkDNS() CheckResult {
 // summarize produces a one-line summary of failed checks.
 func summarize(r *HealthResult) string {
 	var parts []string
-	for name, cr := range r.Checks {
-		if !cr.Pass {
+	for _, name := range []string{"singbox_alive", "tproxy_port", "iptables", "routing", "dns"} {
+		if cr, ok := r.Checks[name]; ok && !cr.Pass {
 			parts = append(parts, name+"("+cr.Detail+")")
 		}
 	}

@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/privstack/daemon/internal/config"
-	"github.com/privstack/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 )
 
 // Strategy identifies which recovery approach is being attempted.

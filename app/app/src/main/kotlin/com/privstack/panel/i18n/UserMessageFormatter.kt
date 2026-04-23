@@ -71,6 +71,10 @@ class UserMessageFormatter @Inject constructor(
             "tunnel_delay_failed" -> get(R.string.node_test_reason_tunnel_delay_failed)
             "tunnel_unavailable" -> get(R.string.node_test_reason_tunnel_unavailable)
             "dns_bootstrap_failed" -> get(R.string.node_test_reason_dns_bootstrap_failed)
+            "runtime_not_ready" -> get(R.string.node_test_reason_runtime_not_ready)
+            "runtime_degraded" -> get(R.string.node_test_reason_runtime_degraded)
+            "proxy_dns_unavailable" -> get(R.string.node_test_reason_proxy_dns_unavailable)
+            "http_helper_unavailable" -> get(R.string.node_test_reason_http_helper_unavailable)
             "", "ok" -> get(R.string.node_test_reason_unknown)
             else -> normalized
         }

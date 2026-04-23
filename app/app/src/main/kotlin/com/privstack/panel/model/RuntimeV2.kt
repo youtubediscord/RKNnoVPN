@@ -62,7 +62,10 @@ data class BackendHealthSnapshot(
     val checkedAt: String? = null,
 ) {
     val healthy: Boolean
-        get() = coreReady && dnsReady && routingReady && egressReady
+        get() = coreReady && routingReady
+
+    val operationalHealthy: Boolean
+        get() = healthy && dnsReady && egressReady
 }
 
 @Serializable

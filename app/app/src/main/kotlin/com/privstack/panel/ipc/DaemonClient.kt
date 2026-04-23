@@ -459,7 +459,13 @@ class DaemonClient @Inject constructor(
                                 status = null,
                                 tcpError = if (probe.errorClass == "tcp_direct_failed") probe.errorClass else null,
                                 urlError = when (probe.errorClass) {
-                                    "tunnel_delay_failed", "tunnel_unavailable", "dns_bootstrap_failed" -> probe.errorClass
+                                    "tunnel_delay_failed",
+                                    "tunnel_unavailable",
+                                    "dns_bootstrap_failed",
+                                    "runtime_not_ready",
+                                    "runtime_degraded",
+                                    "proxy_dns_unavailable",
+                                    "http_helper_unavailable" -> probe.errorClass
                                     else -> null
                                 },
                             )
@@ -588,6 +594,30 @@ class DaemonClient @Inject constructor(
                 else -> element.jsonArray
             }
             arr.map { it.jsonPrimitive.content }
+        }
+    }
+
+    suspend fun runtimeLogs(lines: Int = 160): DaemonClientResult<RuntimeLogsInfo> {
+        val params = buildJsonObject {
+            put("lines", lines)
+            putJsonArray("files") {
+                add("privd")
+                add("sing-box")
+            }
+        }
+        return call("logs", params, timeoutMs = 15_000L) { element ->
+            val obj = element.jsonObject
+            val files = obj["logs"]?.jsonArray?.map { item ->
+                val log = item.jsonObject
+                RuntimeLogFile(
+                    name = log["name"]?.jsonPrimitive?.content.orEmpty(),
+                    path = log["path"]?.jsonPrimitive?.content.orEmpty(),
+                    lines = log["lines"]?.jsonArray?.map { line -> line.jsonPrimitive.content }.orEmpty(),
+                    missing = log["missing"]?.jsonPrimitive?.booleanOrNull ?: false,
+                    error = log["error"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                )
+            }.orEmpty()
+            RuntimeLogsInfo(files = files)
         }
     }
 
@@ -908,6 +938,33 @@ data class NodeTestInfo(
     val results: List<NodeTestResult>,
 )
 
+data class RuntimeLogFile(
+    val name: String,
+    val path: String,
+    val lines: List<String>,
+    val missing: Boolean,
+    val error: String,
+)
+
+data class RuntimeLogsInfo(
+    val files: List<RuntimeLogFile>,
+) {
+    val text: String
+        get() = files.joinToString("\n\n") { file ->
+            buildString {
+                append("== ")
+                append(file.path.ifBlank { file.name })
+                append(" ==")
+                when {
+                    file.missing -> append("\n(missing)")
+                    file.error.isNotBlank() -> append("\n(error: ").append(file.error).append(")")
+                    file.lines.isEmpty() -> append("\n(empty)")
+                    else -> append('\n').append(file.lines.joinToString("\n"))
+                }
+            }
+        }
+}
+
 data class NodeTestResult(
     val id: String,
     val name: String,
@@ -931,7 +988,9 @@ private fun BackendStatusV2.toDaemonStatus(
             if (effectiveHealth.healthy) com.privstack.panel.model.ConnectionState.CONNECTED
             else com.privstack.panel.model.ConnectionState.ERROR
         com.privstack.panel.model.BackendPhase.APPLYING -> com.privstack.panel.model.ConnectionState.CONNECTING
-        com.privstack.panel.model.BackendPhase.DEGRADED -> com.privstack.panel.model.ConnectionState.ERROR
+        com.privstack.panel.model.BackendPhase.DEGRADED ->
+            if (effectiveHealth.healthy) com.privstack.panel.model.ConnectionState.CONNECTED
+            else com.privstack.panel.model.ConnectionState.ERROR
         com.privstack.panel.model.BackendPhase.STOPPED -> com.privstack.panel.model.ConnectionState.DISCONNECTED
     }
 
@@ -942,10 +1001,11 @@ private fun BackendStatusV2.toDaemonStatus(
         health = com.privstack.panel.model.HealthResult(
             healthy = effectiveHealth.healthy,
             coreRunning = effectiveHealth.coreReady,
-            tunActive = false,
+            tunActive = effectiveHealth.healthy,
             dnsOperational = effectiveHealth.dnsReady,
             routingReady = effectiveHealth.routingReady,
             egressReady = effectiveHealth.egressReady,
+            operationalHealthy = effectiveHealth.operationalHealthy,
             backendKind = appliedState.backendKind,
             phase = appliedState.phase,
             lastError = effectiveHealth.lastError.ifBlank { null },
