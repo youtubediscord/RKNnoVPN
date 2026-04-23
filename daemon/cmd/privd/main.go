@@ -28,7 +28,7 @@ import (
 	"github.com/privstack/daemon/internal/watcher"
 )
 
-var Version = "1.6.2"
+var Version = "1.6.3"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {
@@ -2191,7 +2191,6 @@ func buildHealthPayload(state core.State, result *health.HealthResult) map[strin
 
 	dnsOK := false
 	tunOK := false
-	var firstError string
 	for name, check := range result.Checks {
 		if name == "dns" {
 			dnsOK = check.Pass
@@ -2201,17 +2200,23 @@ func buildHealthPayload(state core.State, result *health.HealthResult) map[strin
 				tunOK = true
 			}
 		}
-		if !check.Pass && firstError == "" {
-			firstError = fmt.Sprintf("%s: %s", name, check.Detail)
-		}
 	}
 
 	payload["dnsOperational"] = dnsOK
 	payload["tunActive"] = tunOK
-	if firstError != "" {
+	if firstError := firstFailedCheck(result.Checks, "singbox_alive", "tproxy_port", "iptables", "routing", "dns"); firstError != "" {
 		payload["lastError"] = firstError
 	}
 	return payload
+}
+
+func firstFailedCheck(checks map[string]health.CheckResult, orderedNames ...string) string {
+	for _, name := range orderedNames {
+		if check, ok := checks[name]; ok && !check.Pass {
+			return fmt.Sprintf("%s: %s", name, check.Detail)
+		}
+	}
+	return ""
 }
 
 // --------------------------------------------------------------------------

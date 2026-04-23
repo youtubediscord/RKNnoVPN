@@ -82,7 +82,7 @@ func (b *rootBackendV2) CurrentHealth() runtimev2.HealthSnapshot {
 
 func (b *rootBackendV2) RefreshHealth() runtimev2.HealthSnapshot {
 	result := b.d.healthMon.RunOnce()
-	return b.d.buildRuntimeV2HealthSnapshot(result, true)
+	return b.d.buildRuntimeV2HealthSnapshot(result, false)
 }
 
 func (b *rootBackendV2) TestNodes(desired runtimev2.DesiredState, url string, timeoutMS int, nodeIDs []string) ([]runtimev2.NodeProbeResult, error) {
@@ -189,7 +189,7 @@ func (d *daemon) restartRootBackendV2() error {
 	d.rescueMgr.Reset()
 	d.startSubsystems()
 
-	snapshot := d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), true)
+	snapshot := d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), false)
 	if !snapshot.Healthy() {
 		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
 		return fmt.Errorf("restart health gates failed: %s", snapshot.LastError)
@@ -212,7 +212,7 @@ func (d *daemon) reconcileRootRuntime(reason string) error {
 		return fmt.Errorf("%s reapply failed: %w", reason, err)
 	}
 
-	snapshot := d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), true)
+	snapshot := d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), false)
 	if snapshot.Healthy() {
 		return nil
 	}
@@ -249,14 +249,8 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 			if name == "tproxy_port" {
 				tproxyReady = check.Pass
 			}
-			if !check.Pass && snapshot.LastError == "" {
-				snapshot.LastError = fmt.Sprintf("%s: %s", name, check.Detail)
-			}
 		case "dns":
 			snapshot.DNSReady = check.Pass
-			if !check.Pass && snapshot.LastError == "" {
-				snapshot.LastError = fmt.Sprintf("%s: %s", name, check.Detail)
-			}
 		case "iptables", "routing":
 			if name == "iptables" {
 				iptablesReady = check.Pass
@@ -264,32 +258,41 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 			if name == "routing" {
 				routeReady = check.Pass
 			}
-			if !check.Pass && snapshot.LastError == "" {
-				snapshot.LastError = fmt.Sprintf("%s: %s", name, check.Detail)
-			}
-		default:
-			if !check.Pass && snapshot.LastError == "" {
-				snapshot.LastError = fmt.Sprintf("%s: %s", name, check.Detail)
-			}
 		}
 	}
 	snapshot.CoreReady = singboxReady && tproxyReady
 	snapshot.RoutingReady = iptablesReady && routeReady
 
 	if allowEgressProbe {
-		d.mu.Lock()
-		cfg := d.cfg
-		d.mu.Unlock()
-		panelInbounds := cfg.ResolvePanelInbounds()
-		snapshot.EgressReady = d.cachedEgressIP(state, panelInbounds.HTTPPort) != nil
+		snapshot.EgressReady = d.hasRecentEgress()
 	} else {
 		snapshot.EgressReady = d.hasRecentEgress()
 	}
 
-	if snapshot.LastError == "" && !snapshot.Healthy() {
-		snapshot.LastError = "one or more health gates are red"
+	if snapshot.LastError == "" {
+		snapshot.LastError = firstFailedGate(result, snapshot)
 	}
 	return snapshot
+}
+
+func firstFailedGate(result *health.HealthResult, snapshot runtimev2.HealthSnapshot) string {
+	if result != nil {
+		for _, name := range []string{"singbox_alive", "tproxy_port", "iptables", "routing", "dns"} {
+			if check, ok := result.Checks[name]; ok && !check.Pass {
+				return fmt.Sprintf("%s: %s", name, check.Detail)
+			}
+		}
+	}
+	if !snapshot.EgressReady {
+		return "egress: no recent successful egress probe"
+	}
+	if !snapshot.Healthy() {
+		return "one or more readiness gates are red"
+	}
+	if !snapshot.OperationalHealthy() {
+		return "one or more operational health signals are red"
+	}
+	return ""
 }
 
 func (d *daemon) hasRecentEgress() bool {

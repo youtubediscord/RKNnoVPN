@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.6.3
+
+- Split hard readiness from soft DNS and egress diagnostics so restart no longer tears the runtime down on a single cold-start DNS timeout.
+- Made health error reporting deterministic instead of depending on random Go map iteration order.
+- Kept DNS and egress signals visible as operational diagnostics without using them as restart blockers.
+
 ## v1.6.2
 
 - Stabilized large config/panel payload handling between APK, `privctl`, and daemon IPC.

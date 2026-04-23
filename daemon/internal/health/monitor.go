@@ -206,16 +206,18 @@ func (h *HealthMonitor) RunOnce() *HealthResult {
 	// 4. Routing policy rule (fwmark).
 	result.Checks["routing"] = h.checkRoutingIntact()
 
-	// 5. DNS resolution (best-effort).
+	// 5. DNS resolution (best-effort, not a hard health gate).
 	result.Checks["dns"] = h.checkDNS()
 
-	// Compute overall.
-	for _, cr := range result.Checks {
-		if !cr.Pass {
-			result.Overall = false
-			break
-		}
-	}
+	// Hard health only depends on the core process, the local listener, and
+	// routing hooks. DNS is intentionally diagnostic-only here: it may fail
+	// transiently while the runtime is still usable, and should not by itself
+	// trigger teardown/recovery.
+	result.Overall =
+		result.Checks["singbox_alive"].Pass &&
+			result.Checks["tproxy_port"].Pass &&
+			result.Checks["iptables"].Pass &&
+			result.Checks["routing"].Pass
 
 	h.mu.Lock()
 	h.lastResult = result

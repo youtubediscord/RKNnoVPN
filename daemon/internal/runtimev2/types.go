@@ -64,7 +64,11 @@ type HealthSnapshot struct {
 }
 
 func (h HealthSnapshot) Healthy() bool {
-	return h.CoreReady && h.DNSReady && h.RoutingReady && h.EgressReady
+	return h.CoreReady && h.RoutingReady
+}
+
+func (h HealthSnapshot) OperationalHealthy() bool {
+	return h.Healthy() && h.DNSReady && h.EgressReady
 }
 
 type ResetStep struct {

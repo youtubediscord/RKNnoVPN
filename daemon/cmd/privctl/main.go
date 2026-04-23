@@ -13,7 +13,7 @@ import (
 const defaultSocket = "/data/adb/privstack/run/daemon.sock"
 const maxFrameBytes = 16 * 1024 * 1024
 
-var Version = "1.6.2"
+var Version = "1.6.3"
 
 var commands = map[string]string{
 	"backend.status":            "Get v2 backend status",

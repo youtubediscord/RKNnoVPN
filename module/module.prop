@@ -1,7 +1,7 @@
 id=privstack
 name=PrivStack
-version=v1.6.2
-versionCode=162
+version=v1.6.3
+versionCode=163
 author=PrivStack
 description=Transparent proxy via tproxy+iptables with sing-box. No VpnService, no TUN.
 updateJson=https://raw.githubusercontent.com/youtubediscord/RKNnoVPN/main/update.json
