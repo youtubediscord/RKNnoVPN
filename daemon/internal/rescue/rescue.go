@@ -299,9 +299,6 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		dnsPort = 10856
 	}
 	apiPort := r.cfg.Proxy.APIPort
-	if apiPort == 0 {
-		apiPort = 9090
-	}
 	gid := r.cfg.Proxy.GID
 	if gid == 0 {
 		gid = 23333

@@ -182,6 +182,18 @@ http_port_enabled() {
     [ "${HTTP_PORT:-0}" -gt 0 ] 2>/dev/null
 }
 
+api_port_enabled() {
+    [ "${API_PORT:-0}" -gt 0 ] 2>/dev/null
+}
+
+emit_api_port_protection() {
+    local chain="$1"
+    if api_port_enabled; then
+        echo "-A ${chain} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${chain} -p tcp --dport ${API_PORT} -j RETURN"
+    fi
+}
+
 emit_http_port_protection() {
     local chain="$1"
     if http_port_enabled; then
@@ -270,12 +282,11 @@ fi)
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
--A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -j RETURN
+$(emit_api_port_protection "${CHAIN_OUT}")
 $(emit_http_port_protection "${CHAIN_OUT}")
 
 # 6. Bypass UIDs: specific UIDs that must always go direct.
@@ -378,12 +389,11 @@ fi)
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
--A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP
 -A ${CHAIN_OUT} -p tcp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${TPROXY_PORT} -j RETURN
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
--A ${CHAIN_OUT} -p tcp --dport ${API_PORT} -j RETURN
+$(emit_api_port_protection "${CHAIN_OUT}")
 $(emit_http_port_protection "${CHAIN_OUT}")
 
 # 6. Bypass UIDs

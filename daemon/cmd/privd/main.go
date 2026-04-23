@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -1253,9 +1254,6 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		dnsPort = 10856
 	}
 	apiPort := cfg.Proxy.APIPort
-	if apiPort == 0 {
-		apiPort = 9090
-	}
 	panelInbounds := cfg.ResolvePanelInbounds()
 	appRouting := core.BuildAppRoutingEnv(
 		cfg.Apps.Mode,
@@ -1300,9 +1298,6 @@ func localPortProtectionPresent(cfg *config.Config) bool {
 	}
 	if ports[1] == 0 {
 		ports[1] = 10856
-	}
-	if ports[2] == 0 {
-		ports[2] = 9090
 	}
 
 	v4, err4 := core.ExecCommand("iptables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")

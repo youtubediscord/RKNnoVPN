@@ -31,7 +31,7 @@ type ProxyConfig struct {
 	DNSPort    int    `json:"dns_port"`
 	GID        int    `json:"gid"`  // core process GID (matches config.json proxy.gid)
 	Mark       int    `json:"mark"` // fwmark for policy routing (matches config.json proxy.mark)
-	APIPort    int    `json:"api_port"`
+	APIPort    int    `json:"api_port"` // 0 disables sing-box Clash REST API
 }
 
 // TransportConfig controls the outbound protocol transport layer.
@@ -196,7 +196,7 @@ func DefaultConfig() *Config {
 			DNSPort:    10856,
 			GID:        23333,
 			Mark:       8227,
-			APIPort:    9090,
+			APIPort:    0,
 		},
 		Transport: TransportConfig{
 			Protocol:    "reality",
@@ -425,8 +425,8 @@ func (c *Config) Validate() error {
 	if c.Proxy.DNSPort < 1 || c.Proxy.DNSPort > 65535 {
 		return fmt.Errorf("proxy.dns_port must be 1-65535, got %d", c.Proxy.DNSPort)
 	}
-	if c.Proxy.APIPort < 1 || c.Proxy.APIPort > 65535 {
-		return fmt.Errorf("proxy.api_port must be 1-65535, got %d", c.Proxy.APIPort)
+	if c.Proxy.APIPort < 0 || c.Proxy.APIPort > 65535 {
+		return fmt.Errorf("proxy.api_port must be 0-65535, got %d", c.Proxy.APIPort)
 	}
 
 	validProto := map[string]bool{

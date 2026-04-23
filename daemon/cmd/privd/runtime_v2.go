@@ -326,9 +326,6 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 		cfg := d.cfg
 		d.mu.Unlock()
 		apiPort := cfg.Proxy.APIPort
-		if apiPort == 0 {
-			apiPort = 9090
-		}
 		_ = d.cachedLatencyMs(state, cfg, apiPort)
 	}
 	snapshot.EgressReady = d.hasRecentEgress()
@@ -694,7 +691,7 @@ func effectiveLocalPorts(cfg *config.Config) []int {
 	ports := []int{
 		valueOrDefaultInt(cfg.Proxy.TProxyPort, 10853),
 		valueOrDefaultInt(cfg.Proxy.DNSPort, 10856),
-		valueOrDefaultInt(cfg.Proxy.APIPort, 9090),
+		cfg.Proxy.APIPort,
 		panelInbounds.SocksPort,
 		panelInbounds.HTTPPort,
 	}

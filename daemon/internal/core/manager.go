@@ -641,9 +641,6 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		dnsPort = 10856
 	}
 	apiPort := m.config.Proxy.APIPort
-	if apiPort == 0 {
-		apiPort = 9090
-	}
 	gid := m.config.Proxy.GID
 	if gid == 0 {
 		gid = 23333

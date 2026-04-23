@@ -27,14 +27,17 @@ func RenderSingboxConfig(cfg *Config, profile *NodeProfile) ([]byte, error) {
 			"level":     "info",
 			"timestamp": true,
 		},
-		"experimental": map[string]interface{}{
-			"clash_api": map[string]interface{}{
-				"external_controller": fmt.Sprintf("127.0.0.1:%d", cfg.Proxy.APIPort),
-			},
-		},
 		"dns":      buildDNS(cfg),
 		"inbounds": buildInbounds(cfg),
 		"route":    buildRoute(cfg),
+	}
+	if cfg.Proxy.APIPort > 0 {
+		sbCfg["experimental"] = map[string]interface{}{
+			"clash_api": map[string]interface{}{
+				"external_controller": fmt.Sprintf("127.0.0.1:%d", cfg.Proxy.APIPort),
+				"secret":              "",
+			},
+		}
 	}
 	outbounds, err := buildOutbounds(cfg, profile)
 	if err != nil {
