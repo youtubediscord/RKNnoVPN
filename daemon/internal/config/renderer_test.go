@@ -254,6 +254,79 @@ func TestRenderPanelNodesAsURLTestOutbounds(t *testing.T) {
 	}
 }
 
+func TestRenderPanelNodeGroupsAsSelectorOutbounds(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"first-node",
+			"name":"First",
+			"group":"Europe",
+			"protocol":"SOCKS",
+			"server":"127.0.0.1",
+			"port":1081,
+			"outbound":{
+				"protocol":"socks",
+				"settings":{"address":"127.0.0.1","port":1081,"version":"5"}
+			}
+		}`),
+		json.RawMessage(`{
+			"id":"second-node",
+			"name":"Second",
+			"group":"Europe",
+			"protocol":"SOCKS",
+			"server":"127.0.0.1",
+			"port":1082,
+			"outbound":{
+				"protocol":"socks",
+				"settings":{"address":"127.0.0.1","port":1082,"version":"5"}
+			}
+		}`),
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	byTag := map[string]map[string]any{}
+	for _, rawOutbound := range rendered["outbounds"].([]any) {
+		outbound := rawOutbound.(map[string]any)
+		if tag, ok := outbound["tag"].(string); ok {
+			byTag[tag] = outbound
+		}
+	}
+
+	globalSelector := byTag["proxy"]
+	globalTags := globalSelector["outbounds"].([]any)
+	if len(globalTags) != 4 || globalTags[0] != "auto" || globalTags[1] != "node-first-node" || globalTags[2] != "node-second-node" || globalTags[3] != "group-europe" {
+		t.Fatalf("global selector should expose group selector after raw node tags: %#v", globalTags)
+	}
+
+	groupAuto := byTag["group-europe-auto"]
+	if groupAuto["type"] != "urltest" {
+		t.Fatalf("expected group urltest outbound, got %#v", groupAuto)
+	}
+	groupAutoTags := groupAuto["outbounds"].([]any)
+	if len(groupAutoTags) != 2 || groupAutoTags[0] != "node-first-node" || groupAutoTags[1] != "node-second-node" {
+		t.Fatalf("unexpected group urltest members: %#v", groupAutoTags)
+	}
+
+	groupSelector := byTag["group-europe"]
+	if groupSelector["type"] != "selector" || groupSelector["default"] != "group-europe-auto" {
+		t.Fatalf("unexpected group selector: %#v", groupSelector)
+	}
+	groupSelectorTags := groupSelector["outbounds"].([]any)
+	if len(groupSelectorTags) != 3 || groupSelectorTags[0] != "group-europe-auto" || groupSelectorTags[1] != "node-first-node" || groupSelectorTags[2] != "node-second-node" {
+		t.Fatalf("unexpected group selector members: %#v", groupSelectorTags)
+	}
+}
+
 func TestRenderOmitsInternalStatusHTTPInboundByDefault(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "example.com"

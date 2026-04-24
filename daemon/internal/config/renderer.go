@@ -13,6 +13,7 @@ import (
 type panelNode struct {
 	ID       string          `json:"id"`
 	Name     string          `json:"name"`
+	Group    string          `json:"group"`
 	Protocol string          `json:"protocol"`
 	Server   string          `json:"server"`
 	Port     int             `json:"port"`
@@ -242,6 +243,7 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 
 	outbounds := []map[string]interface{}{}
 	nodeTags := make([]string, 0, len(nodeProfiles))
+	groupPlans := buildGroupOutboundPlans(nodeProfiles)
 	for index, nodeProfile := range nodeProfiles {
 		if len(nodeProfiles) == 1 {
 			nodeProfile.Tag = "proxy"
@@ -271,6 +273,9 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 			"interrupt_exist_connections": true,
 		})
 		selectorOutbounds := append([]string{"auto"}, nodeTags...)
+		for _, groupPlan := range groupPlans {
+			selectorOutbounds = append(selectorOutbounds, groupPlan.selectorTag())
+		}
 		selectorDefault := "auto"
 		if activeTag := activePanelNodeTag(cfg, nodeProfiles); activeTag != "" {
 			selectorDefault = activeTag
@@ -283,6 +288,7 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 			"interrupt_exist_connections": true,
 		})
 	}
+	outbounds = append(outbounds, buildGroupOutbounds(cfg, groupPlans)...)
 
 	outbounds = append(outbounds,
 		map[string]interface{}{
@@ -291,6 +297,90 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 		},
 	)
 	return outbounds, nil
+}
+
+type groupOutboundPlan struct {
+	name string
+	base string
+	tags []string
+}
+
+func (plan groupOutboundPlan) selectorTag() string {
+	return "group-" + plan.base
+}
+
+func (plan groupOutboundPlan) autoTag() string {
+	return "group-" + plan.base + "-auto"
+}
+
+func buildGroupOutboundPlans(profiles []*NodeProfile) []groupOutboundPlan {
+	plans := []groupOutboundPlan{}
+	byName := map[string]int{}
+	usedBases := map[string]int{}
+
+	for _, profile := range profiles {
+		group := strings.TrimSpace(profile.Group)
+		if group == "" || profile.Tag == "" {
+			continue
+		}
+		index, ok := byName[group]
+		if !ok {
+			base := sanitizeOutboundTagSuffix(group)
+			if base == "" {
+				base = "default"
+			}
+			if count := usedBases[base]; count > 0 {
+				base = fmt.Sprintf("%s-%d", base, count+1)
+			}
+			usedBases[base]++
+			index = len(plans)
+			byName[group] = index
+			plans = append(plans, groupOutboundPlan{name: group, base: base})
+		}
+		plans[index].tags = append(plans[index].tags, profile.Tag)
+	}
+
+	return plans
+}
+
+func buildGroupOutbounds(cfg *Config, plans []groupOutboundPlan) []map[string]interface{} {
+	if len(plans) == 0 {
+		return nil
+	}
+	testURL := cfg.Health.URL
+	if testURL == "" {
+		testURL = "https://www.gstatic.com/generate_204"
+	}
+
+	outbounds := make([]map[string]interface{}, 0, len(plans)*2)
+	for _, plan := range plans {
+		if len(plan.tags) == 0 {
+			continue
+		}
+		selectorOutbounds := append([]string{}, plan.tags...)
+		selectorDefault := plan.tags[0]
+		if len(plan.tags) > 1 {
+			outbounds = append(outbounds, map[string]interface{}{
+				"type":                        "urltest",
+				"tag":                         plan.autoTag(),
+				"outbounds":                   plan.tags,
+				"url":                         testURL,
+				"interval":                    "3m",
+				"tolerance":                   50,
+				"interrupt_exist_connections": true,
+			})
+			selectorOutbounds = append([]string{plan.autoTag()}, plan.tags...)
+			selectorDefault = plan.autoTag()
+		}
+		outbounds = append(outbounds, map[string]interface{}{
+			"type":                        "selector",
+			"tag":                         plan.selectorTag(),
+			"outbounds":                   selectorOutbounds,
+			"default":                     selectorDefault,
+			"interrupt_exist_connections": true,
+		})
+	}
+	return outbounds
 }
 
 func activePanelNodeTag(cfg *Config, profiles []*NodeProfile) string {
@@ -528,6 +618,7 @@ func profileFromPanelNode(raw json.RawMessage, index int) (*NodeProfile, error) 
 	profile := &NodeProfile{
 		ID:          node.ID,
 		Name:        node.Name,
+		Group:       strings.TrimSpace(node.Group),
 		Tag:         panelOutboundTag(node, index),
 		Protocol:    protocol,
 		Address:     node.Server,
@@ -705,6 +796,13 @@ func panelOutboundTag(node panelNode, index int) string {
 		base = fmt.Sprintf("node-%d", index+1)
 	}
 	return "node-" + base
+}
+
+func sanitizeOutboundTagSuffix(value string) string {
+	base := strings.ToLower(strings.TrimSpace(value))
+	base = regexp.MustCompile(`[^a-z0-9_-]+`).ReplaceAllString(base, "-")
+	base = strings.Trim(base, "-")
+	return base
 }
 
 func normalizeProtocol(value string) string {

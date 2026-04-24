@@ -204,7 +204,9 @@ diagnostic privacy surface.
 1. selector + manual override; начальный slice сделан: `proxy` рендерится как
    selector, `auto` остаётся `urltest`, active node становится selector default.
 2. speed/throughput probes;
-3. per-app groups;
+3. per-app groups; начальный renderer-slice сделан: `panel.nodes[].group`
+   протягивается в daemon profile и создаёт group selector/urltest outbounds
+   без изменения дефолтного маршрута.
 4. WireGuard outbound import/render without kernel WG interface;
 5. hotspot/sharing mode.
 
