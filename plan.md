@@ -195,7 +195,8 @@ diagnostic privacy surface.
 
 Только после M0-M5:
 
-1. selector + manual override;
+1. selector + manual override; начальный slice сделан: `proxy` рендерится как
+   selector, `auto` остаётся `urltest`, active node становится selector default.
 2. speed/throughput probes;
 3. per-app groups;
 4. WireGuard outbound import/render without kernel WG interface;

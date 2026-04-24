@@ -161,6 +161,7 @@ func TestRenderPanelNodesAsURLTestOutbounds(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = ""
 	cfg.Node.UUID = ""
+	cfg.Panel.ActiveNodeID = "second-node"
 	cfg.Panel.Nodes = []json.RawMessage{
 		json.RawMessage(`{
 			"id":"first-node",
@@ -214,8 +215,8 @@ func TestRenderPanelNodesAsURLTestOutbounds(t *testing.T) {
 	}
 
 	outbounds := rendered["outbounds"].([]any)
-	if len(outbounds) != 4 {
-		t.Fatalf("expected two nodes + urltest + direct, got %#v", outbounds)
+	if len(outbounds) != 5 {
+		t.Fatalf("expected two nodes + urltest + selector + direct, got %#v", outbounds)
 	}
 
 	firstNode := outbounds[0].(map[string]any)
@@ -228,17 +229,28 @@ func TestRenderPanelNodesAsURLTestOutbounds(t *testing.T) {
 	}
 
 	urltest := outbounds[2].(map[string]any)
-	if urltest["type"] != "urltest" || urltest["tag"] != "proxy" {
-		t.Fatalf("expected proxy urltest outbound, got %#v", urltest)
+	if urltest["type"] != "urltest" || urltest["tag"] != "auto" {
+		t.Fatalf("expected auto urltest outbound, got %#v", urltest)
 	}
 	tags := urltest["outbounds"].([]any)
 	if len(tags) != 2 || tags[0] != "node-first-node" || tags[1] != "node-second-node" {
 		t.Fatalf("unexpected urltest outbounds: %#v", tags)
 	}
+	selector := outbounds[3].(map[string]any)
+	if selector["type"] != "selector" || selector["tag"] != "proxy" {
+		t.Fatalf("expected proxy selector outbound, got %#v", selector)
+	}
+	selectorTags := selector["outbounds"].([]any)
+	if len(selectorTags) != 3 || selectorTags[0] != "auto" || selectorTags[1] != "node-first-node" || selectorTags[2] != "node-second-node" {
+		t.Fatalf("unexpected selector outbounds: %#v", selectorTags)
+	}
+	if selector["default"] != "node-second-node" {
+		t.Fatalf("expected active node to be selector default, got %#v", selector["default"])
+	}
 
 	route := rendered["route"].(map[string]any)
 	if route["final"] != "proxy" {
-		t.Fatalf("route final should target urltest proxy, got %#v", route["final"])
+		t.Fatalf("route final should target selector proxy, got %#v", route["final"])
 	}
 }
 

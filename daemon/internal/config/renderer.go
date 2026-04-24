@@ -263,11 +263,23 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 		}
 		outbounds = append(outbounds, map[string]interface{}{
 			"type":                        "urltest",
-			"tag":                         "proxy",
+			"tag":                         "auto",
 			"outbounds":                   nodeTags,
 			"url":                         testURL,
 			"interval":                    "3m",
 			"tolerance":                   50,
+			"interrupt_exist_connections": true,
+		})
+		selectorOutbounds := append([]string{"auto"}, nodeTags...)
+		selectorDefault := "auto"
+		if activeTag := activePanelNodeTag(cfg, nodeProfiles); activeTag != "" {
+			selectorDefault = activeTag
+		}
+		outbounds = append(outbounds, map[string]interface{}{
+			"type":                        "selector",
+			"tag":                         "proxy",
+			"outbounds":                   selectorOutbounds,
+			"default":                     selectorDefault,
 			"interrupt_exist_connections": true,
 		})
 	}
@@ -279,6 +291,19 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 		},
 	)
 	return outbounds, nil
+}
+
+func activePanelNodeTag(cfg *Config, profiles []*NodeProfile) string {
+	activeID := strings.TrimSpace(cfg.Panel.ActiveNodeID)
+	if activeID == "" {
+		return ""
+	}
+	for _, profile := range profiles {
+		if profile.ID == activeID && profile.Tag != "" {
+			return profile.Tag
+		}
+	}
+	return ""
 }
 
 func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
