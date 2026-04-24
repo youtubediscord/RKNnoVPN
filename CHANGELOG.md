@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.7.0
+## v1.7.1
 
 - Reworked root TPROXY runtime recovery with structured reset reports, netstack cleanup verification, and idempotent rescue behavior.
 - Added `privctl doctor` diagnostics with redacted configs/logs, compatibility metadata, release integrity, netstack leftovers, node-test summary, and runtime stage reports.
@@ -13,6 +13,10 @@
 - Added typed APK IPC access to `self-check` with `self.check` fallback for quick repair summaries.
 - Exposed self-check through the APK status repository so Settings/Audit can use concise repair summaries without depending on raw IPC.
 - Treated legacy `unknown command` audit responses like method-not-found so old daemons still fall back to local audit checks.
+
+## v1.7.0
+
+- Initial v1.7 runtime stabilization baseline.
 
 ## v1.6.4
 
