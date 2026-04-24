@@ -146,6 +146,8 @@ Acceptance:
 - update installer проверяет zip до downtime.
 - `version` отдаёт `schema_version`, `panel_min_version`, `capabilities`,
   `supported_methods`, module/core/daemon metadata.
+- APK gate проверяет schema/capabilities перед не-repair RPC, а repair-команды
+  остаются доступными для восстановления.
 
 ### M4. Privacy invariants
 
@@ -185,6 +187,8 @@ diagnostic privacy surface.
 - outbound URL;
 - selected node;
 - APK/module mismatch.
+- summary в diagnostic bundle сразу показывает health/privacy/compatibility
+  issues, TCP-only node-test и необходимость reboot после cleanup leftovers.
 
 Отчёт должен быть redacted по умолчанию.
 

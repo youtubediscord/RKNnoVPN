@@ -1542,6 +1542,9 @@ func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCE
 			result["url_status"] = "fail"
 			result["verdict"] = "unusable"
 			result["url_error"] = urlErr.Error()
+			if errorClass := classifyURLTestError(urlErr); errorClass != "" {
+				result["url_error_class"] = errorClass
+			}
 		} else {
 			result["url_status"] = "ok"
 			result["verdict"] = "usable"

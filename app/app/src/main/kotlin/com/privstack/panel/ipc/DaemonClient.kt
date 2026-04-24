@@ -68,6 +68,7 @@ class DaemonClient @Inject constructor(
 ) {
     companion object {
         const val MIN_CONTROL_PROTOCOL_VERSION = 3
+        const val MIN_SCHEMA_VERSION = 4
         val REQUIRED_METHODS: Set<String> = setOf(
             "backend.status",
             "backend.start",
@@ -499,7 +500,10 @@ class DaemonClient @Inject constructor(
                                     "proxy_dns_unavailable",
                                     "outbound_url_failed",
                                     "http_helper_unavailable",
-                                    "api_disabled" -> probe.errorClass
+                                    "api_disabled",
+                                    "api_unavailable",
+                                    "outbound_missing",
+                                    "tls_handshake_failed" -> probe.errorClass
                                     else -> null
                                 },
                             )
@@ -789,6 +793,7 @@ class DaemonClient @Inject constructor(
                 val required = requiredMethods.toSet()
                 val enforceReleaseMatch = required.none { it in REPAIR_METHODS }
                 val requiresSingBox = required.any { it in SING_BOX_METHODS }
+                val requiresSchemaV4 = enforceReleaseMatch && required.any { it in SCHEMA_V4_METHODS }
                 when {
                     enforceReleaseMatch && info.releaseMismatch(BuildConfig.VERSION_NAME) != null ->
                         DaemonClientResult.DaemonError(
@@ -799,6 +804,16 @@ class DaemonClient @Inject constructor(
                         DaemonClientResult.DaemonError(
                             COMPATIBILITY_ERROR_CODE,
                             "APK и модуль несовместимы: APK ${BuildConfig.VERSION_NAME}, daemon ${info.daemonVersion}, module ${info.moduleVersion}; control protocol ${info.controlProtocolVersion}, нужен $MIN_CONTROL_PROTOCOL_VERSION",
+                        )
+                    requiresSchemaV4 && info.schemaVersion < MIN_SCHEMA_VERSION ->
+                        DaemonClientResult.DaemonError(
+                            COMPATIBILITY_ERROR_CODE,
+                            "APK и модуль несовместимы: daemon config schema ${info.schemaVersion}, нужна $MIN_SCHEMA_VERSION",
+                        )
+                    enforceReleaseMatch && info.missingCapabilities(requiredMethods.toList()).isNotEmpty() ->
+                        DaemonClientResult.DaemonError(
+                            COMPATIBILITY_ERROR_CODE,
+                            "APK и модуль несовместимы: daemon ${info.daemonVersion}, module ${info.moduleVersion}; нет capabilities ${info.missingCapabilities(requiredMethods.toList()).joinToString(", ")}",
                         )
                     requiresSingBox && !info.singBoxAvailable ->
                         DaemonClientResult.DaemonError(
@@ -1014,6 +1029,14 @@ data class VersionInfo(
         return required.filterNot { it in supportedMethods }
     }
 
+    fun missingCapabilities(requiredMethods: Collection<String>): List<String> {
+        if (capabilities.isEmpty()) return listOf("capabilities")
+        return requiredMethods
+            .mapNotNull(::capabilityForMethod)
+            .distinct()
+            .filterNot { it in capabilities }
+    }
+
     fun releaseMismatch(apkVersion: String): String? {
         val apk = stableReleaseVersion(apkVersion) ?: return null
         val daemon = stableReleaseVersion(daemonVersion)
@@ -1036,6 +1059,26 @@ private fun stableReleaseVersion(raw: String): String? {
 
 private val REPAIR_METHODS = setOf("backend.stop", "backend.reset", "network-reset", "network.reset")
 private val SING_BOX_METHODS = setOf("backend.start", "backend.restart")
+private val SCHEMA_V4_METHODS = setOf(
+    "backend.applyDesiredState",
+    "backend.start",
+    "backend.restart",
+    "config-import",
+    "config-set-many",
+    "panel-set",
+)
+
+private fun capabilityForMethod(method: String): String? = when (method) {
+    "backend.status", "backend.start", "backend.stop", "backend.restart",
+    "backend.applyDesiredState" -> "backend.root-tproxy"
+    "backend.reset", "network-reset", "network.reset" -> "backend.reset.structured"
+    "config-import", "config.import" -> "config.import.v2"
+    "config-set-many", "panel-get", "panel-set" -> "panel.nodes"
+    "diagnostics.health" -> "diagnostics.health.v2"
+    "diagnostics.testNodes" -> "diagnostics.testNodes.v2"
+    "logs", "doctor" -> "runtime.logs"
+    else -> null
+}
 
 data class UpdateCheckInfo(
     val currentVersion: String,

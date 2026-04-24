@@ -12,9 +12,11 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
 const controlProtocolVersion = 3
+
 type doctorCommandResult struct {
 	Command string   `json:"command"`
 	Lines   []string `json:"lines,omitempty"`
@@ -49,6 +51,26 @@ type doctorPortStatus struct {
 	TCPListening bool `json:"tcpListening"`
 }
 
+type doctorSummary struct {
+	Status              string                `json:"status"`
+	HealthCode          string                `json:"healthCode,omitempty"`
+	HealthDetail        string                `json:"healthDetail,omitempty"`
+	OperationalHealthy  bool                  `json:"operationalHealthy"`
+	RebootRequired      bool                  `json:"rebootRequired"`
+	IssueCount          int                   `json:"issueCount"`
+	Issues              []string              `json:"issues,omitempty"`
+	CompatibilityIssues []string              `json:"compatibilityIssues,omitempty"`
+	PrivacyIssues       []string              `json:"privacyIssues,omitempty"`
+	NodeTests           doctorNodeTestSummary `json:"nodeTests"`
+}
+
+type doctorNodeTestSummary struct {
+	Total    int `json:"total"`
+	Usable   int `json:"usable"`
+	Unusable int `json:"unusable"`
+	TCPOnly  int `json:"tcpOnly"`
+}
+
 func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	lines := 80
 	if params != nil {
@@ -79,24 +101,34 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	if d.runtimeV2 != nil {
 		backendStatus = d.runtimeV2.Status()
 	}
+	moduleVersion := readModuleVersion()
+	ports := doctorPortStatuses(cfg)
+	leftovers := d.collectNetworkLeftovers(cfg)
+	nodeResults := d.testNodeProbesV2(cfg.Health.URL, 2500, nil)
+	privacy := d.privacyDiagnostics(cfg, lines)
+	singBoxCheck := d.singBoxCheck(singBoxPath, renderedConfigPath, lines)
+	versions := map[string]interface{}{
+		"daemon":                   Version,
+		"core":                     Version,
+		"privctl_expected":         Version,
+		"control_protocol_version": controlProtocolVersion,
+		"schema_version":           config.CurrentSchemaVersion,
+		"panel_min_version":        Version,
+		"capabilities":             supportedCapabilities(),
+		"supported_methods":        supportedRPCMethods(),
+		"sing_box":                 d.singBoxVersion(singBoxPath, lines),
+		"module":                   moduleVersion,
+	}
 
 	report := map[string]interface{}{
 		"generated_at": time.Now().Format(time.RFC3339),
-		"versions": map[string]interface{}{
-			"daemon":                   Version,
-			"core":                     Version,
-			"privctl_expected":         Version,
-			"control_protocol_version": controlProtocolVersion,
-			"schema_version":           config.CurrentSchemaVersion,
-			"panel_min_version":        Version,
-			"capabilities":             supportedCapabilities(),
-			"supported_methods":        supportedRPCMethods(),
-			"sing_box":                 d.singBoxVersion(singBoxPath, lines),
-			"module":                   readModuleVersion(),
-		},
-		"device": d.doctorDevice(lines),
+		"summary":      buildDoctorSummary(healthSnapshot, leftovers, nodeResults, ports, privacy, moduleVersion, singBoxCheck),
+		"versions":     versions,
+		"device":       d.doctorDevice(lines),
 		"paths": map[string]doctorFileStatus{
 			"data_dir":          fileStatus(dataDir, false),
+			"current_release":   fileStatus(filepath.Join(dataDir, "current"), false),
+			"releases_dir":      fileStatus(filepath.Join(dataDir, "releases"), false),
 			"config":            fileStatus(cfgPath, false),
 			"panel":             fileStatus(panelPath, false),
 			"rendered_singbox":  fileStatus(renderedConfigPath, false),
@@ -111,9 +143,9 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 			"raw":      healthResult,
 		},
 		"backend_status": backendStatus,
-		"ports":          doctorPortStatuses(cfg),
-		"leftovers":      d.collectNetworkLeftovers(cfg),
-		"node_tests":     redactNodeProbeResults(d.testNodeProbesV2(cfg.Health.URL, 2500, nil)),
+		"ports":          ports,
+		"leftovers":      leftovers,
+		"node_tests":     redactNodeProbeResults(nodeResults),
 		"logs":           d.doctorLogs(lines),
 		"config": map[string]doctorJSONSection{
 			"daemon":           readRedactedJSONFile(cfgPath),
@@ -121,11 +153,135 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 			"rendered_singbox": readRedactedJSONFile(renderedConfigPath),
 		},
 		"runtime": d.runtimeDiagnostics(lines),
-		"privacy": d.privacyDiagnostics(cfg, lines),
+		"privacy": privacy,
 	}
 
-	report["sing_box_check"] = d.singBoxCheck(singBoxPath, renderedConfigPath, lines)
+	report["sing_box_check"] = singBoxCheck
 	return report, nil
+}
+
+func buildDoctorSummary(
+	healthSnapshot runtimev2.HealthSnapshot,
+	leftovers []string,
+	nodeResults []runtimev2.NodeProbeResult,
+	ports []doctorPortStatus,
+	privacy map[string]interface{},
+	moduleVersion map[string]string,
+	singBoxCheck doctorCommandResult,
+) doctorSummary {
+	summary := doctorSummary{
+		Status:             "ok",
+		HealthCode:         healthSnapshot.LastCode,
+		HealthDetail:       healthSnapshot.LastError,
+		OperationalHealthy: healthSnapshot.OperationalHealthy(),
+		NodeTests:          summarizeDoctorNodeTests(nodeResults),
+	}
+	addIssue := func(issue string) {
+		if strings.TrimSpace(issue) == "" {
+			return
+		}
+		summary.Issues = append(summary.Issues, issue)
+	}
+	addCompatibility := func(issue string) {
+		if strings.TrimSpace(issue) == "" {
+			return
+		}
+		summary.CompatibilityIssues = append(summary.CompatibilityIssues, issue)
+		addIssue("compatibility: " + issue)
+	}
+	addPrivacy := func(issue string) {
+		if strings.TrimSpace(issue) == "" {
+			return
+		}
+		summary.PrivacyIssues = append(summary.PrivacyIssues, issue)
+		addIssue("privacy: " + issue)
+	}
+
+	if !healthSnapshot.Healthy() {
+		addIssue(firstNonEmpty(healthSnapshot.LastError, "readiness checks are failing"))
+		summary.Status = "failed"
+	} else if !healthSnapshot.OperationalHealthy() {
+		addIssue(firstNonEmpty(healthSnapshot.LastError, "operational checks are degraded"))
+		summary.Status = "degraded"
+	}
+	if len(leftovers) > 0 {
+		summary.RebootRequired = true
+		summary.Status = "partial_reset"
+		addIssue("network cleanup leftovers remain")
+	}
+	if singBoxCheck.Error != "" {
+		addCompatibility("sing-box config check failed: " + singBoxCheck.Error)
+	}
+	if moduleVersion["version"] == "" || moduleVersion["version"] == "unknown" {
+		addCompatibility("module version is unknown")
+	}
+	for _, port := range ports {
+		switch port.Port {
+		case 10808, 10809, 9090:
+			if port.TCPListening {
+				addPrivacy("production localhost helper/API port is listening")
+			}
+		}
+	}
+	for _, issue := range doctorPrivacyIssues(privacy) {
+		addPrivacy(issue)
+	}
+	if summary.NodeTests.TCPOnly > 0 {
+		addIssue("one or more nodes have TCP reachability but failed URL/data-plane checks")
+	}
+
+	summary.IssueCount = len(summary.Issues)
+	if summary.Status == "ok" && summary.IssueCount > 0 {
+		summary.Status = "degraded"
+	}
+	return summary
+}
+
+func summarizeDoctorNodeTests(results []runtimev2.NodeProbeResult) doctorNodeTestSummary {
+	summary := doctorNodeTestSummary{Total: len(results)}
+	for _, result := range results {
+		if result.Verdict == "usable" {
+			summary.Usable++
+		}
+		if result.Verdict == "unusable" {
+			summary.Unusable++
+		}
+		if result.TCPStatus == "ok" && result.URLStatus != "ok" {
+			summary.TCPOnly++
+		}
+	}
+	return summary
+}
+
+func doctorPrivacyIssues(privacy map[string]interface{}) []string {
+	rawChecks, _ := privacy["checks"].(map[string]interface{})
+	if len(rawChecks) == 0 {
+		return nil
+	}
+	labels := map[string]string{
+		"no_vpn_like_interfaces":      "VPN-like network interface is visible",
+		"no_transport_vpn_hint":       "Connectivity diagnostics expose VPN transport",
+		"system_proxy_unset":          "system proxy setting is not empty",
+		"clash_api_disabled":          "Clash/API port is enabled",
+		"helper_inbounds_disabled":    "HTTP/SOCKS helper inbound is enabled",
+		"helper_inbounds_local_only":  "helper inbound allows LAN access",
+		"per_app_whitelist_default":   "app routing is not whitelist/off",
+		"dns_hijack_per_uid":          "DNS hijack is not scoped per UID",
+		"localhost_proxy_ports_clear": "localhost proxy port is visible",
+	}
+	issues := make([]string, 0)
+	keys := make([]string, 0, len(rawChecks))
+	for key := range rawChecks {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value, ok := rawChecks[key].(bool)
+		if ok && !value {
+			issues = append(issues, firstNonEmpty(labels[key], key))
+		}
+	}
+	return issues
 }
 
 func supportedCapabilities() []string {

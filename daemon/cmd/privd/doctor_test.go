@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
@@ -75,6 +76,63 @@ func TestDoctorKeepsNodeProbeEndpointMetadata(t *testing.T) {
 		if !strings.Contains(text, diagnostic) {
 			t.Fatalf("node probe diagnostic field %s should remain available, got %s", diagnostic, text)
 		}
+	}
+}
+
+func TestDoctorSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
+	summary := buildDoctorSummary(
+		runtimev2.HealthSnapshot{
+			CoreReady:    true,
+			RoutingReady: true,
+			DNSReady:     true,
+			EgressReady:  false,
+			LastCode:     "OUTBOUND_URL_FAILED",
+			LastError:    "URL probe failed",
+			CheckedAt:    time.Now(),
+		},
+		[]string{"iptables mangle rule remains"},
+		[]runtimev2.NodeProbeResult{
+			{TCPStatus: "ok", URLStatus: "fail", Verdict: "unusable"},
+		},
+		nil,
+		map[string]interface{}{"checks": map[string]interface{}{"helper_inbounds_disabled": true}},
+		map[string]string{"version": "v1.6.4"},
+		doctorCommandResult{},
+	)
+
+	if summary.Status != "partial_reset" {
+		t.Fatalf("leftovers should produce partial_reset summary, got %#v", summary)
+	}
+	if !summary.RebootRequired {
+		t.Fatalf("leftovers should request reboot in summary")
+	}
+	if summary.NodeTests.TCPOnly != 1 {
+		t.Fatalf("expected TCP-only node count, got %#v", summary.NodeTests)
+	}
+	if !strings.Contains(strings.Join(summary.Issues, "\n"), "TCP reachability") {
+		t.Fatalf("expected TCP-only issue, got %#v", summary.Issues)
+	}
+}
+
+func TestDoctorSummaryFlagsPrivacyFailures(t *testing.T) {
+	summary := buildDoctorSummary(
+		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
+		nil,
+		nil,
+		[]doctorPortStatus{{Port: 10809, TCPListening: true}},
+		map[string]interface{}{"checks": map[string]interface{}{
+			"helper_inbounds_disabled": false,
+			"system_proxy_unset":       true,
+		}},
+		map[string]string{"version": "v1.6.4"},
+		doctorCommandResult{},
+	)
+
+	if summary.Status != "degraded" {
+		t.Fatalf("privacy issue should degrade summary, got %#v", summary)
+	}
+	if len(summary.PrivacyIssues) == 0 {
+		t.Fatalf("expected privacy issues, got %#v", summary)
 	}
 }
 

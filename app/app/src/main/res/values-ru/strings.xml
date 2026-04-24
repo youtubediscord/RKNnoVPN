@@ -248,6 +248,9 @@
     <string name="node_test_reason_outbound_url_failed">URL-проверка через туннель не прошла</string>
     <string name="node_test_reason_http_helper_unavailable">HTTP helper недоступен</string>
     <string name="node_test_reason_api_disabled">URL-тест узла отключен в production-режиме</string>
+    <string name="node_test_reason_api_unavailable">локальный control API недоступен</string>
+    <string name="node_test_reason_outbound_missing">outbound tag не найден</string>
+    <string name="node_test_reason_tls_handshake_failed">TLS/REALITY handshake не прошёл</string>
     <string name="node_test_reason_unknown">ошибка</string>
     <string name="node_test_tcp_ms">TCP %1$d мс</string>
     <string name="node_test_url_ms">URL %1$d мс</string>

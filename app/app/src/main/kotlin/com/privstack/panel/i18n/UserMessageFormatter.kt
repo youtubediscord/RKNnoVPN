@@ -119,6 +119,9 @@ class UserMessageFormatter @Inject constructor(
             "outbound_url_failed" -> get(R.string.node_test_reason_outbound_url_failed)
             "http_helper_unavailable" -> get(R.string.node_test_reason_http_helper_unavailable)
             "api_disabled" -> get(R.string.node_test_reason_api_disabled)
+            "api_unavailable" -> get(R.string.node_test_reason_api_unavailable)
+            "outbound_missing" -> get(R.string.node_test_reason_outbound_missing)
+            "tls_handshake_failed" -> get(R.string.node_test_reason_tls_handshake_failed)
             "", "ok" -> get(R.string.node_test_reason_unknown)
             else -> normalized
         }

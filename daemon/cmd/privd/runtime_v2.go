@@ -1060,6 +1060,7 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 			} else {
 				result.URLStatus = "fail"
 				result.Verdict = "unusable"
+				result.ErrorDetail = urlErr.Error()
 				if result.ErrorClass == "" {
 					result.ErrorClass = classifyRuntimeURLTestFailure(urlErr, runtimeHealth)
 				}
@@ -1083,11 +1084,11 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 }
 
 func classifyRuntimeURLTestFailure(err error, snapshot runtimev2.HealthSnapshot) string {
+	if direct := classifyURLTestControlPlaneError(err); direct != "" {
+		return direct
+	}
 	if !snapshot.Healthy() {
 		return "runtime_not_ready"
-	}
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "api_disabled") {
-		return "api_disabled"
 	}
 	switch snapshot.LastCode {
 	case "DNS_LISTENER_DOWN",
@@ -1116,14 +1117,55 @@ func classifyRuntimeURLTestFailure(err error, snapshot runtimev2.HealthSnapshot)
 		return "runtime_degraded"
 	}
 	if err != nil {
-		detail := strings.ToLower(err.Error())
-		if strings.Contains(detail, "127.0.0.1") ||
-			strings.Contains(detail, "connection refused") ||
-			strings.Contains(detail, "connect:") {
-			return "http_helper_unavailable"
+		if direct := classifyURLTestError(err); direct != "" {
+			return direct
 		}
 	}
 	return "tunnel_delay_failed"
+}
+
+func classifyURLTestControlPlaneError(err error) string {
+	if err == nil {
+		return ""
+	}
+	detail := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(detail, "api_disabled"):
+		return "api_disabled"
+	case strings.Contains(detail, "connection refused"),
+		strings.Contains(detail, "connect: connection"),
+		strings.Contains(detail, "127.0.0.1"),
+		strings.Contains(detail, "api port"):
+		return "api_unavailable"
+	case strings.Contains(detail, "http 404"),
+		strings.Contains(detail, "not found"),
+		strings.Contains(detail, "outbound tag"):
+		return "outbound_missing"
+	}
+	return ""
+}
+
+func classifyURLTestError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if control := classifyURLTestControlPlaneError(err); control != "" {
+		return control
+	}
+	detail := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(detail, "no such host"),
+		strings.Contains(detail, "dns"):
+		return "proxy_dns_unavailable"
+	case strings.Contains(detail, "tls"),
+		strings.Contains(detail, "handshake"):
+		return "tls_handshake_failed"
+	case strings.Contains(detail, "timeout"),
+		strings.Contains(detail, "deadline exceeded"),
+		strings.Contains(detail, "i/o timeout"):
+		return "tunnel_delay_failed"
+	}
+	return ""
 }
 
 func (d *daemon) probeNodeBootstrapDNS(cfg *config.Config, host string, timeout time.Duration) bool {

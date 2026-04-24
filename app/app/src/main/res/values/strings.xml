@@ -248,6 +248,9 @@
     <string name="node_test_reason_outbound_url_failed">outbound URL probe failed</string>
     <string name="node_test_reason_http_helper_unavailable">HTTP helper unavailable</string>
     <string name="node_test_reason_api_disabled">per-node URL test disabled in production mode</string>
+    <string name="node_test_reason_api_unavailable">local control API unavailable</string>
+    <string name="node_test_reason_outbound_missing">outbound tag not found</string>
+    <string name="node_test_reason_tls_handshake_failed">TLS/REALITY handshake failed</string>
     <string name="node_test_reason_unknown">error</string>
     <string name="node_test_tcp_ms">TCP %1$d ms</string>
     <string name="node_test_url_ms">URL %1$d ms</string>

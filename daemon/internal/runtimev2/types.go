@@ -118,6 +118,7 @@ type NodeProbeResult struct {
 	URLStatus    string `json:"urlStatus,omitempty"`
 	Verdict      string `json:"verdict,omitempty"`
 	ErrorClass   string `json:"errorClass,omitempty"`
+	ErrorDetail  string `json:"errorDetail,omitempty"`
 }
 
 type DiagnosticsSnapshot struct {

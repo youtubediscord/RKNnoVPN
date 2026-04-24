@@ -160,6 +160,31 @@ func TestClassifyRuntimeURLTestFailureUsesLastHealthCode(t *testing.T) {
 	}
 }
 
+func TestClassifyURLTestFailureUsesConcreteURLCause(t *testing.T) {
+	base := runtimev2.HealthSnapshot{
+		CoreReady:    true,
+		RoutingReady: true,
+		DNSReady:     true,
+		EgressReady:  true,
+		CheckedAt:    time.Now(),
+	}
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{errors.New("api_disabled"), "api_disabled"},
+		{errors.New("Get http://127.0.0.1:9090/proxies/node/delay: connect: connection refused"), "api_unavailable"},
+		{errors.New("clash delay HTTP 404: proxy not found"), "outbound_missing"},
+		{errors.New("remote error: tls: handshake failure"), "tls_handshake_failed"},
+		{errors.New("lookup example.com: no such host"), "proxy_dns_unavailable"},
+	}
+	for _, tc := range cases {
+		if got := classifyRuntimeURLTestFailure(tc.err, base); got != tc.want {
+			t.Fatalf("expected %q for %v, got %q", tc.want, tc.err, got)
+		}
+	}
+}
+
 func TestIgnorableKillallExitStatusOne(t *testing.T) {
 	if !isIgnorableKillallError("anything", errors.New("exit status 1")) {
 		t.Fatalf("killall exit status 1 should be treated as success-noop")
@@ -230,6 +255,33 @@ func TestRootReconcileGuardRequiresActiveMarker(t *testing.T) {
 	}
 	if skip, detail := d.shouldSkipRootReconcile(); !skip || !strings.Contains(detail, "manual mode") {
 		t.Fatalf("expected manual guard, got skip=%v detail=%q", skip, detail)
+	}
+}
+
+func TestRemoveStaleRuntimeFilesIsIdempotent(t *testing.T) {
+	d := &daemon{dataDir: t.TempDir()}
+	if err := os.MkdirAll(d.dataDir+"/run", 0750); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"singbox.pid", "active", "net_change.lock", "iptables.rules", "ip6tables.rules", "env.sh"} {
+		if err := os.WriteFile(d.dataDir+"/run/"+name, []byte("stale\n"), 0640); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	removed, err := d.removeStaleRuntimeFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) < 6 {
+		t.Fatalf("expected stale files to be removed, got %#v", removed)
+	}
+	removed, err = d.removeStaleRuntimeFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("second cleanup should be already clean, got %#v", removed)
 	}
 }
 

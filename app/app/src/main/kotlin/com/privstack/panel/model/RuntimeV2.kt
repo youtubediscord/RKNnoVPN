@@ -127,4 +127,5 @@ data class NodeProbeResultV2(
     val urlStatus: String = "",
     val verdict: String = "",
     val errorClass: String = "",
+    val errorDetail: String = "",
 )
