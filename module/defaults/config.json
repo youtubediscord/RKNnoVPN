@@ -1,10 +1,12 @@
 {
+  "schema_version": 4,
   "proxy": {
     "mode": "tproxy",
     "tproxy_port": 10853,
     "dns_port": 10856,
     "gid": 23333,
-    "mark": 8227
+    "mark": 8227,
+    "api_port": 0
   },
   "transport": {
     "protocol": "reality",
@@ -55,7 +57,17 @@
     "interval_sec": 30,
     "threshold": 3,
     "check_url": "https://www.gstatic.com/generate_204",
-    "timeout_sec": 5
+    "timeout_sec": 5,
+    "dns_probe_domains": [
+      "connectivitycheck.gstatic.com",
+      "cloudflare.com",
+      "example.com"
+    ],
+    "egress_urls": [
+      "https://www.gstatic.com/generate_204",
+      "https://cp.cloudflare.com/generate_204"
+    ],
+    "dns_is_hard_readiness": false
   },
   "rescue": {
     "enabled": true,

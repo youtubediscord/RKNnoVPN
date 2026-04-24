@@ -1948,7 +1948,7 @@ func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCEr
 		"sing_box":                 d.singBoxVersion(singBoxPath, 20),
 		"control_protocol":         controlProtocolVersion,
 		"control_protocol_version": controlProtocolVersion,
-		"schema_version":           configSchemaVersion,
+		"schema_version":           config.CurrentSchemaVersion,
 		"panel_min_version":        Version,
 		"capabilities":             supportedCapabilities(),
 		"supported_methods":        supportedRPCMethods(),

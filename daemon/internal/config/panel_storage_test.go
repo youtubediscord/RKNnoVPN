@@ -130,6 +130,9 @@ func TestLoadMigratesEmbeddedPanelToSidecar(t *testing.T) {
 	if cfg.Node.Address != "example.com" {
 		t.Fatalf("expected synced node address from panel, got %q", cfg.Node.Address)
 	}
+	if cfg.SchemaVersion != CurrentSchemaVersion {
+		t.Fatalf("legacy config should be migrated to schema %d, got %d", CurrentSchemaVersion, cfg.SchemaVersion)
+	}
 
 	panelPath := PanelPath(configPath)
 	panelData, err := os.ReadFile(panelPath)
@@ -149,6 +152,14 @@ func TestLoadMigratesEmbeddedPanelToSidecar(t *testing.T) {
 	}
 	if containsPanelKey(savedConfig) {
 		t.Fatalf("rewritten config still contains embedded panel: %s", string(savedConfig))
+	}
+}
+
+func TestValidateRejectsNewerSchemaVersion(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.SchemaVersion = CurrentSchemaVersion + 1
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("newer schema version should be rejected")
 	}
 }
 

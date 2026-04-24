@@ -15,8 +15,6 @@ import (
 )
 
 const controlProtocolVersion = 3
-const configSchemaVersion = 4
-
 type doctorCommandResult struct {
 	Command string   `json:"command"`
 	Lines   []string `json:"lines,omitempty"`
@@ -89,7 +87,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 			"core":                     Version,
 			"privctl_expected":         Version,
 			"control_protocol_version": controlProtocolVersion,
-			"schema_version":           configSchemaVersion,
+			"schema_version":           config.CurrentSchemaVersion,
 			"panel_min_version":        Version,
 			"capabilities":             supportedCapabilities(),
 			"supported_methods":        supportedRPCMethods(),

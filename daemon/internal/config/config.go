@@ -8,20 +8,23 @@ import (
 	"path/filepath"
 )
 
+const CurrentSchemaVersion = 4
+
 // Config is the canonical daemon configuration.
 type Config struct {
-	Proxy     ProxyConfig     `json:"proxy"`
-	Transport TransportConfig `json:"transport"`
-	Node      NodeConfig      `json:"node"`
-	Panel     PanelConfig     `json:"-"`
-	RuntimeV2 RuntimeV2Config `json:"runtime_v2,omitempty"`
-	Routing   RoutingConfig   `json:"routing"`
-	Apps      AppsConfig      `json:"apps"`
-	DNS       DNSConfig       `json:"dns"`
-	IPv6      IPv6Config      `json:"ipv6"`
-	Health    HealthConfig    `json:"health"`
-	Rescue    RescueConfig    `json:"rescue"`
-	Autostart bool            `json:"autostart"`
+	SchemaVersion int             `json:"schema_version"`
+	Proxy         ProxyConfig     `json:"proxy"`
+	Transport     TransportConfig `json:"transport"`
+	Node          NodeConfig      `json:"node"`
+	Panel         PanelConfig     `json:"-"`
+	RuntimeV2     RuntimeV2Config `json:"runtime_v2,omitempty"`
+	Routing       RoutingConfig   `json:"routing"`
+	Apps          AppsConfig      `json:"apps"`
+	DNS           DNSConfig       `json:"dns"`
+	IPv6          IPv6Config      `json:"ipv6"`
+	Health        HealthConfig    `json:"health"`
+	Rescue        RescueConfig    `json:"rescue"`
+	Autostart     bool            `json:"autostart"`
 }
 
 // ProxyConfig controls the sing-box proxy listener ports.
@@ -193,6 +196,7 @@ type NodeProfile struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
+		SchemaVersion: CurrentSchemaVersion,
 		Proxy: ProxyConfig{
 			Mode:       "tproxy",
 			TProxyPort: 10853,
@@ -344,6 +348,9 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	if cfg.SchemaVersion == 0 {
+		cfg.SchemaVersion = CurrentSchemaVersion
+	}
 
 	panelPath := PanelPath(path)
 	panel, found, err := loadPanelFromSidecar(panelPath)
@@ -385,6 +392,9 @@ func (c *Config) Save(path string) error {
 		return fmt.Errorf("config: mkdir: %w", err)
 	}
 
+	if c.SchemaVersion == 0 {
+		c.SchemaVersion = CurrentSchemaVersion
+	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return fmt.Errorf("config: marshal: %w", err)
@@ -428,6 +438,12 @@ func SavePanel(path string, panel PanelConfig) error {
 
 // Validate checks the Config for obvious misconfigurations.
 func (c *Config) Validate() error {
+	if c.SchemaVersion < 1 {
+		return fmt.Errorf("schema_version must be >= 1, got %d", c.SchemaVersion)
+	}
+	if c.SchemaVersion > CurrentSchemaVersion {
+		return fmt.Errorf("schema_version %d is newer than daemon supports (%d)", c.SchemaVersion, CurrentSchemaVersion)
+	}
 	if c.Proxy.TProxyPort < 1 || c.Proxy.TProxyPort > 65535 {
 		return fmt.Errorf("proxy.tproxy_port must be 1-65535, got %d", c.Proxy.TProxyPort)
 	}
