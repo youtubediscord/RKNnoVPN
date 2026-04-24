@@ -13,3 +13,9 @@ func TestIgnorableCleanupScriptError(t *testing.T) {
 		t.Fatal("real cleanup command failures must still be reported")
 	}
 }
+
+func TestRKNHarderingIsBuiltInAlwaysDirect(t *testing.T) {
+	if !IsBuiltInAlwaysDirectPackage("com.notcvnt.rknhardering") {
+		t.Fatal("RKNHardering self-test app must stay direct by default")
+	}
+}

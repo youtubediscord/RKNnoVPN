@@ -71,6 +71,7 @@ var builtInAlwaysDirectExact = map[string]bool{
 	"com.getsurfboard":                     true,
 	"com.github.kr328.clash":               true,
 	"com.github.metacubex.clash.meta":      true,
+	"com.notcvnt.rknhardering":             true,
 }
 
 var builtInAlwaysDirectPrefixes = []string{
