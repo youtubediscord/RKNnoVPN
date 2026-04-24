@@ -61,6 +61,8 @@
 - reset возвращает структурный `ResetReport`;
 - `doctor` и `logs` доступны из UI;
 - update/version gate различает repair-команды и команды запуска core.
+- health probe-set больше не завязан на один `www.gstatic.com`;
+- отчёт диагностики можно скопировать одной кнопкой из Settings.
 
 Acceptance:
 
@@ -102,6 +104,7 @@ Acceptance:
 
 - rollback чистит только применённые стадии;
 - `CoreManager.Start()` больше не является одним большим error string;
+- старт ждёт `tproxy`, `dns` и опциональный `api` listener до применения правил;
 - UI может показать, где именно остановился запуск:
   `CONFIG_CHECKED`, `CORE_SPAWNED`, `CORE_LISTENING`, `RULES_APPLIED`,
   `DNS_APPLIED`, `OUTBOUND_CHECKED`, `DEGRADED`.
@@ -141,6 +144,8 @@ Acceptance:
 - start/restart требуют working `sing-box`;
 - reset/logs/doctor/node TCP diagnostics остаются доступны для ремонта;
 - update installer проверяет zip до downtime.
+- `version` отдаёт `schema_version`, `panel_min_version`, `capabilities`,
+  `supported_methods`, module/core/daemon metadata.
 
 ### M4. Privacy invariants
 
@@ -156,6 +161,10 @@ no public SOCKS/HTTP listener
 no public Xray/Clash API
 protected/direct-only app set is active
 ```
+
+Часть self-test уже находится в `audit`/`doctor`: API/helper listeners,
+system proxy, VPN-like interfaces, per-app whitelist/off defaults и
+diagnostic privacy surface.
 
 Не делать:
 
@@ -178,6 +187,9 @@ protected/direct-only app set is active
 - APK/module mismatch.
 
 Отчёт должен быть redacted по умолчанию.
+
+Текущий redaction contract: credentials/keys/passwords/UUID скрываются,
+а server/port/SNI остаются видимыми для диагностики маршрута.
 
 ### M6. Feature roadmap after stabilization
 

@@ -724,6 +724,11 @@ class DaemonClient @Inject constructor(
                 controlProtocolVersion = obj["control_protocol_version"]?.jsonPrimitive?.intOrNull
                     ?: obj["control_protocol"]?.jsonPrimitive?.intOrNull
                     ?: 0,
+                schemaVersion = obj["schema_version"]?.jsonPrimitive?.intOrNull ?: 0,
+                panelMinVersion = obj["panel_min_version"]?.jsonPrimitive?.contentOrNull ?: "",
+                capabilities = obj["capabilities"]?.jsonArray?.mapNotNull {
+                    it.jsonPrimitive.contentOrNull
+                }.orEmpty(),
                 supportedMethods = obj["supported_methods"]?.jsonArray?.mapNotNull {
                     it.jsonPrimitive.contentOrNull
                 }.orEmpty(),
@@ -999,6 +1004,9 @@ data class VersionInfo(
     val singBoxAvailable: Boolean = true,
     val singBoxError: String = "",
     val controlProtocolVersion: Int = 0,
+    val schemaVersion: Int = 0,
+    val panelMinVersion: String = "",
+    val capabilities: List<String> = emptyList(),
     val supportedMethods: List<String> = emptyList(),
 ) {
     fun missingRequiredMethods(required: Collection<String>): List<String> {
@@ -1429,6 +1437,19 @@ private data class DaemonHealthSection(
     val checkUrl: String = "https://www.gstatic.com/generate_204",
     @SerialName("timeout_sec")
     val timeoutSec: Int = 5,
+    @SerialName("dns_probe_domains")
+    val dnsProbeDomains: List<String> = listOf(
+        "connectivitycheck.gstatic.com",
+        "cloudflare.com",
+        "example.com",
+    ),
+    @SerialName("egress_urls")
+    val egressUrls: List<String> = listOf(
+        "https://www.gstatic.com/generate_204",
+        "https://cp.cloudflare.com/generate_204",
+    ),
+    @SerialName("dns_is_hard_readiness")
+    val dnsIsHardReadiness: Boolean = false,
 ) {
     fun toPanelHealth(): HealthConfig =
         HealthConfig(
@@ -1437,6 +1458,9 @@ private data class DaemonHealthSection(
             threshold = threshold,
             checkUrl = checkUrl,
             timeoutSec = timeoutSec,
+            dnsProbeDomains = dnsProbeDomains,
+            egressUrls = egressUrls,
+            dnsIsHardReadiness = dnsIsHardReadiness,
         )
 }
 
@@ -1539,6 +1563,13 @@ private fun HealthConfig.toDaemonHealthSection(base: JsonObject?): DaemonHealthS
         put("threshold", threshold)
         put("check_url", checkUrl)
         put("timeout_sec", timeoutSec)
+        putJsonArray("dns_probe_domains") {
+            dnsProbeDomains.map(String::trim).filter(String::isNotBlank).distinct().forEach { add(it) }
+        }
+        putJsonArray("egress_urls") {
+            egressUrls.map(String::trim).filter(String::isNotBlank).distinct().forEach { add(it) }
+        }
+        put("dns_is_hard_readiness", dnsIsHardReadiness)
     }
     return bridgeJson.decodeFromJsonElement(DaemonHealthSection.serializer(), merged)
 }

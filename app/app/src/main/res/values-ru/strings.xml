@@ -35,6 +35,7 @@
     <string name="runtime_operational_degraded">Runtime подключён, но operational-проверки ещё с проблемами</string>
     <string name="health_issue_core_crashed">Процесс core не запущен.</string>
     <string name="health_issue_tproxy_port_down">TPROXY listener не принимает подключения.</string>
+    <string name="health_issue_api_port_down">Локальный control API listener не принимает подключения.</string>
     <string name="health_issue_rules_not_applied">Правила перехвата трафика не применены.</string>
     <string name="health_issue_routing_not_applied">Policy routing не применён.</string>
     <string name="health_issue_dns_listener_down">DNS listener 127.0.0.1 не отвечает.</string>
@@ -150,6 +151,7 @@
     <string name="show_logs">Показать логи</string>
     <string name="loading_logs">Загрузка…</string>
     <string name="share_logs_telegram">Отправить в Telegram</string>
+    <string name="copy_diagnostic_report">Скопировать отчёт</string>
     <string name="logs_share_subject">Логи RKNnoVPN runtime</string>
     <string name="logs_share_chooser">Отправить логи</string>
     <string name="settings_theme">Тема</string>

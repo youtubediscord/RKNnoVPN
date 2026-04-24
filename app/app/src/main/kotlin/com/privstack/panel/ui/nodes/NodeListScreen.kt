@@ -311,10 +311,14 @@ private fun NodeCard(
 
             Spacer(modifier = Modifier.width(12.dp))
 
+            val okStatus = stringResource(R.string.node_test_status_ok)
+            val tcpOkStatus = stringResource(R.string.node_test_status_tcp_ok)
+            val hasFailedDataPlane = node.testStatus != null &&
+                node.testStatus != okStatus &&
+                node.testStatus != tcpOkStatus
+
             // Name + protocol + server
             Column(modifier = Modifier.weight(1f)) {
-                val okStatus = stringResource(R.string.node_test_status_ok)
-                val tcpOkStatus = stringResource(R.string.node_test_status_tcp_ok)
                 val testSummary = listOfNotNull(
                     node.latencyMs?.takeIf { it >= 0 }?.let { stringResource(R.string.node_test_tcp_ms, it) },
                     node.responseMs?.let { stringResource(R.string.node_test_url_ms, it) },
@@ -348,7 +352,12 @@ private fun NodeCard(
             Spacer(modifier = Modifier.width(8.dp))
 
             // Latency chip
-            node.latencyMs?.let { ms ->
+            val chipMs = when {
+                node.responseMs != null -> node.responseMs
+                hasFailedDataPlane -> -1
+                else -> node.latencyMs
+            }
+            chipMs?.let { ms ->
                 LatencyChip(ms)
             }
         }

@@ -15,6 +15,7 @@ import (
 )
 
 const controlProtocolVersion = 3
+const configSchemaVersion = 4
 
 type doctorCommandResult struct {
 	Command string   `json:"command"`
@@ -88,10 +89,14 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 			"core":                     Version,
 			"privctl_expected":         Version,
 			"control_protocol_version": controlProtocolVersion,
+			"schema_version":           configSchemaVersion,
+			"panel_min_version":        Version,
+			"capabilities":             supportedCapabilities(),
 			"supported_methods":        supportedRPCMethods(),
 			"sing_box":                 d.singBoxVersion(singBoxPath, lines),
 			"module":                   readModuleVersion(),
 		},
+		"device": d.doctorDevice(lines),
 		"paths": map[string]doctorFileStatus{
 			"data_dir":          fileStatus(dataDir, false),
 			"config":            fileStatus(cfgPath, false),
@@ -118,10 +123,28 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 			"rendered_singbox": readRedactedJSONFile(renderedConfigPath),
 		},
 		"runtime": d.runtimeDiagnostics(lines),
+		"privacy": d.privacyDiagnostics(cfg, lines),
 	}
 
 	report["sing_box_check"] = d.singBoxCheck(singBoxPath, renderedConfigPath, lines)
 	return report, nil
+}
+
+func supportedCapabilities() []string {
+	return []string{
+		"backend.root-tproxy",
+		"backend.reset.structured",
+		"config.import.v2",
+		"config.schema.v4",
+		"diagnostics.bundle.v2",
+		"diagnostics.health.v2",
+		"diagnostics.testNodes.v2",
+		"node-test.tcp-direct",
+		"node-test.url",
+		"panel.nodes",
+		"privacy.audit.v2",
+		"runtime.logs",
+	}
 }
 
 func supportedRPCMethods() []string {
@@ -185,16 +208,62 @@ func (d *daemon) singBoxCheck(path string, configPath string, maxLines int) doct
 
 func (d *daemon) runtimeDiagnostics(maxLines int) map[string]doctorCommandResult {
 	return map[string]doctorCommandResult{
-		"iptables_mangle":   runDoctorCommand(maxLines, "iptables", "-w", "100", "-t", "mangle", "-S"),
-		"iptables_nat":      runDoctorCommand(maxLines, "iptables", "-w", "100", "-t", "nat", "-S"),
-		"ip6tables_mangle":  runDoctorCommand(maxLines, "ip6tables", "-w", "100", "-t", "mangle", "-S"),
-		"ip6tables_nat":     runDoctorCommand(maxLines, "ip6tables", "-w", "100", "-t", "nat", "-S"),
-		"ip_rule":           runDoctorCommand(maxLines, "ip", "rule", "show"),
-		"ip_rule_v6":        runDoctorCommand(maxLines, "ip", "-6", "rule", "show"),
-		"ip_route_2023":     runDoctorCommand(maxLines, "ip", "route", "show", "table", "2023"),
-		"ip_route_2024_v6":  runDoctorCommand(maxLines, "ip", "-6", "route", "show", "table", "2024"),
-		"listeners_ss":      runDoctorCommand(maxLines, "ss", "-lntu"),
-		"listeners_netstat": runDoctorCommand(maxLines, "netstat", "-lntu"),
+		"iptables_save_mangle":  runDoctorCommand(maxLines, "iptables-save", "-t", "mangle"),
+		"ip6tables_save_mangle": runDoctorCommand(maxLines, "ip6tables-save", "-t", "mangle"),
+		"iptables_mangle":       runDoctorCommand(maxLines, "iptables", "-w", "100", "-t", "mangle", "-S"),
+		"iptables_nat":          runDoctorCommand(maxLines, "iptables", "-w", "100", "-t", "nat", "-S"),
+		"ip6tables_mangle":      runDoctorCommand(maxLines, "ip6tables", "-w", "100", "-t", "mangle", "-S"),
+		"ip6tables_nat":         runDoctorCommand(maxLines, "ip6tables", "-w", "100", "-t", "nat", "-S"),
+		"ip_rule":               runDoctorCommand(maxLines, "ip", "rule", "show"),
+		"ip_rule_v6":            runDoctorCommand(maxLines, "ip", "-6", "rule", "show"),
+		"ip_route_2023":         runDoctorCommand(maxLines, "ip", "route", "show", "table", "2023"),
+		"ip_route_2024_v6":      runDoctorCommand(maxLines, "ip", "-6", "route", "show", "table", "2024"),
+		"listeners_ss":          runDoctorCommand(maxLines, "ss", "-lntu"),
+		"listeners_netstat":     runDoctorCommand(maxLines, "netstat", "-lntu"),
+	}
+}
+
+func (d *daemon) doctorDevice(maxLines int) map[string]doctorCommandResult {
+	return map[string]doctorCommandResult{
+		"model":           runDoctorCommand(maxLines, "getprop", "ro.product.model"),
+		"manufacturer":    runDoctorCommand(maxLines, "getprop", "ro.product.manufacturer"),
+		"android_release": runDoctorCommand(maxLines, "getprop", "ro.build.version.release"),
+		"android_sdk":     runDoctorCommand(maxLines, "getprop", "ro.build.version.sdk"),
+		"abi":             runDoctorCommand(maxLines, "getprop", "ro.product.cpu.abi"),
+		"selinux":         runDoctorCommand(maxLines, "getenforce"),
+		"uid":             runDoctorCommand(maxLines, "id"),
+		"magisk":          runDoctorCommand(maxLines, "magisk", "-V"),
+		"ksu":             runDoctorCommand(maxLines, "ksud", "-V"),
+		"apatch":          runDoctorCommand(maxLines, "apd", "--version"),
+	}
+}
+
+func (d *daemon) privacyDiagnostics(cfg *config.Config, maxLines int) map[string]interface{} {
+	ipLinks := runDoctorCommand(maxLines, "ip", "link", "show")
+	connectivity := runDoctorCommand(maxLines, "dumpsys", "connectivity")
+	settingsProxyHost := runDoctorCommand(maxLines, "settings", "get", "global", "http_proxy")
+	settingsProxyPort := runDoctorCommand(maxLines, "settings", "get", "global", "global_http_proxy_port")
+	checks := map[string]interface{}{
+		"no_vpn_like_interfaces": !doctorLinesContainAny(ipLinks.Lines, "tun0", "wg0", "tap0", "ppp0", "ipsec"),
+		"no_transport_vpn_hint":  !doctorLinesContainAny(connectivity.Lines, "TRANSPORT_VPN", "VpnTransportInfo"),
+		"system_proxy_unset":     doctorCommandLooksEmptySetting(settingsProxyHost) && doctorCommandLooksEmptySetting(settingsProxyPort),
+	}
+	if cfg != nil {
+		panelInbounds := cfg.ResolvePanelInbounds()
+		checks["clash_api_disabled"] = cfg.Proxy.APIPort == 0
+		checks["helper_inbounds_disabled"] = panelInbounds.HTTPPort == 0 && panelInbounds.SocksPort == 0
+		checks["helper_inbounds_local_only"] = !panelInbounds.AllowLAN
+		checks["per_app_whitelist_default"] = cfg.Apps.Mode == "whitelist" || cfg.Apps.Mode == "off"
+		checks["dns_hijack_per_uid"] = cfg.DNS.HijackPerUID
+	}
+	return map[string]interface{}{
+		"checks": checks,
+		"commands": map[string]doctorCommandResult{
+			"ip_link":                    ipLinks,
+			"dumpsys_connectivity":       connectivity,
+			"settings_global_http_proxy": settingsProxyHost,
+			"settings_global_proxy_port": settingsProxyPort,
+		},
 	}
 }
 
@@ -295,22 +364,6 @@ func redactNodeProbeResults(results interface{}) interface{} {
 	if err := json.Unmarshal(data, &value); err != nil {
 		return results
 	}
-	if items, ok := value.([]interface{}); ok {
-		for _, item := range items {
-			probe, ok := item.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			server, _ := probe["server"].(string)
-			if server == "" {
-				continue
-			}
-			if name, _ := probe["name"].(string); name == server {
-				probe["name"] = "[redacted]"
-			}
-			probe["server"] = "[redacted]"
-		}
-	}
 	return redactDiagnosticValue("", value)
 }
 
@@ -362,8 +415,7 @@ func redactDiagnosticValue(key string, value interface{}) interface{} {
 func isSensitiveDiagnosticKey(key string) bool {
 	lower := strings.ToLower(strings.TrimSpace(key))
 	switch lower {
-	case "uuid", "password", "private_key", "short_id", "server", "address", "sni",
-		"server_name", "tls_server", "public_key", "reality_public_key":
+	case "uuid", "password", "private_key", "short_id", "public_key", "reality_public_key":
 		return true
 	}
 	for _, token := range []string{"password", "private", "secret", "token", "uuid", "short_id", "public_key"} {
@@ -376,13 +428,38 @@ func isSensitiveDiagnosticKey(key string) bool {
 
 var (
 	diagnosticUUIDPattern = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
-	diagnosticKeyPattern  = regexp.MustCompile(`(?i)("?(?:uuid|password|private_key|short_id|server|address|sni|server_name|tls_server|public_key|reality_public_key)"?\s*[:=]\s*)("[^"]*"|[^,\s}]+)`)
+	diagnosticKeyPattern  = regexp.MustCompile(`(?i)("?(?:uuid|password|private_key|short_id|public_key|reality_public_key)"?\s*[:=]\s*)("[^"]*"|[^,\s}]+)`)
 )
 
 func redactDiagnosticText(text string) string {
 	text = diagnosticKeyPattern.ReplaceAllString(text, `${1}"[redacted]"`)
 	text = diagnosticUUIDPattern.ReplaceAllString(text, "[redacted-uuid]")
 	return text
+}
+
+func doctorLinesContainAny(lines []string, needles ...string) bool {
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		for _, needle := range needles {
+			if strings.Contains(lower, strings.ToLower(needle)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func doctorCommandLooksEmptySetting(result doctorCommandResult) bool {
+	if result.Error != "" {
+		return true
+	}
+	for _, line := range result.Lines {
+		value := strings.TrimSpace(line)
+		if value != "" && value != "null" && value != ":0" {
+			return false
+		}
+	}
+	return true
 }
 
 func limitLines(lines []string, max int) []string {

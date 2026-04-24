@@ -472,14 +472,16 @@ func phaseFromHealth(health HealthSnapshot, fallback Phase) Phase {
 	switch health.LastCode {
 	case "TPROXY_PORT_DOWN":
 		return PhaseCoreSpawned
+	case "DNS_LISTENER_DOWN",
+		"API_PORT_DOWN":
+		return PhaseCoreListening
 	case "RULES_NOT_APPLIED",
 		"ROUTING_CHECK_FAILED",
 		"ROUTING_V4_MISSING",
 		"ROUTING_V6_MISSING",
 		"ROUTING_NOT_APPLIED":
 		return PhaseCoreListening
-	case "DNS_LISTENER_DOWN",
-		"DNS_APPLY_FAILED":
+	case "DNS_APPLY_FAILED":
 		return PhaseRulesApplied
 	case "DNS_LOOKUP_TIMEOUT",
 		"DNS_EMPTY_RESPONSE",

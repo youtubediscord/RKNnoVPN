@@ -42,7 +42,8 @@ type HealthMonitor struct {
 	tproxyPort int // port to probe
 	dnsPort    int // local DNS listener port to probe
 	routeMark  int // fwmark that must exist in routing policy
-	dnsHost    string
+	dnsHosts   []string
+	dnsHard    bool
 	dnsTimeout time.Duration
 	onDegraded func()
 	onRestored func()
@@ -89,7 +90,7 @@ func NewHealthMonitor(
 		tproxyPort: tproxyPort,
 		dnsPort:    dnsPort,
 		routeMark:  routeMark,
-		dnsHost:    dnsProbeHost(checkURL),
+		dnsHosts:   normalizeDNSProbeHosts(checkURL, nil),
 		dnsTimeout: normalizedDNSTimeout(timeout),
 		logger:     logger,
 	}
@@ -124,6 +125,8 @@ func (h *HealthMonitor) SetConfig(
 	dnsPort int,
 	routeMark int,
 	checkURL string,
+	dnsProbeDomains []string,
+	dnsIsHardReadiness bool,
 	timeout time.Duration,
 ) {
 	h.mu.Lock()
@@ -143,7 +146,8 @@ func (h *HealthMonitor) SetConfig(
 	if routeMark != 0 {
 		h.routeMark = routeMark
 	}
-	h.dnsHost = dnsProbeHost(checkURL)
+	h.dnsHosts = normalizeDNSProbeHosts(checkURL, dnsProbeDomains)
+	h.dnsHard = dnsIsHardReadiness
 	h.dnsTimeout = normalizedDNSTimeout(timeout)
 }
 
@@ -231,15 +235,19 @@ func (h *HealthMonitor) RunOnce() *HealthResult {
 	result.Checks["dns_listener"] = h.checkDNSListener()
 	result.Checks["dns"] = h.runDNSCheck()
 
-	// Hard health only depends on the core process, the local listener, and
-	// routing hooks. DNS is intentionally diagnostic-only here: it may fail
-	// transiently while the runtime is still usable, and should not by itself
-	// trigger teardown/recovery.
+	// Hard health normally depends only on the core process, local listener,
+	// and routing hooks. DNS can be promoted to a hard gate for specialised
+	// deployments, but privacy-first defaults keep it diagnostic-only.
 	result.Overall =
 		result.Checks["singbox_alive"].Pass &&
 			result.Checks["tproxy_port"].Pass &&
 			result.Checks["iptables"].Pass &&
 			result.Checks["routing"].Pass
+	if h.dnsHard {
+		result.Overall = result.Overall &&
+			result.Checks["dns_listener"].Pass &&
+			result.Checks["dns"].Pass
+	}
 
 	h.mu.Lock()
 	h.lastResult = result
@@ -428,18 +436,27 @@ func (h *HealthMonitor) checkDNS() CheckResult {
 		},
 	}
 
-	host := h.dnsHost
-	if host == "" {
-		host = "dns.google"
+	hosts := h.dnsHosts
+	if len(hosts) == 0 {
+		hosts = []string{"dns.google"}
 	}
-	addrs, err := resolver.LookupHost(ctx, host)
-	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s через 127.0.0.1:%d завершился ошибкой: %v", host, port, err), Code: classifyDNSError(err)}
+	var failures []string
+	lastCode := "DNS_LOOKUP_FAILED"
+	for _, host := range hosts {
+		addrs, err := resolver.LookupHost(ctx, host)
+		if err != nil {
+			lastCode = classifyDNSError(err)
+			failures = append(failures, fmt.Sprintf("%s: %v", host, err))
+			continue
+		}
+		if len(addrs) == 0 {
+			lastCode = "DNS_EMPTY_RESPONSE"
+			failures = append(failures, host+": empty response")
+			continue
+		}
+		return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS для %s через 127.0.0.1:%d работает", host, port)}
 	}
-	if len(addrs) == 0 {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("lookup %s через 127.0.0.1:%d не вернул ответов", host, port), Code: "DNS_EMPTY_RESPONSE"}
-	}
-	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS для %s через 127.0.0.1:%d работает", host, port)}
+	return CheckResult{Pass: false, Detail: fmt.Sprintf("DNS probe через 127.0.0.1:%d не прошёл: %s", port, strings.Join(failures, "; ")), Code: lastCode}
 }
 
 func classifyDNSError(err error) string {
@@ -486,6 +503,29 @@ func dnsProbeHost(checkURL string) string {
 		return "dns.google"
 	}
 	return parsed.Hostname()
+}
+
+func normalizeDNSProbeHosts(checkURL string, domains []string) []string {
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(domains)+1)
+	for _, domain := range domains {
+		host := strings.TrimSpace(domain)
+		if host == "" || seen[host] {
+			continue
+		}
+		seen[host] = true
+		result = append(result, host)
+	}
+	if len(result) == 0 {
+		host := dnsProbeHost(checkURL)
+		if host != "" {
+			result = append(result, host)
+		}
+	}
+	if len(result) == 0 {
+		result = append(result, "dns.google")
+	}
+	return result
 }
 
 func normalizedDNSTimeout(timeout time.Duration) time.Duration {

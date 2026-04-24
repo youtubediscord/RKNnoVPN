@@ -31,13 +31,15 @@ func TestDoctorRedactsSensitiveJSON(t *testing.T) {
 		t.Fatalf("unexpected parse error: %s", section.Error)
 	}
 	text := redactDiagnosticText(mustMarshalForTest(t, section.Value))
-	for _, secret := range []string{"proxy.example.com", "00000000-0000-0000-0000-000000000000", "secret", "cdn.example.com", "pubsecretvalue", "sidsecretvalue"} {
+	for _, secret := range []string{"00000000-0000-0000-0000-000000000000", "secret", "pubsecretvalue", "sidsecretvalue"} {
 		if strings.Contains(text, secret) {
 			t.Fatalf("secret %q was not redacted from %s", secret, text)
 		}
 	}
-	if !strings.Contains(text, `"server_port":443`) {
-		t.Fatalf("non-secret server_port should remain available, got %s", text)
+	for _, diagnostic := range []string{`"server":"proxy.example.com"`, `"server_port":443`, `"server_name":"cdn.example.com"`} {
+		if !strings.Contains(text, diagnostic) {
+			t.Fatalf("diagnostic endpoint field %s should remain available, got %s", diagnostic, text)
+		}
 	}
 }
 
@@ -50,7 +52,16 @@ func TestSupportedRPCMethodsAdvertiseCompatibilityAliases(t *testing.T) {
 	}
 }
 
-func TestDoctorRedactsNodeProbeServer(t *testing.T) {
+func TestSupportedCapabilitiesAdvertiseSchemaAndDiagnostics(t *testing.T) {
+	caps := supportedCapabilities()
+	for _, capability := range []string{"config.schema.v4", "diagnostics.bundle.v2", "node-test.tcp-direct", "runtime.logs"} {
+		if !slices.Contains(caps, capability) {
+			t.Fatalf("supported capabilities missing %s: %#v", capability, caps)
+		}
+	}
+}
+
+func TestDoctorKeepsNodeProbeEndpointMetadata(t *testing.T) {
 	value := redactNodeProbeResults([]runtimev2.NodeProbeResult{
 		{
 			ID:     "node-1",
@@ -60,11 +71,10 @@ func TestDoctorRedactsNodeProbeServer(t *testing.T) {
 		},
 	})
 	text := mustMarshalForTest(t, value)
-	if strings.Contains(text, "secret.example.com") {
-		t.Fatalf("node probe server/name was not redacted from %s", text)
-	}
-	if !strings.Contains(text, `"port":443`) {
-		t.Fatalf("non-secret node probe fields should remain available, got %s", text)
+	for _, diagnostic := range []string{`"name":"secret.example.com"`, `"server":"secret.example.com"`, `"port":443`} {
+		if !strings.Contains(text, diagnostic) {
+			t.Fatalf("node probe diagnostic field %s should remain available, got %s", diagnostic, text)
+		}
 	}
 }
 

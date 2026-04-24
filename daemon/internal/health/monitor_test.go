@@ -85,6 +85,59 @@ func TestRunOnceFailsHardReadinessOnRoutingFailure(t *testing.T) {
 	}
 }
 
+func TestRunOnceCanPromoteDNSProbeToHardReadiness(t *testing.T) {
+	cfg := config.DefaultConfig()
+	manager := core.NewCoreManager(cfg, t.TempDir(), log.New(os.Stderr, "", 0))
+	monitor := NewHealthMonitor(
+		manager,
+		time.Second,
+		1,
+		cfg.Proxy.TProxyPort,
+		cfg.Proxy.DNSPort,
+		cfg.Proxy.Mark,
+		cfg.Health.URL,
+		time.Second,
+		log.New(os.Stderr, "", 0),
+	)
+	monitor.SetConfig(time.Second, 1, cfg.Proxy.TProxyPort, cfg.Proxy.DNSPort, cfg.Proxy.Mark, cfg.Health.URL, cfg.Health.DNSProbeDomains, true, time.Second)
+	monitor.runProcessAliveCheck = func(pid int) CheckResult {
+		return CheckResult{Pass: true, Detail: "alive"}
+	}
+	monitor.runPortListeningCheck = func(port int) CheckResult {
+		return CheckResult{Pass: true, Detail: "listening"}
+	}
+	monitor.runIptablesCheck = func() CheckResult {
+		return CheckResult{Pass: true, Detail: "iptables"}
+	}
+	monitor.runRoutingCheck = func() CheckResult {
+		return CheckResult{Pass: true, Detail: "routing"}
+	}
+	monitor.runDNSCheck = func() CheckResult {
+		return CheckResult{Pass: false, Detail: "dns timeout", Code: "DNS_LOOKUP_TIMEOUT"}
+	}
+
+	result := monitor.RunOnce()
+	if result.Overall {
+		t.Fatalf("DNS failure must fail hard readiness when explicitly configured: %#v", result)
+	}
+}
+
+func TestNormalizeDNSProbeHostsUsesConfiguredProbeSet(t *testing.T) {
+	got := normalizeDNSProbeHosts(
+		"https://www.gstatic.com/generate_204",
+		[]string{" example.com ", "", "cloudflare.com", "example.com"},
+	)
+	want := []string{"example.com", "cloudflare.com"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected probe hosts: %#v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected probe hosts: got %#v want %#v", got, want)
+		}
+	}
+}
+
 func TestClearDropsStickyHealthState(t *testing.T) {
 	cfg := config.DefaultConfig()
 	manager := core.NewCoreManager(cfg, t.TempDir(), log.New(os.Stderr, "", 0))

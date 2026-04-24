@@ -815,6 +815,18 @@ func firstLineContaining(text string, needle string) string {
 	return ""
 }
 
+func firstLineContainingAny(text string, needles ...string) string {
+	for _, line := range splitLines(text) {
+		lower := strings.ToLower(line)
+		for _, needle := range needles {
+			if strings.Contains(lower, strings.ToLower(needle)) {
+				return strings.TrimSpace(line)
+			}
+		}
+	}
+	return ""
+}
+
 func firstLine(text string) string {
 	for _, line := range splitLines(text) {
 		line = strings.TrimSpace(line)

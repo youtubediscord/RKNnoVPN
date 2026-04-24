@@ -228,6 +228,25 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	// Write PID file.
 	pidPath := filepath.Join(m.dataDir, "run", "singbox.pid")
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
+	iptablesScript := filepath.Join(m.dataDir, "scripts", "iptables.sh")
+	dnsScript := filepath.Join(m.dataDir, "scripts", "dns.sh")
+	rollbackStarted := func(signal syscall.Signal, stopDNS bool, stopRules bool) {
+		if stopDNS {
+			_ = ExecScript(dnsScript, "stop", m.scriptEnv())
+		}
+		if stopRules {
+			_ = ExecScript(iptablesScript, "stop", m.scriptEnv())
+		}
+		if m.process != nil {
+			_ = m.process.Signal(signal)
+		}
+		m.process = nil
+		m.pid = 0
+		m.activeProfile = ""
+		m.startedAt = time.Time{}
+		m.state = StateStopped
+		_ = os.Remove(pidPath)
+	}
 
 	m.logger.Printf("sing-box spawned, pid=%d", m.pid)
 
@@ -244,44 +263,44 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	}
 	if err := m.waitForPortOrExit(tproxyPort, 30*time.Second, exitCh, logPath); err != nil {
 		m.logger.Printf("port %d did not open in time, killing pid %d", tproxyPort, m.pid)
-		_ = m.process.Signal(syscall.SIGKILL)
-		m.process = nil
-		m.pid = 0
-		m.activeProfile = ""
-		m.startedAt = time.Time{}
-		m.state = StateStopped
-		_ = os.Remove(pidPath)
+		rollbackStarted(syscall.SIGKILL, false, false)
 		return runtimeError("wait tproxy port", "TPROXY_PORT_DOWN", fmt.Errorf("port %d not ready: %w", tproxyPort, err))
 	}
 	m.logger.Printf("port %d is listening", tproxyPort)
 
+	dnsPort := m.config.Proxy.DNSPort
+	if dnsPort == 0 {
+		dnsPort = 10856
+	}
+	if err := m.waitForPortOrExit(dnsPort, 10*time.Second, exitCh, logPath); err != nil {
+		m.logger.Printf("DNS port %d did not open in time, killing pid %d", dnsPort, m.pid)
+		rollbackStarted(syscall.SIGKILL, false, false)
+		return runtimeError("wait dns port", "DNS_LISTENER_DOWN", fmt.Errorf("DNS port %d not ready: %w", dnsPort, err))
+	}
+	m.logger.Printf("DNS port %d is listening", dnsPort)
+
+	apiPort := m.config.Proxy.APIPort
+	if apiPort > 0 {
+		if err := m.waitForPortOrExit(apiPort, 10*time.Second, exitCh, logPath); err != nil {
+			m.logger.Printf("API port %d did not open in time, killing pid %d", apiPort, m.pid)
+			rollbackStarted(syscall.SIGKILL, false, false)
+			return runtimeError("wait API port", "API_PORT_DOWN", fmt.Errorf("API port %d not ready: %w", apiPort, err))
+		}
+		m.logger.Printf("API port %d is listening", apiPort)
+	}
+
 	// 5. Apply iptables rules.
-	iptablesScript := filepath.Join(m.dataDir, "scripts", "iptables.sh")
 	if err := ExecScript(iptablesScript, "start", m.scriptEnv()); err != nil {
 		m.logger.Printf("iptables apply failed: %v — rolling back", err)
-		_ = m.process.Signal(syscall.SIGTERM)
-		m.process = nil
-		m.pid = 0
-		m.activeProfile = ""
-		m.startedAt = time.Time{}
-		m.state = StateStopped
-		_ = os.Remove(pidPath)
+		rollbackStarted(syscall.SIGTERM, false, false)
 		return runtimeError("iptables start", "RULES_NOT_APPLIED", err)
 	}
 	m.logger.Println("iptables rules applied")
 
 	// 6. Apply DNS interception.
-	dnsScript := filepath.Join(m.dataDir, "scripts", "dns.sh")
 	if err := ExecScript(dnsScript, "start", m.scriptEnv()); err != nil {
 		m.logger.Printf("DNS apply failed: %v — rolling back iptables", err)
-		_ = ExecScript(iptablesScript, "stop", m.scriptEnv())
-		_ = m.process.Signal(syscall.SIGTERM)
-		m.process = nil
-		m.pid = 0
-		m.activeProfile = ""
-		m.startedAt = time.Time{}
-		m.state = StateStopped
-		_ = os.Remove(pidPath)
+		rollbackStarted(syscall.SIGTERM, false, true)
 		return runtimeError("dns start", "DNS_APPLY_FAILED", err)
 	}
 	m.logger.Println("DNS interception applied")
@@ -333,7 +352,7 @@ func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 	dnsScript := filepath.Join(m.dataDir, "scripts", "dns.sh")
 	if err := ExecScript(dnsScript, "stop", m.scriptEnv()); err != nil {
 		m.logger.Printf("dns stop: %v", err)
-		if firstErr == nil {
+		if firstErr == nil && !ignorableCleanupScriptError(err) {
 			firstErr = err
 		}
 	}
@@ -343,7 +362,7 @@ func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 	iptablesScript := filepath.Join(m.dataDir, "scripts", "iptables.sh")
 	if err := ExecScript(iptablesScript, "stop", m.scriptEnv()); err != nil {
 		m.logger.Printf("iptables stop: %v", err)
-		if firstErr == nil {
+		if firstErr == nil && !ignorableCleanupScriptError(err) {
 			firstErr = err
 		}
 	}
@@ -368,6 +387,15 @@ func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 	m.state = StateStopped
 	m.logger.Println("core stopped")
 	return firstErr
+}
+
+func ignorableCleanupScriptError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "script not found:") ||
+		strings.Contains(lower, "no such file or directory")
 }
 
 // --------------------------------------------------------------------------

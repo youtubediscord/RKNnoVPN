@@ -142,11 +142,14 @@ type IPv6Config struct {
 
 // HealthConfig controls automatic health checking.
 type HealthConfig struct {
-	Enabled     bool   `json:"enabled"` // matches config.json health.enabled
-	IntervalSec int    `json:"interval_sec"`
-	Threshold   int    `json:"threshold"` // failure threshold (matches config.json health.threshold)
-	URL         string `json:"check_url"` // URL to probe (matches config.json health.check_url)
-	TimeoutSec  int    `json:"timeout_sec"`
+	Enabled            bool     `json:"enabled"` // matches config.json health.enabled
+	IntervalSec        int      `json:"interval_sec"`
+	Threshold          int      `json:"threshold"` // failure threshold (matches config.json health.threshold)
+	URL                string   `json:"check_url"` // URL to probe (matches config.json health.check_url)
+	TimeoutSec         int      `json:"timeout_sec"`
+	DNSProbeDomains    []string `json:"dns_probe_domains,omitempty"`
+	EgressURLs         []string `json:"egress_urls,omitempty"`
+	DNSIsHardReadiness bool     `json:"dns_is_hard_readiness"`
 }
 
 // RescueConfig controls automatic fallback on persistent failures.
@@ -235,11 +238,17 @@ func DefaultConfig() *Config {
 			Mode: "mirror",
 		},
 		Health: HealthConfig{
-			Enabled:     true,
-			IntervalSec: 30,
-			Threshold:   3,
-			URL:         "https://www.gstatic.com/generate_204",
-			TimeoutSec:  5,
+			Enabled:         true,
+			IntervalSec:     30,
+			Threshold:       3,
+			URL:             "https://www.gstatic.com/generate_204",
+			TimeoutSec:      5,
+			DNSProbeDomains: []string{"connectivitycheck.gstatic.com", "cloudflare.com", "example.com"},
+			EgressURLs: []string{
+				"https://www.gstatic.com/generate_204",
+				"https://cp.cloudflare.com/generate_204",
+			},
+			DNSIsHardReadiness: false,
 		},
 		Rescue: RescueConfig{
 			Enabled:     true,

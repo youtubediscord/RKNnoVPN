@@ -456,7 +456,11 @@ class NodeListViewModel @Inject constructor(
 
     private fun sortNodes(nodes: List<Node>, mode: NodeSortMode): List<Node> = when (mode) {
         NodeSortMode.NAME -> nodes.sortedBy { it.name.lowercase() }
-        NodeSortMode.LATENCY -> nodes.sortedBy { it.latencyMs ?: Int.MAX_VALUE }
+        NodeSortMode.LATENCY -> nodes.sortedWith(
+            compareBy<Node> { it.responseMs == null }
+                .thenBy { it.responseMs ?: Int.MAX_VALUE }
+                .thenBy { it.latencyMs ?: Int.MAX_VALUE },
+        )
         NodeSortMode.COUNTRY -> nodes.sortedBy { extractCountryFromName(it.name) }
     }
 

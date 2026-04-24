@@ -171,6 +171,7 @@ func main() {
 		healthTimeout = 5 * time.Second
 	}
 	healthMon := health.NewHealthMonitor(coreMgr, healthInterval, healthThreshold, tproxyPort, dnsPort, mark, cfg.Health.URL, healthTimeout, healthLogger)
+	healthMon.SetConfig(healthInterval, healthThreshold, tproxyPort, dnsPort, mark, cfg.Health.URL, cfg.Health.DNSProbeDomains, cfg.Health.DNSIsHardReadiness, healthTimeout)
 	scriptEnv := buildScriptEnv(cfg, *dataDir)
 	var d *daemon
 	netWatcher := watcher.NewNetworkWatcher(*dataDir, scriptEnv, func() error {
@@ -603,11 +604,65 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 			"PER_APP_ROUTING_DISABLED",
 			"Маршрутизация по приложениям отключена",
 			"Все приложения маршрутизируются одинаково, что может повышать риск для чувствительных программ.",
-			"INFO",
+			"MEDIUM",
 			"ROUTING",
-			"Если нужна изоляция по приложениям, используйте белый список или исключения.",
+			"Для privacy-by-design используйте whitelist/off по умолчанию и добавляйте приложения в proxy явно.",
 			"apps.mode",
 		)
+	}
+
+	if cfg.Proxy.APIPort > 0 {
+		appendFinding(
+			"LOCAL_CLASH_API_ENABLED",
+			"Локальный Clash API включён",
+			"В production-режиме лишний localhost API расширяет поверхность детекта и диагностики извне процесса.",
+			"HIGH",
+			"LEAK",
+			"Оставьте proxy.api_port = 0, если URL-test по отдельным outbound не нужен для отладки.",
+			"proxy.api_port",
+		)
+	}
+
+	panelInbounds := cfg.ResolvePanelInbounds()
+	if panelInbounds.AllowLAN && (panelInbounds.HTTPPort > 0 || panelInbounds.SocksPort > 0) {
+		appendFinding(
+			"LOCAL_HELPER_EXPOSED_ON_LAN",
+			"Локальный helper inbound открыт за пределы localhost",
+			"HTTP/SOCKS helper должен быть отключён или доступен только локально, иначе он похож на обычный proxy.",
+			"HIGH",
+			"LEAK",
+			"Отключите helper inbound или установите allowLan = false.",
+			"panel.inbounds",
+		)
+	}
+
+	if linkOut, err := core.ExecCommand("ip", "link", "show"); err == nil {
+		if line := firstLineContainingAny(linkOut, "tun0", "wg0", "tap0", "ppp0", "ipsec"); line != "" {
+			appendFinding(
+				"VPN_LIKE_INTERFACE_PRESENT",
+				"Обнаружен VPN-похожий интерфейс",
+				"Интерфейсы tun/wg/tap/ppp/ipsec являются прямым детектируемым признаком VPN-подобного стека.",
+				"HIGH",
+				"LEAK",
+				"Не запускайте TUN/WireGuard-интерфейсы вместе с PrivStack; outbound должен жить внутри core.",
+				line,
+			)
+		}
+	}
+
+	if proxyOut, err := core.ExecCommand("settings", "get", "global", "http_proxy"); err == nil {
+		value := strings.TrimSpace(proxyOut)
+		if value != "" && value != "null" && value != ":0" {
+			appendFinding(
+				"SYSTEM_HTTP_PROXY_SET",
+				"Системный HTTP proxy задан",
+				"Системный proxy виден обычным Android API и ломает no-proxy surface.",
+				"HIGH",
+				"LEAK",
+				"Очистите global http_proxy и используйте только TPROXY/per-UID interception.",
+				"settings global http_proxy="+value,
+			)
+		}
 	}
 
 	if cfg.Routing.Mode == "direct" && cfg.Apps.Mode != "off" {
@@ -1126,7 +1181,7 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 	if routeMark == 0 {
 		routeMark = 0x2023
 	}
-	d.healthMon.SetConfig(healthInterval, healthThreshold, tproxyPort, dnsPort, routeMark, newCfg.Health.URL, healthTimeout)
+	d.healthMon.SetConfig(healthInterval, healthThreshold, tproxyPort, dnsPort, routeMark, newCfg.Health.URL, newCfg.Health.DNSProbeDomains, newCfg.Health.DNSIsHardReadiness, healthTimeout)
 	d.netWatcher.SetEnv(buildScriptEnv(newCfg, d.dataDir))
 	d.syncRuntimeV2DesiredState()
 
@@ -1893,6 +1948,9 @@ func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCEr
 		"sing_box":                 d.singBoxVersion(singBoxPath, 20),
 		"control_protocol":         controlProtocolVersion,
 		"control_protocol_version": controlProtocolVersion,
+		"schema_version":           configSchemaVersion,
+		"panel_min_version":        Version,
+		"capabilities":             supportedCapabilities(),
 		"supported_methods":        supportedRPCMethods(),
 		// Keep legacy keys for backward compatibility.
 		"version": Version,
@@ -2231,16 +2289,19 @@ func (d *daemon) refreshOutboundURLProbe(state core.State, cfg *config.Config, a
 	}
 	d.metricsMu.Unlock()
 
-	testURL := cfg.Health.URL
-	if testURL == "" {
-		testURL = "https://www.gstatic.com/generate_204"
-	}
 	var latency int64
 	var err error
-	if apiPort > 0 {
-		latency, _, err = testClashDelay(apiPort, "proxy", testURL, timeoutMS)
-	} else {
-		latency, _, err = testTransparentURLDelay(cfg, testURL, timeoutMS)
+	var lastURL string
+	for _, testURL := range healthEgressURLs(cfg) {
+		lastURL = testURL
+		if apiPort > 0 {
+			latency, _, err = testClashDelay(apiPort, "proxy", testURL, timeoutMS)
+		} else {
+			latency, _, err = testTransparentURLDelay(cfg, testURL, timeoutMS)
+		}
+		if err == nil {
+			break
+		}
 	}
 
 	d.metricsMu.Lock()
@@ -2250,7 +2311,7 @@ func (d *daemon) refreshOutboundURLProbe(state core.State, cfg *config.Config, a
 		d.latency.Valid = false
 		return nil, health.CheckResult{
 			Pass:   false,
-			Detail: fmt.Sprintf("outbound URL probe failed: %v", err),
+			Detail: fmt.Sprintf("outbound URL probe failed for %s: %v", lastURL, err),
 			Code:   "OUTBOUND_URL_FAILED",
 		}
 	}
@@ -2261,6 +2322,28 @@ func (d *daemon) refreshOutboundURLProbe(state core.State, cfg *config.Config, a
 		Pass:   true,
 		Detail: fmt.Sprintf("outbound URL probe ok: %d ms", latency),
 	}
+}
+
+func healthEgressURLs(cfg *config.Config) []string {
+	seen := make(map[string]bool)
+	result := make([]string, 0, 3)
+	add := func(raw string) {
+		url := strings.TrimSpace(raw)
+		if url == "" || seen[url] {
+			return
+		}
+		seen[url] = true
+		result = append(result, url)
+	}
+	if cfg != nil {
+		for _, url := range cfg.Health.EgressURLs {
+			add(url)
+		}
+		add(cfg.Health.URL)
+	}
+	add("https://www.gstatic.com/generate_204")
+	add("https://cp.cloudflare.com/generate_204")
+	return result
 }
 
 func (d *daemon) cachedEgressIP(state core.State, httpPort int) *string {

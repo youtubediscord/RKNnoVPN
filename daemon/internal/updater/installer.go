@@ -82,6 +82,14 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	if err := validateModuleStaging(staging, stagedBinDir); err != nil {
 		return err
 	}
+	moduleProps, err := readModuleProp(filepath.Join(staging, "module.prop"))
+	if err != nil {
+		return err
+	}
+	releaseDir, err := prepareVersionedRelease(staging, stagedBinDir, dataDir, moduleProps["version"])
+	if err != nil {
+		return err
+	}
 
 	// --- 3. Stop the current proxy ---
 	logger.Println("stopping current proxy before module update")
@@ -204,6 +212,11 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	logger.Println("running post-copy network cleanup with updated scripts")
 	if err := stopCurrentProxy(dataDir); err != nil {
 		logger.Printf("warning: post-copy cleanup: %v", err)
+	}
+
+	if err := updateCurrentReleaseSymlink(dataDir, releaseDir); err != nil {
+		rollbackBinaries()
+		return fmt.Errorf("update current release symlink: %w", err)
 	}
 
 	// --- 9. Verify new privd binary ---
@@ -472,9 +485,25 @@ func validateModuleStaging(staging string, stagedBinDir string) error {
 }
 
 func validateModuleProp(path string) error {
+	props, err := readModuleProp(path)
+	if err != nil {
+		return err
+	}
+	for _, key := range []string{"id", "version", "versionCode"} {
+		if props[key] == "" {
+			return fmt.Errorf("module.prop missing required %s", key)
+		}
+	}
+	if props["id"] != "privstack" {
+		return fmt.Errorf("module.prop has unexpected id %q", props["id"])
+	}
+	return nil
+}
+
+func readModuleProp(path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read module.prop: %w", err)
+		return nil, fmt.Errorf("read module.prop: %w", err)
 	}
 	props := map[string]string{}
 	for _, line := range strings.Split(string(data), "\n") {
@@ -488,13 +517,140 @@ func validateModuleProp(path string) error {
 		}
 		props[strings.TrimSpace(key)] = strings.TrimSpace(value)
 	}
-	for _, key := range []string{"id", "version", "versionCode"} {
-		if props[key] == "" {
-			return fmt.Errorf("module.prop missing required %s", key)
+	return props, nil
+}
+
+func prepareVersionedRelease(staging string, stagedBinDir string, dataDir string, version string) (string, error) {
+	releasesRoot := filepath.Join(dataDir, "releases")
+	if err := os.MkdirAll(releasesRoot, 0750); err != nil {
+		return "", fmt.Errorf("mkdir releases: %w", err)
+	}
+
+	tmp, err := os.MkdirTemp(releasesRoot, ".staging-*")
+	if err != nil {
+		return "", fmt.Errorf("create release staging: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(tmp)
+		}
+	}()
+
+	binDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(binDir, 0750); err != nil {
+		return "", fmt.Errorf("mkdir release bin: %w", err)
+	}
+	for _, name := range []string{"sing-box", "privd", "privctl"} {
+		if err := copyFile(filepath.Join(stagedBinDir, name), filepath.Join(binDir, name), 0750); err != nil {
+			return "", fmt.Errorf("copy release binary %s: %w", name, err)
 		}
 	}
-	if props["id"] != "privstack" {
-		return fmt.Errorf("module.prop has unexpected id %q", props["id"])
+
+	moduleDir := filepath.Join(tmp, "module")
+	if err := os.MkdirAll(moduleDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir release module: %w", err)
+	}
+	for _, name := range []string{
+		"module.prop",
+		"service.sh",
+		"post-fs-data.sh",
+		"uninstall.sh",
+		"customize.sh",
+		"sepolicy.rule",
+	} {
+		src := filepath.Join(staging, name)
+		if _, err := os.Stat(src); err != nil {
+			if os.IsNotExist(err) && name == "sepolicy.rule" {
+				continue
+			}
+			return "", fmt.Errorf("stat release module file %s: %w", name, err)
+		}
+		perm := os.FileMode(0644)
+		if strings.HasSuffix(name, ".sh") {
+			perm = 0755
+		}
+		if err := copyFile(src, filepath.Join(moduleDir, name), perm); err != nil {
+			return "", fmt.Errorf("copy release module file %s: %w", name, err)
+		}
+	}
+
+	for _, dir := range []string{"scripts", "defaults"} {
+		src := filepath.Join(staging, dir)
+		if info, err := os.Stat(src); err == nil && info.IsDir() {
+			perm := os.FileMode(0644)
+			if dir == "scripts" {
+				perm = 0755
+			}
+			if err := copyDir(src, filepath.Join(moduleDir, dir), perm); err != nil {
+				return "", fmt.Errorf("copy release %s: %w", dir, err)
+			}
+		}
+	}
+
+	releaseDir := nextReleaseDir(releasesRoot, version)
+	if err := os.Rename(tmp, releaseDir); err != nil {
+		return "", fmt.Errorf("publish release dir: %w", err)
+	}
+	cleanup = false
+	return releaseDir, nil
+}
+
+func nextReleaseDir(releasesRoot string, version string) string {
+	base := safeReleaseDirName(NormalizeVersionTag(version))
+	if base == "" || base == "v0.0.0" {
+		base = "unknown"
+	}
+	candidate := filepath.Join(releasesRoot, base)
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		return candidate
+	}
+	for i := 2; ; i++ {
+		candidate = filepath.Join(releasesRoot, fmt.Sprintf("%s-%d", base, i))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+}
+
+func safeReleaseDirName(version string) string {
+	var b strings.Builder
+	for _, r := range version {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.' || r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return strings.Trim(b.String(), "._-")
+}
+
+func updateCurrentReleaseSymlink(dataDir string, releaseDir string) error {
+	tmp, err := os.CreateTemp(dataDir, ".current-*")
+	if err != nil {
+		return fmt.Errorf("create current temp path: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Remove(tmpPath); err != nil {
+		return fmt.Errorf("remove current temp file: %w", err)
+	}
+	if err := os.Symlink(releaseDir, tmpPath); err != nil {
+		return fmt.Errorf("create current symlink: %w", err)
+	}
+	if err := os.Rename(tmpPath, filepath.Join(dataDir, "current")); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename current symlink: %w", err)
 	}
 	return nil
 }

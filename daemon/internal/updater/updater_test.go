@@ -109,6 +109,60 @@ func TestValidateModuleStagingRejectsBadModuleProp(t *testing.T) {
 	}
 }
 
+func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
+	dataDir := t.TempDir()
+	staging := t.TempDir()
+	binDir := filepath.Join(staging, "binaries", runtimeBinaryArch())
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sing-box", "privd", "privctl"} {
+		writeTestFile(t, filepath.Join(binDir, name), 0755)
+	}
+	for _, path := range []string{
+		"service.sh",
+		"post-fs-data.sh",
+		"uninstall.sh",
+		"customize.sh",
+		"scripts/dns.sh",
+		"scripts/iptables.sh",
+		"scripts/net_handler.sh",
+		"scripts/rescue_reset.sh",
+		"scripts/routing.sh",
+		"defaults/config.json",
+	} {
+		writeTestFile(t, filepath.Join(staging, path), 0644)
+	}
+	writeTestFile(t, filepath.Join(staging, "module.prop"), 0644, "id=privstack\nversion=V1.6.4\nversionCode=164\n")
+
+	releaseDir, err := prepareVersionedRelease(staging, binDir, dataDir, "V1.6.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(releaseDir, "bin", "privd"),
+		filepath.Join(releaseDir, "bin", "privctl"),
+		filepath.Join(releaseDir, "bin", "sing-box"),
+		filepath.Join(releaseDir, "module", "module.prop"),
+		filepath.Join(releaseDir, "module", "scripts", "rescue_reset.sh"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("release artifact missing %s: %v", path, err)
+		}
+	}
+
+	if err := updateCurrentReleaseSymlink(dataDir, releaseDir); err != nil {
+		t.Fatal(err)
+	}
+	target, err := os.Readlink(filepath.Join(dataDir, "current"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != releaseDir {
+		t.Fatalf("current symlink = %q, want %q", target, releaseDir)
+	}
+}
+
 func writeTestFile(t *testing.T, path string, perm os.FileMode, contents ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

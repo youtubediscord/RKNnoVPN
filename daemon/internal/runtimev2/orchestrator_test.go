@@ -33,7 +33,8 @@ func TestPhaseFromHealthUsesStableFailureCodeForStage(t *testing.T) {
 	}{
 		{name: "tproxy", code: "TPROXY_PORT_DOWN", want: PhaseCoreSpawned},
 		{name: "rules", code: "RULES_NOT_APPLIED", want: PhaseCoreListening},
-		{name: "dns listener", code: "DNS_LISTENER_DOWN", want: PhaseRulesApplied},
+		{name: "dns listener", code: "DNS_LISTENER_DOWN", want: PhaseCoreListening},
+		{name: "api listener", code: "API_PORT_DOWN", want: PhaseCoreListening},
 		{name: "dns upstream", code: "DNS_LOOKUP_TIMEOUT", want: PhaseDNSApplied},
 		{name: "outbound", code: "OUTBOUND_URL_FAILED", want: PhaseOutboundChecked},
 		{name: "core crash", code: "CORE_PROCESS_DEAD", want: PhaseFailed},

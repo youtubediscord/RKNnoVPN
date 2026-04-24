@@ -264,6 +264,27 @@ func TestBuildScriptEnvUsesExplicitDNSScopeForWhitelist(t *testing.T) {
 	}
 }
 
+func TestHealthEgressURLsPrefersConfiguredProbeSet(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Health.EgressURLs = []string{" https://cp.cloudflare.com/generate_204 ", "", "https://example.com/204"}
+	cfg.Health.URL = "https://cp.cloudflare.com/generate_204"
+
+	got := healthEgressURLs(cfg)
+	want := []string{
+		"https://cp.cloudflare.com/generate_204",
+		"https://example.com/204",
+		"https://www.gstatic.com/generate_204",
+	}
+	if len(got) < len(want) {
+		t.Fatalf("unexpected probe URLs: %#v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected probe URLs: got %#v want prefix %#v", got, want)
+		}
+	}
+}
+
 func TestReadLogTailReturnsBoundedTail(t *testing.T) {
 	path := t.TempDir() + "/runtime.log"
 	content := strings.Join([]string{"one", "two", "three", "four"}, "\n")

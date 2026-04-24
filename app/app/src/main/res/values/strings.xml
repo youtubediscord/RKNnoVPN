@@ -35,6 +35,7 @@
     <string name="runtime_operational_degraded">Runtime is connected, but operational checks are still degraded</string>
     <string name="health_issue_core_crashed">Core process is not running.</string>
     <string name="health_issue_tproxy_port_down">TPROXY listener is not accepting connections.</string>
+    <string name="health_issue_api_port_down">Local control API listener is not accepting connections.</string>
     <string name="health_issue_rules_not_applied">Traffic interception rules are not applied.</string>
     <string name="health_issue_routing_not_applied">Policy routing is not applied.</string>
     <string name="health_issue_dns_listener_down">DNS listener 127.0.0.1 is not responding.</string>
@@ -150,6 +151,7 @@
     <string name="show_logs">Show logs</string>
     <string name="loading_logs">Loading…</string>
     <string name="share_logs_telegram">Send to Telegram</string>
+    <string name="copy_diagnostic_report">Copy report</string>
     <string name="logs_share_subject">RKNnoVPN runtime logs</string>
     <string name="logs_share_chooser">Send logs</string>
     <string name="settings_theme">Theme</string>

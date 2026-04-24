@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Dns
@@ -52,8 +53,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -70,6 +73,7 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
 
     state.shareLogsText?.let { logs ->
         LaunchedEffect(logs) {
@@ -82,6 +86,13 @@ fun SettingsScreen(
                 Intent.createChooser(intent, context.getString(R.string.logs_share_chooser))
             )
             viewModel.clearSharedLogs()
+        }
+    }
+
+    state.copyReportText?.let { report ->
+        LaunchedEffect(report) {
+            clipboard.setText(AnnotatedString(report))
+            viewModel.clearCopiedReport()
         }
     }
 
@@ -309,6 +320,18 @@ fun SettingsScreen(
                                     modifier = Modifier.padding(end = 4.dp),
                                 )
                                 Text(stringResource(R.string.share_logs_telegram))
+                            }
+                            FilledTonalButton(
+                                onClick = viewModel::copyDiagnosticReport,
+                                enabled = !state.isLoadingLogs,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Icon(
+                                    Icons.Filled.ContentCopy,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 4.dp),
+                                )
+                                Text(stringResource(R.string.copy_diagnostic_report))
                             }
                         }
                         if (state.logsText.isNotBlank()) {

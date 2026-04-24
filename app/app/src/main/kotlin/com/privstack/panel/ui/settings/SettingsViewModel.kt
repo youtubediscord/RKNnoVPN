@@ -95,6 +95,7 @@ data class SettingsUiState(
     val logsText: String = "",
     val isLoadingLogs: Boolean = false,
     val shareLogsText: String? = null,
+    val copyReportText: String? = null,
 )
 
 @HiltViewModel
@@ -363,8 +364,44 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun copyDiagnosticReport() {
+        val current = _uiState.value.logsText
+        if (current.isNotBlank()) {
+            _uiState.update { it.copy(copyReportText = current) }
+            return
+        }
+        _uiState.update { it.copy(isLoadingLogs = true, errorMessage = null) }
+        viewModelScope.launch {
+            when (val result = daemonClient.diagnosticBundle(lines = 220)) {
+                is DaemonClientResult.Ok -> {
+                    _uiState.update {
+                        it.copy(
+                            logsText = result.data,
+                            copyReportText = result.data,
+                            isLoadingLogs = false,
+                        )
+                    }
+                }
+                else -> {
+                    val message = formatUpdateError(result)
+                    Log.w(TAG, "Failed to copy diagnostic report: $message")
+                    _uiState.update {
+                        it.copy(
+                            isLoadingLogs = false,
+                            errorMessage = message,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     fun clearSharedLogs() {
         _uiState.update { it.copy(shareLogsText = null) }
+    }
+
+    fun clearCopiedReport() {
+        _uiState.update { it.copy(copyReportText = null) }
     }
 
     // ---- Update actions ----

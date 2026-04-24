@@ -81,7 +81,17 @@ data class HealthConfig(
     val intervalSec: Int = 30,
     val threshold: Int = 3,
     val checkUrl: String = "https://www.gstatic.com/generate_204",
-    val timeoutSec: Int = 5
+    val timeoutSec: Int = 5,
+    val dnsProbeDomains: List<String> = listOf(
+        "connectivitycheck.gstatic.com",
+        "cloudflare.com",
+        "example.com",
+    ),
+    val egressUrls: List<String> = listOf(
+        "https://www.gstatic.com/generate_204",
+        "https://cp.cloudflare.com/generate_204",
+    ),
+    val dnsIsHardReadiness: Boolean = false,
 )
 
 @Serializable

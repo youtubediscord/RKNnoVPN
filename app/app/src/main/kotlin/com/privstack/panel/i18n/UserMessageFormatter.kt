@@ -84,6 +84,7 @@ class UserMessageFormatter @Inject constructor(
             "CORE_SPAWN_FAILED",
             "CONFIG_RENDER_FAILED",
             "CONFIG_CHECK_FAILED" -> get(R.string.health_issue_readiness_failed)
+            "API_PORT_DOWN" -> get(R.string.health_issue_api_port_down)
             "RULES_NOT_APPLIED" -> get(R.string.health_issue_rules_not_applied)
             "ROUTING_CHECK_FAILED",
             "ROUTING_V4_MISSING",
