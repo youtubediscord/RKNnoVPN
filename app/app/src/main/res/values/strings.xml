@@ -33,6 +33,16 @@
     <string name="dns_ok">OK</string>
     <string name="dns_fail">Fail</string>
     <string name="runtime_operational_degraded">Runtime is connected, but operational checks are still degraded</string>
+    <string name="health_issue_core_crashed">Core process is not running.</string>
+    <string name="health_issue_tproxy_port_down">TPROXY listener is not accepting connections.</string>
+    <string name="health_issue_rules_not_applied">Traffic interception rules are not applied.</string>
+    <string name="health_issue_routing_not_applied">Policy routing is not applied.</string>
+    <string name="health_issue_dns_listener_down">DNS listener 127.0.0.1 is not responding.</string>
+    <string name="health_issue_dns_lookup_timeout">DNS lookup through the local listener timed out.</string>
+    <string name="health_issue_proxy_dns_unavailable">Proxy DNS is unavailable.</string>
+    <string name="health_issue_outbound_url_failed">Outbound URL probe did not pass through the tunnel.</string>
+    <string name="health_issue_readiness_failed">Runtime readiness gates failed.</string>
+    <string name="health_issue_operational_degraded">Runtime started, but data-plane checks are degraded.</string>
     <string name="uptime">Uptime</string>
     <string name="traffic">Traffic</string>
     <string name="upload_short">TX</string>
@@ -233,6 +243,7 @@
     <string name="node_test_reason_runtime_not_ready">runtime not ready</string>
     <string name="node_test_reason_runtime_degraded">runtime degraded</string>
     <string name="node_test_reason_proxy_dns_unavailable">proxy DNS unavailable</string>
+    <string name="node_test_reason_outbound_url_failed">outbound URL probe failed</string>
     <string name="node_test_reason_http_helper_unavailable">HTTP helper unavailable</string>
     <string name="node_test_reason_api_disabled">per-node URL test disabled in production mode</string>
     <string name="node_test_reason_unknown">error</string>

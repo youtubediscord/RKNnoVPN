@@ -60,15 +60,9 @@ if [ "$MODE" != "boot-clean" ]; then
     touch "$MANUAL_FLAG" 2>/dev/null
 fi
 
-log "[1/7] stopping bundled runtime pieces"
+log "[1/8] asking daemon for graceful stop"
 if [ -x "$PRIVSTACK_DIR/bin/privctl" ] && [ "$MODE" = "hard-reset" ]; then
     "$PRIVSTACK_DIR/bin/privctl" stop >/dev/null 2>&1 || true
-fi
-if [ -x "$PRIVSTACK_DIR/scripts/dns.sh" ]; then
-    "$PRIVSTACK_DIR/scripts/dns.sh" stop >/dev/null 2>&1 || true
-fi
-if [ -x "$PRIVSTACK_DIR/scripts/iptables.sh" ]; then
-    "$PRIVSTACK_DIR/scripts/iptables.sh" stop >/dev/null 2>&1 || true
 fi
 
 kill_matching_processes() {
@@ -95,10 +89,18 @@ kill_matching_processes() {
     done
 }
 
-log "[2/7] killing orphan privd/sing-box/net_handler processes"
+log "[2/8] killing orphan privd/sing-box/net_handler processes"
 kill_matching_processes TERM
 sleep 1
 kill_matching_processes KILL
+
+log "[3/8] stopping bundled runtime pieces"
+if [ -x "$PRIVSTACK_DIR/scripts/dns.sh" ]; then
+    "$PRIVSTACK_DIR/scripts/dns.sh" stop >/dev/null 2>&1 || true
+fi
+if [ -x "$PRIVSTACK_DIR/scripts/iptables.sh" ]; then
+    "$PRIVSTACK_DIR/scripts/iptables.sh" stop >/dev/null 2>&1 || true
+fi
 
 cleanup_ipt() {
     ipt="$1"
@@ -128,7 +130,7 @@ cleanup_ipt() {
     done
 }
 
-log "[3/7] deleting PrivStack iptables/ip6tables artifacts"
+log "[4/8] deleting PrivStack iptables/ip6tables artifacts"
 cleanup_ipt iptables
 cleanup_ipt ip6tables
 cleanup_ipt iptables-legacy
@@ -154,14 +156,14 @@ delete_rules() {
     done
 }
 
-log "[4/7] deleting PrivStack policy routing"
+log "[5/8] deleting PrivStack policy routing"
 delete_rules
 ip route del local default dev lo table "$ROUTE_TABLE" 2>/dev/null || true
 ip route flush table "$ROUTE_TABLE" 2>/dev/null || true
 ip -6 route del local default dev lo table "$ROUTE_TABLE_V6" 2>/dev/null || true
 ip -6 route flush table "$ROUTE_TABLE_V6" 2>/dev/null || true
 
-log "[5/7] removing stale runtime files"
+log "[6/8] removing stale runtime files"
 rm -f "$RUN_DIR/singbox.pid" 2>/dev/null
 rm -f "$RUN_DIR/net_change.lock" 2>/dev/null
 rm -f "$RUN_DIR/env.sh" 2>/dev/null
@@ -180,7 +182,7 @@ add_leftover() {
     fi
 }
 
-log "[6/7] verifying cleanup"
+log "[7/8] verifying cleanup"
 for ipt in iptables ip6tables; do
     command -v "$ipt" >/dev/null 2>&1 || continue
     for table in raw mangle nat filter; do
@@ -198,7 +200,7 @@ out="$(ip route show table "$ROUTE_TABLE" 2>/dev/null | head -n 1)"
 out="$(ip -6 route show table "$ROUTE_TABLE_V6" 2>/dev/null | head -n 1)"
 [ -n "$out" ] && add_leftover "ip -6 route table $ROUTE_TABLE_V6: $out"
 
-log "[7/7] finishing"
+log "[8/8] finishing"
 if [ "$MODE" != "daemon-reset" ]; then
     rm -f "$RESET_LOCK" 2>/dev/null
 fi

@@ -665,13 +665,16 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun formatRuntimeStatus(status: DaemonStatus, fallback: String): String {
+        val healthIssue = messages.formatHealthIssue(
+            status.health.lastCode,
+            status.health.lastError,
+        )
         return when (status.state) {
             ConnectionState.CONNECTED -> {
                 if (status.health.healthy && !status.health.operationalHealthy) {
                     messages.get(
                         com.privstack.panel.R.string.daemon_status_running_degraded,
-                        status.health.lastError
-                            ?: messages.get(com.privstack.panel.R.string.runtime_operational_degraded),
+                        healthIssue,
                     )
                 } else {
                     fallback.ifBlank { messages.get(com.privstack.panel.R.string.state_connected) }
@@ -684,8 +687,7 @@ class SettingsViewModel @Inject constructor(
             ConnectionState.ERROR ->
                 messages.get(
                     com.privstack.panel.R.string.daemon_status_error_with_reason,
-                    status.health.lastError
-                        ?: messages.get(com.privstack.panel.R.string.daemon_status_unknown_text),
+                    healthIssue,
                 )
             ConnectionState.UNKNOWN ->
                 messages.get(com.privstack.panel.R.string.daemon_status_unknown_text)

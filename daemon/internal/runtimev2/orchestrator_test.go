@@ -25,6 +25,38 @@ func TestPhaseFromHealthUsesOperationalHealthForDegradedPhase(t *testing.T) {
 	}
 }
 
+func TestPhaseFromHealthUsesStableFailureCodeForStage(t *testing.T) {
+	cases := []struct {
+		name string
+		code string
+		want Phase
+	}{
+		{name: "tproxy", code: "TPROXY_PORT_DOWN", want: PhaseCoreSpawned},
+		{name: "rules", code: "RULES_NOT_APPLIED", want: PhaseCoreListening},
+		{name: "dns listener", code: "DNS_LISTENER_DOWN", want: PhaseRulesApplied},
+		{name: "dns upstream", code: "DNS_LOOKUP_TIMEOUT", want: PhaseDNSApplied},
+		{name: "outbound", code: "OUTBOUND_URL_FAILED", want: PhaseOutboundChecked},
+		{name: "core crash", code: "CORE_PROCESS_DEAD", want: PhaseFailed},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			health := HealthSnapshot{
+				CoreReady:    true,
+				RoutingReady: true,
+				DNSReady:     true,
+				EgressReady:  false,
+				LastCode:     tc.code,
+				CheckedAt:    time.Now(),
+			}
+
+			if got := phaseFromHealth(health, PhaseHealthy); got != tc.want {
+				t.Fatalf("expected %s for %s, got %s", tc.want, tc.code, got)
+			}
+		})
+	}
+}
+
 func TestStopCallsBackendEvenWhenAppliedPhaseStopped(t *testing.T) {
 	backend := &fakeBackend{kind: BackendRootTProxy}
 	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)

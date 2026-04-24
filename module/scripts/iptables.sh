@@ -542,11 +542,26 @@ setup_policy_routing() {
 
 teardown_policy_routing() {
     # Remove policy rules and routes. Suppress errors if they don't exist.
-    while ip rule del fwmark ${FWMARK} table ${ROUTE_TABLE} 2>/dev/null; do :; done
+    # Older interrupted starts may have left duplicate or partially-specified
+    # rules. Android deletes only one matching rule per command, so loop over
+    # all known PrivStack variants until none remain.
+    i=0
+    while [ "$i" -lt 100 ]; do
+        ip rule del fwmark ${FWMARK} table ${ROUTE_TABLE} 2>/dev/null && { i=$((i + 1)); continue; }
+        ip rule del fwmark ${FWMARK} 2>/dev/null && { i=$((i + 1)); continue; }
+        ip rule del table ${ROUTE_TABLE} 2>/dev/null && { i=$((i + 1)); continue; }
+        break
+    done
     ip route del local default dev lo table ${ROUTE_TABLE} 2>/dev/null || true
     ip route flush table ${ROUTE_TABLE} 2>/dev/null || true
 
-    while ip -6 rule del fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null; do :; done
+    i=0
+    while [ "$i" -lt 100 ]; do
+        ip -6 rule del fwmark ${FWMARK} table ${ROUTE_TABLE_V6} 2>/dev/null && { i=$((i + 1)); continue; }
+        ip -6 rule del fwmark ${FWMARK} 2>/dev/null && { i=$((i + 1)); continue; }
+        ip -6 rule del table ${ROUTE_TABLE_V6} 2>/dev/null && { i=$((i + 1)); continue; }
+        break
+    done
     ip -6 route del local default dev lo table ${ROUTE_TABLE_V6} 2>/dev/null || true
     ip -6 route flush table ${ROUTE_TABLE_V6} 2>/dev/null || true
 

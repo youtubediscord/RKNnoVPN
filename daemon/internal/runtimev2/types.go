@@ -11,10 +11,20 @@ const (
 type Phase string
 
 const (
-	PhaseStopped  Phase = "STOPPED"
-	PhaseApplying Phase = "APPLYING"
-	PhaseHealthy  Phase = "HEALTHY"
-	PhaseDegraded Phase = "DEGRADED"
+	PhaseStopped         Phase = "STOPPED"
+	PhaseApplying        Phase = "APPLYING" // legacy coarse in-flight phase
+	PhaseStarting        Phase = "STARTING"
+	PhaseConfigChecked   Phase = "CONFIG_CHECKED"
+	PhaseCoreSpawned     Phase = "CORE_SPAWNED"
+	PhaseCoreListening   Phase = "CORE_LISTENING"
+	PhaseRulesApplied    Phase = "RULES_APPLIED"
+	PhaseDNSApplied      Phase = "DNS_APPLIED"
+	PhaseOutboundChecked Phase = "OUTBOUND_CHECKED"
+	PhaseStopping        Phase = "STOPPING"
+	PhaseResetting       Phase = "RESETTING"
+	PhaseHealthy         Phase = "HEALTHY"
+	PhaseDegraded        Phase = "DEGRADED"
+	PhaseFailed          Phase = "FAILED"
 )
 
 type FallbackPolicy string
@@ -55,13 +65,14 @@ type AppliedState struct {
 }
 
 type HealthSnapshot struct {
-	CoreReady    bool      `json:"coreReady"`
-	DNSReady     bool      `json:"dnsReady"`
-	RoutingReady bool      `json:"routingReady"`
-	EgressReady  bool      `json:"egressReady"`
-	LastCode     string    `json:"lastCode,omitempty"`
-	LastError    string    `json:"lastError,omitempty"`
-	CheckedAt    time.Time `json:"checkedAt,omitempty"`
+	CoreReady    bool                           `json:"coreReady"`
+	DNSReady     bool                           `json:"dnsReady"`
+	RoutingReady bool                           `json:"routingReady"`
+	EgressReady  bool                           `json:"egressReady"`
+	LastCode     string                         `json:"lastCode,omitempty"`
+	LastError    string                         `json:"lastError,omitempty"`
+	CheckedAt    time.Time                      `json:"checkedAt,omitempty"`
+	Checks       map[string]HealthCheckSnapshot `json:"checks,omitempty"`
 }
 
 func (h HealthSnapshot) Healthy() bool {
@@ -70,6 +81,12 @@ func (h HealthSnapshot) Healthy() bool {
 
 func (h HealthSnapshot) OperationalHealthy() bool {
 	return h.Healthy() && h.DNSReady && h.EgressReady
+}
+
+type HealthCheckSnapshot struct {
+	Pass   bool   `json:"pass"`
+	Code   string `json:"code,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type ResetStep struct {

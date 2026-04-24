@@ -3,6 +3,7 @@ package com.privstack.panel.ui.dashboard
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.model.ConnectionState
 import com.privstack.panel.model.DaemonConnectionState
 import com.privstack.panel.model.DaemonStatus
@@ -52,6 +53,7 @@ private const val PEAK_RATE_FOR_NORMALIZATION = 10_000_000f // 10 MB/s
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val statusRepository: StatusRepository,
+    private val messages: UserMessageFormatter,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardUiState())
@@ -200,10 +202,13 @@ class DashboardViewModel @Inject constructor(
         }
 
         _uiState.update {
-            val operationalDegraded = status.state == ConnectionState.CONNECTED &&
-                status.health.healthy &&
+            val operationalDegraded = status.health.healthy &&
                 !status.health.operationalHealthy &&
                 status.health.checkedAt > 0L
+            val healthIssueMessage = messages.formatHealthIssue(
+                status.health.lastCode,
+                status.health.lastError,
+            )
             it.copy(
                 connectionState = status.state,
                 activeNodeName = status.activeNodeName,
@@ -217,16 +222,16 @@ class DashboardViewModel @Inject constructor(
                 dnsOperational = status.health.dnsOperational,
                 operationalDegraded = operationalDegraded,
                 operationalIssueMessage = if (operationalDegraded) {
-                    status.health.lastError
+                    healthIssueMessage
                 } else {
                     null
                 },
                 uptimeSeconds = status.uptime,
                 // Clear error when we get a successful status with a healthy state
-                errorMessage = if (status.state == ConnectionState.ERROR) {
-                    status.health.lastError ?: it.errorMessage
-                } else {
-                    null
+                errorMessage = when {
+                    operationalDegraded -> null
+                    status.state == ConnectionState.ERROR -> healthIssueMessage
+                    else -> null
                 },
             )
         }

@@ -496,6 +496,7 @@ class DaemonClient @Inject constructor(
                                     "runtime_not_ready",
                                     "runtime_degraded",
                                     "proxy_dns_unavailable",
+                                    "outbound_url_failed",
                                     "http_helper_unavailable",
                                     "api_disabled" -> probe.errorClass
                                     else -> null
@@ -1061,9 +1062,19 @@ private fun BackendStatusV2.toDaemonStatus(
         com.privstack.panel.model.BackendPhase.HEALTHY ->
             if (effectiveHealth.operationalHealthy) com.privstack.panel.model.ConnectionState.CONNECTED
             else com.privstack.panel.model.ConnectionState.ERROR
-        com.privstack.panel.model.BackendPhase.APPLYING -> com.privstack.panel.model.ConnectionState.CONNECTING
-        com.privstack.panel.model.BackendPhase.DEGRADED -> com.privstack.panel.model.ConnectionState.ERROR
         com.privstack.panel.model.BackendPhase.STOPPED -> com.privstack.panel.model.ConnectionState.DISCONNECTED
+        com.privstack.panel.model.BackendPhase.APPLYING,
+        com.privstack.panel.model.BackendPhase.STARTING,
+        com.privstack.panel.model.BackendPhase.CONFIG_CHECKED,
+        com.privstack.panel.model.BackendPhase.STOPPING,
+        com.privstack.panel.model.BackendPhase.RESETTING -> com.privstack.panel.model.ConnectionState.CONNECTING
+        com.privstack.panel.model.BackendPhase.CORE_SPAWNED,
+        com.privstack.panel.model.BackendPhase.CORE_LISTENING,
+        com.privstack.panel.model.BackendPhase.RULES_APPLIED,
+        com.privstack.panel.model.BackendPhase.DNS_APPLIED,
+        com.privstack.panel.model.BackendPhase.OUTBOUND_CHECKED,
+        com.privstack.panel.model.BackendPhase.DEGRADED,
+        com.privstack.panel.model.BackendPhase.FAILED -> com.privstack.panel.model.ConnectionState.ERROR
     }
 
     return DaemonStatus(
@@ -1080,6 +1091,7 @@ private fun BackendStatusV2.toDaemonStatus(
             operationalHealthy = effectiveHealth.operationalHealthy,
             backendKind = appliedState.backendKind,
             phase = appliedState.phase,
+            lastCode = effectiveHealth.lastCode.ifBlank { null },
             lastError = effectiveHealth.lastError.ifBlank { null },
             checkedAt = effectiveHealth.checkedAt?.let(::epochSeconds) ?: 0L,
         ),

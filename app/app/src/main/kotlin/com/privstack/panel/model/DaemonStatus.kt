@@ -78,6 +78,7 @@ data class HealthResult(
     val operationalHealthy: Boolean = false,
     val backendKind: BackendKind = BackendKind.ROOT_TPROXY,
     val phase: BackendPhase = BackendPhase.STOPPED,
+    val lastCode: String? = null,
     val lastError: String? = null,
     val checkedAt: Long = 0L
 )

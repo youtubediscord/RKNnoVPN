@@ -2076,9 +2076,15 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 	apiPort := cfg.Proxy.APIPort
 	panelInbounds := cfg.ResolvePanelInbounds()
 	traffic := d.buildTrafficPayload(state, apiPort)
-	latencyMs := d.cachedLatencyMs(state, cfg, apiPort)
+	latencyMs, outboundURLCheck := d.refreshOutboundURLProbe(state, cfg, apiPort, 2500)
+	if healthResult != nil && (state == core.StateRunning || state == core.StateDegraded) && healthResult.Overall {
+		if healthResult.Checks == nil {
+			healthResult.Checks = make(map[string]health.CheckResult)
+		}
+		healthResult.Checks["outbound_url"] = outboundURLCheck
+	}
 	egressIP := d.cachedEgressIP(state, panelInbounds.HTTPPort)
-	healthPayload := buildHealthPayload(state, healthResult, d.hasRecentEgress())
+	healthPayload := buildHealthPayload(state, healthResult, outboundURLCheck.Pass || d.hasRecentEgress())
 	connectionState := mapCoreStateToConnectionState(status.State)
 	if connectionState == "CONNECTED" {
 		if healthResult == nil {
@@ -2189,8 +2195,20 @@ func (d *daemon) buildTrafficPayload(state core.State, apiPort int) map[string]i
 }
 
 func (d *daemon) cachedLatencyMs(state core.State, cfg *config.Config, apiPort int) *int64 {
+	latency, _ := d.refreshOutboundURLProbe(state, cfg, apiPort, 2500)
+	return latency
+}
+
+func (d *daemon) refreshOutboundURLProbe(state core.State, cfg *config.Config, apiPort int, timeoutMS int) (*int64, health.CheckResult) {
 	if state != core.StateRunning && state != core.StateDegraded {
-		return nil
+		return nil, health.CheckResult{
+			Pass:   false,
+			Detail: "runtime is not running",
+			Code:   "OUTBOUND_NOT_RUNNING",
+		}
+	}
+	if timeoutMS <= 0 {
+		timeoutMS = 2500
 	}
 
 	now := time.Now()
@@ -2198,11 +2216,18 @@ func (d *daemon) cachedLatencyMs(state core.State, cfg *config.Config, apiPort i
 	if d.latency.Valid && now.Sub(d.latency.CheckedAt) < 30*time.Second {
 		value := d.latency.Ms
 		d.metricsMu.Unlock()
-		return &value
+		return &value, health.CheckResult{
+			Pass:   true,
+			Detail: fmt.Sprintf("recent outbound URL probe ok: %d ms", value),
+		}
 	}
 	if !d.latency.Valid && !d.latency.CheckedAt.IsZero() && now.Sub(d.latency.CheckedAt) < 10*time.Second {
 		d.metricsMu.Unlock()
-		return nil
+		return nil, health.CheckResult{
+			Pass:   false,
+			Detail: "recent outbound URL probe failed",
+			Code:   "OUTBOUND_URL_FAILED",
+		}
 	}
 	d.metricsMu.Unlock()
 
@@ -2213,9 +2238,9 @@ func (d *daemon) cachedLatencyMs(state core.State, cfg *config.Config, apiPort i
 	var latency int64
 	var err error
 	if apiPort > 0 {
-		latency, _, err = testClashDelay(apiPort, "proxy", testURL, 2500)
+		latency, _, err = testClashDelay(apiPort, "proxy", testURL, timeoutMS)
 	} else {
-		latency, _, err = testTransparentURLDelay(cfg, testURL, 2500)
+		latency, _, err = testTransparentURLDelay(cfg, testURL, timeoutMS)
 	}
 
 	d.metricsMu.Lock()
@@ -2223,12 +2248,19 @@ func (d *daemon) cachedLatencyMs(state core.State, cfg *config.Config, apiPort i
 	d.latency.CheckedAt = now
 	if err != nil {
 		d.latency.Valid = false
-		return nil
+		return nil, health.CheckResult{
+			Pass:   false,
+			Detail: fmt.Sprintf("outbound URL probe failed: %v", err),
+			Code:   "OUTBOUND_URL_FAILED",
+		}
 	}
 	d.latency.Valid = true
 	d.latency.Ms = latency
 	value := latency
-	return &value
+	return &value, health.CheckResult{
+		Pass:   true,
+		Detail: fmt.Sprintf("outbound URL probe ok: %d ms", latency),
+	}
 }
 
 func (d *daemon) cachedEgressIP(state core.State, httpPort int) *string {
@@ -2393,6 +2425,7 @@ func buildHealthPayload(state core.State, result *health.HealthResult, egressRea
 		"routingReady":       false,
 		"egressReady":        egressReady,
 		"operationalHealthy": false,
+		"lastCode":           nil,
 		"lastError":          nil,
 		"checkedAt":          int64(0),
 	}
@@ -2423,36 +2456,62 @@ func buildHealthPayload(state core.State, result *health.HealthResult, egressRea
 	payload["tunActive"] = false
 	payload["routingReady"] = iptablesOK && routingOK
 	payload["operationalHealthy"] = result.Overall && dnsOK && egressReady
-	if firstError := firstHealthError(result.Checks, result.Overall, egressReady); firstError != "" {
-		payload["lastError"] = firstError
+	if issue := firstHealthIssue(result.Checks, result.Overall, egressReady); issue.Detail != "" {
+		if issue.Code != "" {
+			payload["lastCode"] = issue.Code
+		}
+		payload["lastError"] = issue.Detail
 	}
 	return payload
 }
 
 func firstHealthError(checks map[string]health.CheckResult, readinessOK bool, egressReady bool) string {
-	if firstError := firstFailedCheck(checks, "singbox_alive", "tproxy_port", "iptables", "routing"); firstError != "" {
-		return firstError
+	return firstHealthIssue(checks, readinessOK, egressReady).Detail
+}
+
+func firstHealthIssue(checks map[string]health.CheckResult, readinessOK bool, egressReady bool) healthGateDiagnostic {
+	if firstIssue := firstFailedCheckDiagnostic(checks, "singbox_alive", "tproxy_port", "iptables", "routing"); firstIssue.Detail != "" {
+		return firstIssue
 	}
 	if readinessOK {
 		for _, name := range []string{"dns_listener", "dns"} {
 			if check, ok := checks[name]; ok && !check.Pass {
-				return fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", formatHealthCheckError(name, check))
+				return healthGateDiagnostic{
+					Code:   firstNonEmpty(check.Code, "PROXY_DNS_UNAVAILABLE"),
+					Detail: fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", formatHealthCheckError(name, check)),
+				}
 			}
 		}
 		if !egressReady {
-			return "operational degraded: no recent successful egress probe"
+			if check, ok := checks["outbound_url"]; ok && !check.Pass {
+				return healthGateDiagnostic{
+					Code:   firstNonEmpty(check.Code, "OUTBOUND_URL_FAILED"),
+					Detail: fmt.Sprintf("operational degraded: outbound URL probe failed: %s", formatHealthCheckError("outbound_url", check)),
+				}
+			}
+			return healthGateDiagnostic{
+				Code:   "OUTBOUND_URL_FAILED",
+				Detail: "operational degraded: no recent successful egress probe",
+			}
 		}
 	}
-	return ""
+	return healthGateDiagnostic{}
 }
 
 func firstFailedCheck(checks map[string]health.CheckResult, orderedNames ...string) string {
+	return firstFailedCheckDiagnostic(checks, orderedNames...).Detail
+}
+
+func firstFailedCheckDiagnostic(checks map[string]health.CheckResult, orderedNames ...string) healthGateDiagnostic {
 	for _, name := range orderedNames {
 		if check, ok := checks[name]; ok && !check.Pass {
-			return formatHealthCheckError(name, check)
+			return healthGateDiagnostic{
+				Code:   firstNonEmpty(check.Code, "READINESS_GATE_FAILED"),
+				Detail: formatHealthCheckError(name, check),
+			}
 		}
 	}
-	return ""
+	return healthGateDiagnostic{}
 }
 
 // --------------------------------------------------------------------------

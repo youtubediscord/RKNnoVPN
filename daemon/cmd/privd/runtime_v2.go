@@ -326,9 +326,18 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 		cfg := d.cfg
 		d.mu.Unlock()
 		apiPort := cfg.Proxy.APIPort
-		_ = d.cachedLatencyMs(state, cfg, apiPort)
+		_, outboundURLCheck := d.refreshOutboundURLProbe(state, cfg, apiPort, 2500)
+		if result.Checks == nil {
+			result.Checks = make(map[string]health.CheckResult)
+		}
+		result.Checks["outbound_url"] = outboundURLCheck
 	}
-	snapshot.EgressReady = d.hasRecentEgress()
+	if check, ok := result.Checks["outbound_url"]; ok {
+		snapshot.EgressReady = check.Pass
+	} else {
+		snapshot.EgressReady = d.hasRecentEgress()
+	}
+	snapshot.Checks = runtimeHealthChecks(result)
 
 	diagnostic := firstFailedGateDiagnostic(result, snapshot)
 	if snapshot.LastCode == "" {
@@ -338,6 +347,21 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 		snapshot.LastError = diagnostic.Detail
 	}
 	return snapshot
+}
+
+func runtimeHealthChecks(result *health.HealthResult) map[string]runtimev2.HealthCheckSnapshot {
+	if result == nil || len(result.Checks) == 0 {
+		return nil
+	}
+	checks := make(map[string]runtimev2.HealthCheckSnapshot, len(result.Checks))
+	for name, check := range result.Checks {
+		checks[name] = runtimev2.HealthCheckSnapshot{
+			Pass:   check.Pass,
+			Code:   check.Code,
+			Detail: check.Detail,
+		}
+	}
+	return checks
 }
 
 func firstFailedGate(result *health.HealthResult, snapshot runtimev2.HealthSnapshot) string {
@@ -374,6 +398,14 @@ func firstFailedGateDiagnostic(result *health.HealthResult, snapshot runtimev2.H
 		return healthGateDiagnostic{Code: "READINESS_GATE_FAILED", Detail: "one or more readiness gates are red"}
 	}
 	if !snapshot.EgressReady {
+		if result != nil {
+			if check, ok := result.Checks["outbound_url"]; ok && !check.Pass {
+				return healthGateDiagnostic{
+					Code:   firstNonEmpty(check.Code, "OUTBOUND_URL_FAILED"),
+					Detail: fmt.Sprintf("operational degraded: outbound URL probe failed: %s", formatHealthCheckError("outbound_url", check)),
+				}
+			}
+		}
 		return healthGateDiagnostic{Code: "OUTBOUND_URL_FAILED", Detail: "operational degraded: no recent successful egress probe"}
 	}
 	if !snapshot.OperationalHealthy() {
@@ -591,14 +623,18 @@ func (d *daemon) collectNetworkLeftovers(cfg *config.Config) []string {
 		bin   string
 		table string
 	}{
+		{bin: "iptables", table: "raw"},
 		{bin: "iptables", table: "mangle"},
 		{bin: "iptables", table: "nat"},
+		{bin: "iptables", table: "filter"},
+		{bin: "ip6tables", table: "raw"},
 		{bin: "ip6tables", table: "mangle"},
 		{bin: "ip6tables", table: "nat"},
+		{bin: "ip6tables", table: "filter"},
 	} {
 		out, err := core.ExecCommand(spec.bin, "-w", "100", "-t", spec.table, "-S")
 		if err != nil {
-			if spec.bin == "ip6tables" && spec.table == "nat" && isMissingKernelTableOutput(out) {
+			if isMissingKernelTableOutput(out) {
 				continue
 			}
 			if strings.TrimSpace(out) != "" {
@@ -1012,6 +1048,26 @@ func classifyRuntimeURLTestFailure(err error, snapshot runtimev2.HealthSnapshot)
 	}
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "api_disabled") {
 		return "api_disabled"
+	}
+	switch snapshot.LastCode {
+	case "DNS_LISTENER_DOWN",
+		"DNS_LOOKUP_TIMEOUT",
+		"DNS_EMPTY_RESPONSE",
+		"DNS_LOOKUP_FAILED",
+		"PROXY_DNS_UNAVAILABLE":
+		return "proxy_dns_unavailable"
+	case "OUTBOUND_URL_FAILED":
+		return "outbound_url_failed"
+	case "TPROXY_PORT_DOWN",
+		"RULES_NOT_APPLIED",
+		"ROUTING_CHECK_FAILED",
+		"ROUTING_V4_MISSING",
+		"ROUTING_V6_MISSING",
+		"ROUTING_NOT_APPLIED",
+		"CORE_PID_MISSING",
+		"CORE_PID_LOOKUP_FAILED",
+		"CORE_PROCESS_DEAD":
+		return "runtime_not_ready"
 	}
 	if !snapshot.DNSReady {
 		return "proxy_dns_unavailable"

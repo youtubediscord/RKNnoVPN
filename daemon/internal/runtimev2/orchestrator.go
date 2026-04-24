@@ -89,7 +89,7 @@ func (o *Orchestrator) Start() (Status, error) {
 	startedAt := time.Now()
 	o.applied = AppliedState{
 		BackendKind:     desired.BackendKind,
-		Phase:           PhaseApplying,
+		Phase:           PhaseStarting,
 		ActiveProfileID: desired.ActiveProfileID,
 		Generation:      generation,
 	}
@@ -100,7 +100,7 @@ func (o *Orchestrator) Start() (Status, error) {
 		o.health = HealthSnapshot{LastError: err.Error(), CheckedAt: time.Now()}
 		o.applied = AppliedState{
 			BackendKind:     desired.BackendKind,
-			Phase:           PhaseStopped,
+			Phase:           PhaseFailed,
 			ActiveProfileID: desired.ActiveProfileID,
 			Generation:      generation,
 		}
@@ -143,7 +143,7 @@ func (o *Orchestrator) Stop() (Status, error) {
 		active := o.applied
 		o.applied = AppliedState{
 			BackendKind:     backendKind,
-			Phase:           PhaseApplying,
+			Phase:           PhaseStopping,
 			ActiveProfileID: active.ActiveProfileID,
 			Generation:      generation,
 		}
@@ -168,7 +168,7 @@ func (o *Orchestrator) Stop() (Status, error) {
 	}
 	generation := o.nextGenerationLocked()
 	active := o.applied
-	o.applied.Phase = PhaseApplying
+	o.applied.Phase = PhaseStopping
 	o.mu.Unlock()
 
 	stopErr := backend.Stop()
@@ -179,7 +179,7 @@ func (o *Orchestrator) Stop() (Status, error) {
 			o.health = HealthSnapshot{LastError: stopErr.Error(), CheckedAt: time.Now()}
 			o.applied = AppliedState{
 				BackendKind:     active.BackendKind,
-				Phase:           PhaseDegraded,
+				Phase:           PhaseFailed,
 				ActiveProfileID: active.ActiveProfileID,
 				StartedAt:       active.StartedAt,
 				Generation:      generation,
@@ -225,7 +225,7 @@ func (o *Orchestrator) Restart() (Status, error) {
 	startedAt := time.Now()
 	o.applied = AppliedState{
 		BackendKind:     desired.BackendKind,
-		Phase:           PhaseApplying,
+		Phase:           PhaseStarting,
 		ActiveProfileID: desired.ActiveProfileID,
 		Generation:      generation,
 	}
@@ -236,7 +236,7 @@ func (o *Orchestrator) Restart() (Status, error) {
 		o.health = HealthSnapshot{LastError: err.Error(), CheckedAt: time.Now()}
 		o.applied = AppliedState{
 			BackendKind:     desired.BackendKind,
-			Phase:           PhaseDegraded,
+			Phase:           PhaseFailed,
 			ActiveProfileID: desired.ActiveProfileID,
 			Generation:      generation,
 		}
@@ -290,7 +290,7 @@ func (o *Orchestrator) Reset() ResetReport {
 	}
 	o.applied = AppliedState{
 		BackendKind:     backendKind,
-		Phase:           PhaseApplying,
+		Phase:           PhaseResetting,
 		ActiveProfileID: o.applied.ActiveProfileID,
 		Generation:      generation,
 	}
@@ -330,7 +330,7 @@ func (o *Orchestrator) HandleNetworkChange() (Status, error) {
 	}
 	generation := o.nextGenerationLocked()
 	active := o.applied
-	o.applied.Phase = PhaseApplying
+	o.applied.Phase = PhaseStarting
 	o.applied.Generation = generation
 	o.mu.Unlock()
 
@@ -465,6 +465,30 @@ func phaseFromHealth(health HealthSnapshot, fallback Phase) Phase {
 	}
 	if health.OperationalHealthy() {
 		return PhaseHealthy
+	}
+	switch health.LastCode {
+	case "TPROXY_PORT_DOWN":
+		return PhaseCoreSpawned
+	case "RULES_NOT_APPLIED",
+		"ROUTING_CHECK_FAILED",
+		"ROUTING_V4_MISSING",
+		"ROUTING_V6_MISSING",
+		"ROUTING_NOT_APPLIED":
+		return PhaseCoreListening
+	case "DNS_LISTENER_DOWN":
+		return PhaseRulesApplied
+	case "DNS_LOOKUP_TIMEOUT",
+		"DNS_EMPTY_RESPONSE",
+		"DNS_LOOKUP_FAILED",
+		"PROXY_DNS_UNAVAILABLE":
+		return PhaseDNSApplied
+	case "OUTBOUND_URL_FAILED",
+		"OPERATIONAL_DEGRADED":
+		return PhaseOutboundChecked
+	case "CORE_PID_MISSING",
+		"CORE_PID_LOOKUP_FAILED",
+		"CORE_PROCESS_DEAD":
+		return PhaseFailed
 	}
 	return PhaseDegraded
 }

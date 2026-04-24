@@ -73,6 +73,33 @@ class UserMessageFormatter @Inject constructor(
     fun formatOperationFailure(@StringRes operationResId: Int, reason: String): String =
         get(R.string.error_operation_failed_with_reason, get(operationResId), reason)
 
+    fun formatHealthIssue(code: String?, detail: String?): String {
+        val normalized = code?.trim().orEmpty()
+        val mapped = when (normalized) {
+            "CORE_PID_MISSING",
+            "CORE_PID_LOOKUP_FAILED",
+            "CORE_PROCESS_DEAD" -> get(R.string.health_issue_core_crashed)
+            "TPROXY_PORT_DOWN" -> get(R.string.health_issue_tproxy_port_down)
+            "RULES_NOT_APPLIED" -> get(R.string.health_issue_rules_not_applied)
+            "ROUTING_CHECK_FAILED",
+            "ROUTING_V4_MISSING",
+            "ROUTING_V6_MISSING",
+            "ROUTING_NOT_APPLIED" -> get(R.string.health_issue_routing_not_applied)
+            "DNS_LISTENER_DOWN" -> get(R.string.health_issue_dns_listener_down)
+            "DNS_LOOKUP_TIMEOUT" -> get(R.string.health_issue_dns_lookup_timeout)
+            "DNS_EMPTY_RESPONSE",
+            "DNS_LOOKUP_FAILED",
+            "PROXY_DNS_UNAVAILABLE" -> get(R.string.health_issue_proxy_dns_unavailable)
+            "OUTBOUND_URL_FAILED" -> get(R.string.health_issue_outbound_url_failed)
+            "READINESS_GATE_FAILED" -> get(R.string.health_issue_readiness_failed)
+            "OPERATIONAL_DEGRADED" -> get(R.string.health_issue_operational_degraded)
+            else -> ""
+        }
+        return mapped.ifBlank { detail?.trim().orEmpty() }.ifBlank {
+            get(R.string.runtime_operational_degraded)
+        }
+    }
+
     fun formatNodeTestIssue(code: String?): String {
         val normalized = code?.trim().orEmpty()
         return when (normalized) {
@@ -83,6 +110,7 @@ class UserMessageFormatter @Inject constructor(
             "runtime_not_ready" -> get(R.string.node_test_reason_runtime_not_ready)
             "runtime_degraded" -> get(R.string.node_test_reason_runtime_degraded)
             "proxy_dns_unavailable" -> get(R.string.node_test_reason_proxy_dns_unavailable)
+            "outbound_url_failed" -> get(R.string.node_test_reason_outbound_url_failed)
             "http_helper_unavailable" -> get(R.string.node_test_reason_http_helper_unavailable)
             "api_disabled" -> get(R.string.node_test_reason_api_disabled)
             "", "ok" -> get(R.string.node_test_reason_unknown)

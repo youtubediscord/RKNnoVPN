@@ -24,8 +24,18 @@ data class RuntimeConfig(
 enum class BackendPhase {
     STOPPED,
     APPLYING,
+    STARTING,
+    CONFIG_CHECKED,
+    CORE_SPAWNED,
+    CORE_LISTENING,
+    RULES_APPLIED,
+    DNS_APPLIED,
+    OUTBOUND_CHECKED,
+    STOPPING,
+    RESETTING,
     HEALTHY,
     DEGRADED,
+    FAILED,
 }
 
 @Serializable
@@ -58,8 +68,10 @@ data class BackendHealthSnapshot(
     val dnsReady: Boolean = false,
     val routingReady: Boolean = false,
     val egressReady: Boolean = false,
+    val lastCode: String = "",
     val lastError: String = "",
     val checkedAt: String? = null,
+    val checks: Map<String, BackendHealthCheck> = emptyMap(),
 ) {
     val healthy: Boolean
         get() = coreReady && routingReady
@@ -67,6 +79,13 @@ data class BackendHealthSnapshot(
     val operationalHealthy: Boolean
         get() = healthy && dnsReady && egressReady
 }
+
+@Serializable
+data class BackendHealthCheck(
+    val pass: Boolean = false,
+    val code: String = "",
+    val detail: String = "",
+)
 
 @Serializable
 data class BackendStatusV2(

@@ -27,7 +27,7 @@ func TestBuildRuntimeV2HealthSnapshotSeparatesOperationalFailures(t *testing.T) 
 			"tproxy_port":   {Pass: true, Detail: "listening"},
 			"iptables":      {Pass: true, Detail: "iptables"},
 			"routing":       {Pass: true, Detail: "routing"},
-			"dns":           {Pass: false, Detail: "dns timeout"},
+			"dns":           {Pass: false, Detail: "dns timeout", Code: "DNS_LOOKUP_TIMEOUT"},
 		},
 	}
 
@@ -40,6 +40,12 @@ func TestBuildRuntimeV2HealthSnapshotSeparatesOperationalFailures(t *testing.T) 
 	}
 	if !strings.Contains(snapshot.LastError, "operational degraded") {
 		t.Fatalf("expected operational degraded diagnostic, got %q", snapshot.LastError)
+	}
+	if snapshot.LastCode != "DNS_LOOKUP_TIMEOUT" {
+		t.Fatalf("expected stable DNS failure code, got %q", snapshot.LastCode)
+	}
+	if got := snapshot.Checks["dns"].Code; got != "DNS_LOOKUP_TIMEOUT" {
+		t.Fatalf("expected DNS check code in structured checks, got %q", got)
 	}
 }
 
@@ -59,6 +65,97 @@ func TestFirstFailedGateUsesDeterministicReadinessPriority(t *testing.T) {
 	got := firstFailedGate(result, runtimev2.HealthSnapshot{})
 	if !strings.HasPrefix(got, "singbox_alive:") {
 		t.Fatalf("expected singbox_alive first, got %q", got)
+	}
+}
+
+func TestFirstFailedGateCodeUsesDeterministicReadinessPriority(t *testing.T) {
+	result := &health.HealthResult{
+		Timestamp: time.Now(),
+		Overall:   false,
+		Checks: map[string]health.CheckResult{
+			"dns":           {Pass: false, Detail: "dns timeout", Code: "DNS_LOOKUP_TIMEOUT"},
+			"routing":       {Pass: false, Detail: "routing missing", Code: "ROUTING_NOT_APPLIED"},
+			"iptables":      {Pass: false, Detail: "iptables missing", Code: "RULES_NOT_APPLIED"},
+			"tproxy_port":   {Pass: false, Detail: "port closed", Code: "TPROXY_PORT_DOWN"},
+			"singbox_alive": {Pass: false, Detail: "pid missing", Code: "CORE_PID_MISSING"},
+		},
+	}
+
+	got := firstFailedGateDiagnostic(result, runtimev2.HealthSnapshot{})
+	if got.Code != "CORE_PID_MISSING" {
+		t.Fatalf("expected CORE_PID_MISSING first, got %#v", got)
+	}
+}
+
+func TestBuildHealthPayloadIncludesStableLastCode(t *testing.T) {
+	result := &health.HealthResult{
+		Timestamp: time.Now(),
+		Overall:   true,
+		Checks: map[string]health.CheckResult{
+			"singbox_alive": {Pass: true, Detail: "alive"},
+			"tproxy_port":   {Pass: true, Detail: "listening"},
+			"iptables":      {Pass: true, Detail: "iptables"},
+			"routing":       {Pass: true, Detail: "routing"},
+			"dns_listener":  {Pass: false, Detail: "listener down", Code: "DNS_LISTENER_DOWN"},
+			"dns":           {Pass: false, Detail: "dns timeout", Code: "DNS_LOOKUP_TIMEOUT"},
+		},
+	}
+
+	payload := buildHealthPayload(core.StateRunning, result, false)
+	if payload["lastCode"] != "DNS_LISTENER_DOWN" {
+		t.Fatalf("expected DNS_LISTENER_DOWN code, got %#v", payload["lastCode"])
+	}
+	if payload["lastError"] == nil {
+		t.Fatalf("expected legacy lastError detail to remain populated")
+	}
+}
+
+func TestBuildHealthPayloadIncludesOutboundURLCheck(t *testing.T) {
+	result := &health.HealthResult{
+		Timestamp: time.Now(),
+		Overall:   true,
+		Checks: map[string]health.CheckResult{
+			"singbox_alive": {Pass: true, Detail: "alive"},
+			"tproxy_port":   {Pass: true, Detail: "listening"},
+			"iptables":      {Pass: true, Detail: "iptables"},
+			"routing":       {Pass: true, Detail: "routing"},
+			"dns_listener":  {Pass: true, Detail: "dns listener"},
+			"dns":           {Pass: true, Detail: "dns"},
+			"outbound_url":  {Pass: false, Detail: "probe timeout", Code: "OUTBOUND_URL_FAILED"},
+		},
+	}
+
+	payload := buildHealthPayload(core.StateRunning, result, false)
+	if payload["egressReady"] != false {
+		t.Fatalf("expected egressReady=false, got %#v", payload["egressReady"])
+	}
+	if payload["operationalHealthy"] != false {
+		t.Fatalf("expected operationalHealthy=false, got %#v", payload["operationalHealthy"])
+	}
+	if payload["lastCode"] != "OUTBOUND_URL_FAILED" {
+		t.Fatalf("expected OUTBOUND_URL_FAILED code, got %#v", payload["lastCode"])
+	}
+}
+
+func TestClassifyRuntimeURLTestFailureUsesLastHealthCode(t *testing.T) {
+	base := runtimev2.HealthSnapshot{
+		CoreReady:    true,
+		RoutingReady: true,
+		DNSReady:     true,
+		EgressReady:  false,
+		CheckedAt:    time.Now(),
+	}
+	base.LastCode = "OUTBOUND_URL_FAILED"
+	if got := classifyRuntimeURLTestFailure(errors.New("timeout"), base); got != "outbound_url_failed" {
+		t.Fatalf("expected outbound_url_failed, got %q", got)
+	}
+	base.LastCode = "DNS_LOOKUP_TIMEOUT"
+	if got := classifyRuntimeURLTestFailure(errors.New("timeout"), base); got != "proxy_dns_unavailable" {
+		t.Fatalf("expected proxy_dns_unavailable, got %q", got)
+	}
+	base.LastCode = "RULES_NOT_APPLIED"
+	if got := classifyRuntimeURLTestFailure(errors.New("timeout"), base); got != "runtime_not_ready" {
+		t.Fatalf("expected runtime_not_ready, got %q", got)
 	}
 }
 

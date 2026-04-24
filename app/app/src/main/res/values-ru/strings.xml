@@ -33,6 +33,16 @@
     <string name="dns_ok">ОК</string>
     <string name="dns_fail">Ошибка</string>
     <string name="runtime_operational_degraded">Runtime подключён, но operational-проверки ещё с проблемами</string>
+    <string name="health_issue_core_crashed">Процесс core не запущен.</string>
+    <string name="health_issue_tproxy_port_down">TPROXY listener не принимает подключения.</string>
+    <string name="health_issue_rules_not_applied">Правила перехвата трафика не применены.</string>
+    <string name="health_issue_routing_not_applied">Policy routing не применён.</string>
+    <string name="health_issue_dns_listener_down">DNS listener 127.0.0.1 не отвечает.</string>
+    <string name="health_issue_dns_lookup_timeout">DNS-запрос через локальный listener ушёл в таймаут.</string>
+    <string name="health_issue_proxy_dns_unavailable">Proxy DNS недоступен.</string>
+    <string name="health_issue_outbound_url_failed">URL-проверка не прошла через туннель.</string>
+    <string name="health_issue_readiness_failed">Проверки готовности runtime не пройдены.</string>
+    <string name="health_issue_operational_degraded">Runtime запущен, но data-plane проверки degraded.</string>
     <string name="uptime">Время работы</string>
     <string name="traffic">Трафик</string>
     <string name="upload_short">TX</string>
@@ -233,6 +243,7 @@
     <string name="node_test_reason_runtime_not_ready">runtime не готов</string>
     <string name="node_test_reason_runtime_degraded">runtime degraded</string>
     <string name="node_test_reason_proxy_dns_unavailable">proxy DNS недоступен</string>
+    <string name="node_test_reason_outbound_url_failed">URL-проверка через туннель не прошла</string>
     <string name="node_test_reason_http_helper_unavailable">HTTP helper недоступен</string>
     <string name="node_test_reason_api_disabled">URL-тест узла отключен в production-режиме</string>
     <string name="node_test_reason_unknown">ошибка</string>
