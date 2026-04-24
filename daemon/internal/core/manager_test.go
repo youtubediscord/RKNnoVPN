@@ -82,6 +82,21 @@ func TestRuntimeStageReportRecordsFailureAndFinish(t *testing.T) {
 	}
 }
 
+func TestSuccessfulStartReportUpdatesRuntimeReport(t *testing.T) {
+	manager := NewCoreManager(config.DefaultConfig(), t.TempDir(), nil)
+	report := newRuntimeStageReport("start")
+	report.addStage("commit-state", "ok", "", "vless://example.com", false)
+
+	manager.finishStartReport(report)
+
+	if manager.LastRuntimeReport().Status != "ok" {
+		t.Fatalf("successful start should leave runtime report finished: %#v", manager.LastRuntimeReport())
+	}
+	if manager.LastStartReport().Status != "ok" {
+		t.Fatalf("successful start should leave start report finished: %#v", manager.LastStartReport())
+	}
+}
+
 func TestStartStopsBeforeSpawnAndNetstackWhenConfigCheckFails(t *testing.T) {
 	dataDir := t.TempDir()
 	binDir := filepath.Join(dataDir, "bin")

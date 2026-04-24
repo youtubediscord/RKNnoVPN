@@ -85,6 +85,26 @@ func TestBuildRuntimeV2HealthSnapshotIncludesLatestStageReport(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeV2HealthSnapshotUsesSuccessfulStageBeforeFirstHealth(t *testing.T) {
+	cfg := config.DefaultConfig()
+	manager := core.NewCoreManager(cfg, t.TempDir(), nil)
+	manager.SetState(core.StateRunning)
+	d := &daemon{coreMgr: manager}
+
+	report := core.NewRuntimeStageReport("start")
+	report.AddStage("commit-state", "ok", "", "vless://example.com", false)
+	report.FinishOK()
+	d.setLastReloadReport(report)
+
+	snapshot := d.buildRuntimeV2HealthSnapshot(nil, false)
+	if !snapshot.CoreReady || !snapshot.RoutingReady {
+		t.Fatalf("successful stage report should keep hard readiness green before first health result: %#v", snapshot)
+	}
+	if snapshot.DNSReady || snapshot.EgressReady {
+		t.Fatalf("soft readiness should not be invented before health probes: %#v", snapshot)
+	}
+}
+
 func TestFirstFailedGateUsesDeterministicReadinessPriority(t *testing.T) {
 	result := &health.HealthResult{
 		Timestamp: time.Now(),
@@ -143,6 +163,27 @@ func TestBuildHealthPayloadIncludesStableLastCode(t *testing.T) {
 	}
 	if payload["lastError"] == nil {
 		t.Fatalf("expected legacy lastError detail to remain populated")
+	}
+}
+
+func TestPortProtectionOutputRequiresProtocolAndDropRule(t *testing.T) {
+	output := strings.Join([]string{
+		"-A PRIVSTACK_OUT -p tcp -m tcp --dport 10853 -m owner ! --uid-owner 0 ! --gid-owner 23333 -j DROP",
+		"-A PRIVSTACK_OUT -p udp -m udp --dport 10853 -m owner ! --uid-owner 0 ! --gid-owner 23333 -j DROP",
+		"-A PRIVSTACK_OUT -p tcp -m tcp --dport 10856 -j RETURN",
+	}, "\n")
+
+	if !portProtectionOutputContains(output, "tcp", 10853) {
+		t.Fatalf("expected TCP protection rule to be detected")
+	}
+	if !portProtectionOutputContains(output, "udp", 10853) {
+		t.Fatalf("expected UDP protection rule to be detected")
+	}
+	if portProtectionOutputContains(output, "udp", 10856) {
+		t.Fatalf("RETURN-only DNS rule must not count as listener protection")
+	}
+	if portProtectionOutputContains(output, "tcp", 10854) {
+		t.Fatalf("wrong port must not count as listener protection")
 	}
 }
 

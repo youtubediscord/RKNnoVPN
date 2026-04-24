@@ -216,6 +216,39 @@ emit_socks_port_protection() {
     fi
 }
 
+check_listener_protection() {
+    local ipt="$1"
+    local proto="$2"
+    local port="$3"
+    local label="$4"
+
+    if ! ${ipt} ${IPT_WAIT} -t mangle -C "${CHAIN_OUT}" -p "${proto}" --dport "${port}" -m owner ! --uid-owner 0 ! --gid-owner "${CORE_GID}" -j DROP >/dev/null 2>&1; then
+        log_error "missing ${ipt} ${label} ${proto}/${port} local listener protection"
+        return 1
+    fi
+    return 0
+}
+
+check_local_listener_protection() {
+    local ipt="$1"
+    local missing=0
+
+    check_listener_protection "${ipt}" tcp "${TPROXY_PORT}" "TPROXY" || missing=1
+    check_listener_protection "${ipt}" udp "${TPROXY_PORT}" "TPROXY" || missing=1
+    check_listener_protection "${ipt}" tcp "${DNS_PORT}" "DNS" || missing=1
+    check_listener_protection "${ipt}" udp "${DNS_PORT}" "DNS" || missing=1
+    if api_port_enabled; then
+        check_listener_protection "${ipt}" tcp "${API_PORT}" "API" || missing=1
+    fi
+    if socks_port_enabled; then
+        check_listener_protection "${ipt}" tcp "${SOCKS_PORT}" "SOCKS" || missing=1
+    fi
+    if http_port_enabled; then
+        check_listener_protection "${ipt}" tcp "${HTTP_PORT}" "HTTP" || missing=1
+    fi
+    return "${missing}"
+}
+
 # ============================================================================
 # iptables-restore rule generation
 # ============================================================================
@@ -773,6 +806,9 @@ do_status() {
         log_error "missing IPv4 PREROUTING hook for ${CHAIN_PRE}"
         missing=1
     fi
+    if ! check_local_listener_protection iptables; then
+        missing=1
+    fi
 
     if ip6tables ${IPT_WAIT} -t mangle -L >/dev/null 2>&1; then
         if ! ip6tables ${IPT_WAIT} -t mangle -L "${CHAIN_OUT}" -n >/dev/null 2>&1; then
@@ -789,6 +825,9 @@ do_status() {
         fi
         if ! ip6tables ${IPT_WAIT} -t mangle -C PREROUTING -j "${CHAIN_PRE}" >/dev/null 2>&1; then
             log_error "missing IPv6 PREROUTING hook for ${CHAIN_PRE}"
+            missing=1
+        fi
+        if ! check_local_listener_protection ip6tables; then
             missing=1
         fi
     fi

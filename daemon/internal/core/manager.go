@@ -483,9 +483,14 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
 	m.logger.Printf("core is running (pid=%d)", m.pid)
 	recordStage("commit-state", "ok", "", m.activeProfile, false)
-	stageReport.finishOK()
-	m.lastStartReport = stageReport
+	m.finishStartReport(stageReport)
 	return nil
+}
+
+func (m *CoreManager) finishStartReport(report RuntimeStageReport) {
+	report.finishOK()
+	m.lastStartReport = report
+	m.lastRuntimeReport = report
 }
 
 // --------------------------------------------------------------------------

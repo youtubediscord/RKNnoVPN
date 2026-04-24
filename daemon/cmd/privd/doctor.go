@@ -67,8 +67,28 @@ type doctorSummary struct {
 	Issues              []string              `json:"issues,omitempty"`
 	CompatibilityIssues []string              `json:"compatibilityIssues,omitempty"`
 	PrivacyIssues       []string              `json:"privacyIssues,omitempty"`
+	Compatibility       doctorCompatSummary   `json:"compatibility"`
+	Runtime             doctorRuntimeSummary  `json:"runtime"`
 	Routing             doctorRoutingSummary  `json:"routing"`
 	NodeTests           doctorNodeTestSummary `json:"nodeTests"`
+}
+
+type doctorCompatSummary struct {
+	DaemonVersion          string `json:"daemonVersion"`
+	ModuleVersion          string `json:"moduleVersion"`
+	ControlProtocolVersion int    `json:"controlProtocolVersion"`
+	SchemaVersion          int    `json:"schemaVersion"`
+	PanelMinVersion        string `json:"panelMinVersion"`
+	CurrentReleaseOK       bool   `json:"currentReleaseOk"`
+}
+
+type doctorRuntimeSummary struct {
+	StageOperation   string `json:"stageOperation,omitempty"`
+	StageStatus      string `json:"stageStatus,omitempty"`
+	FailedStage      string `json:"failedStage,omitempty"`
+	LastCode         string `json:"lastCode,omitempty"`
+	RollbackApplied  bool   `json:"rollbackApplied,omitempty"`
+	RuntimeReportAge string `json:"runtimeReportAge,omitempty"`
 }
 
 type doctorNodeTestSummary struct {
@@ -331,8 +351,17 @@ func buildDoctorSummary(
 		HealthCode:         healthSnapshot.LastCode,
 		HealthDetail:       healthSnapshot.LastError,
 		OperationalHealthy: healthSnapshot.OperationalHealthy(),
-		Routing:            routingSummary,
-		NodeTests:          summarizeDoctorNodeTests(nodeResults),
+		Compatibility: doctorCompatSummary{
+			DaemonVersion:          Version,
+			ModuleVersion:          firstNonEmpty(moduleVersion["version"], "unknown"),
+			ControlProtocolVersion: controlProtocolVersion,
+			SchemaVersion:          config.CurrentSchemaVersion,
+			PanelMinVersion:        Version,
+			CurrentReleaseOK:       releaseIntegrity.OK,
+		},
+		Runtime:   summarizeDoctorRuntime(healthSnapshot),
+		Routing:   routingSummary,
+		NodeTests: summarizeDoctorNodeTests(nodeResults),
 	}
 	addIssue := func(issue string) {
 		if strings.TrimSpace(issue) == "" {
@@ -400,6 +429,28 @@ func buildDoctorSummary(
 	summary.IssueCount = len(summary.Issues)
 	if summary.Status == "ok" && summary.IssueCount > 0 {
 		summary.Status = "degraded"
+	}
+	return summary
+}
+
+func summarizeDoctorRuntime(healthSnapshot runtimev2.HealthSnapshot) doctorRuntimeSummary {
+	report, ok := healthSnapshot.StageReport.(core.RuntimeStageReport)
+	if !ok || report.Empty() {
+		return doctorRuntimeSummary{LastCode: healthSnapshot.LastCode}
+	}
+	summary := doctorRuntimeSummary{
+		StageOperation:  report.Operation,
+		StageStatus:     report.Status,
+		FailedStage:     report.FailedStage,
+		LastCode:        firstNonEmpty(report.LastCode, healthSnapshot.LastCode),
+		RollbackApplied: report.RollbackApplied,
+	}
+	reportAt := report.FinishedAt
+	if reportAt.IsZero() {
+		reportAt = report.StartedAt
+	}
+	if !reportAt.IsZero() {
+		summary.RuntimeReportAge = time.Since(reportAt).Truncate(time.Second).String()
 	}
 	return summary
 }

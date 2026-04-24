@@ -71,6 +71,9 @@ Acceptance:
 - `node-test` сохраняет TCP-direct диагностику даже если tunnel/url недоступен;
 - `self-check` возвращает краткий health/privacy/compatibility summary без
   полного diagnostic bundle;
+- self-check/doctor summary включает компактные `compatibility` и `runtime`
+  поля: версии daemon/module/schema/control protocol, release status и последнюю
+  runtime stage summary;
 - `backend.reset` и `network-reset` не блокируются из-за version mismatch или
   отсутствующего `sing-box`;
 - кривой module update zip отбрасывается до остановки рабочего runtime.
@@ -107,6 +110,12 @@ Acceptance:
 - rollback чистит только применённые стадии;
 - `CoreManager.Start()` больше не является одним большим error string;
 - старт ждёт `tproxy`, `dns` и опциональный `api` listener до применения правил;
+- hot-swap ждёт тот же набор runtime listeners (`tproxy`, `dns`, optional
+  `api`), а не только TPROXY;
+- successful start закрывает и `lastStartReport`, и `lastRuntimeReport` как
+  `ok`, чтобы status/doctor не показывали зависшую стадию `running`;
+- до первого health result runtime snapshot может считать hard readiness
+  зелёной по successful stage report, не придумывая soft DNS/egress успех;
 - UI может показать, где именно остановился запуск:
   `CONFIG_CHECKED`, `CORE_SPAWNED`, `CORE_LISTENING`, `RULES_APPLIED`,
   `DNS_APPLIED`, `OUTBOUND_CHECKED`, `DEGRADED`.
@@ -128,6 +137,8 @@ Acceptance:
 - проверка остатков смотрит IPv4/IPv6 и raw/mangle/nat/filter;
 - `netstack verify` вызывает `iptables.sh status`/`dns.sh status` и
   отличает `NETSTACK_VERIFY_FAILED` от apply/cleanup ошибок;
+- `iptables.sh status` проверяет не только наличие chains/hooks/routes, но и
+  DROP protection rules для TPROXY/DNS/API/SOCKS/HTTP local listener ports;
 - reset с cleanup leftovers возвращает `clean_with_warnings`, а не hard
   failure; hard `partial` остаётся для реальных ошибок шагов;
 - DNS остаётся network-layer redirect, без изменения Android system DNS;
@@ -198,6 +209,9 @@ Diagnostic privacy payload отдаёт `protected_packages.self_test`, чтоб
 проверяемый direct-only набор был виден в отчёте.
 Audit/doctor проверяют configured helper/API ports и common proxy ports
 10808/10809/9090 на stale localhost listeners.
+Audit helper для local port protection теперь учитывает отсутствие IPv6 mangle
+как допустимый Android-вариант и проверяет TCP/UDP protection отдельно для
+TPROXY/DNS.
 VPN-like interface detection теперь смотрит имя интерфейса из `ip link`, а не
 только фиксированные `tun0/wg0/tap0` имена.
 Doctor bundle теперь разделяет cleanup leftovers (`netstack`) и runtime

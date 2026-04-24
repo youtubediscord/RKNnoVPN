@@ -1469,34 +1469,66 @@ func pathHasGroupOrWorldBits(path string) bool {
 
 func localPortProtectionPresent(cfg *config.Config) bool {
 	panelInbounds := cfg.ResolvePanelInbounds()
-	ports := []int{cfg.Proxy.TProxyPort, cfg.Proxy.DNSPort, cfg.Proxy.APIPort, panelInbounds.SocksPort, panelInbounds.HTTPPort}
-	if ports[0] == 0 {
-		ports[0] = 10853
+	tproxyPort := cfg.Proxy.TProxyPort
+	if tproxyPort == 0 {
+		tproxyPort = 10853
 	}
-	if ports[1] == 0 {
-		ports[1] = 10856
+	dnsPort := cfg.Proxy.DNSPort
+	if dnsPort == 0 {
+		dnsPort = 10856
+	}
+	specs := []struct {
+		port     int
+		protocol string
+	}{
+		{port: tproxyPort, protocol: "tcp"},
+		{port: tproxyPort, protocol: "udp"},
+		{port: dnsPort, protocol: "tcp"},
+		{port: dnsPort, protocol: "udp"},
+		{port: cfg.Proxy.APIPort, protocol: "tcp"},
+		{port: panelInbounds.SocksPort, protocol: "tcp"},
+		{port: panelInbounds.HTTPPort, protocol: "tcp"},
 	}
 
 	v4, err4 := core.ExecCommand("iptables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
-	v6, err6 := core.ExecCommand("ip6tables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
-	if err4 != nil || err6 != nil {
+	if err4 != nil {
 		return false
 	}
-	for _, port := range ports {
-		if port <= 0 {
+	if !portProtectionOutputContainsAll(v4, specs) {
+		return false
+	}
+
+	if _, err := core.ExecCommand("ip6tables", "-w", "100", "-t", "mangle", "-L"); err != nil {
+		return true
+	}
+	v6, err6 := core.ExecCommand("ip6tables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
+	if err6 != nil {
+		return false
+	}
+	return portProtectionOutputContainsAll(v6, specs)
+}
+
+func portProtectionOutputContainsAll(output string, specs []struct {
+	port     int
+	protocol string
+}) bool {
+	for _, spec := range specs {
+		if spec.port <= 0 {
 			continue
 		}
-		if !portProtectionOutputContains(v4, port) || !portProtectionOutputContains(v6, port) {
+		if !portProtectionOutputContains(output, spec.protocol, spec.port) {
 			return false
 		}
 	}
 	return true
 }
 
-func portProtectionOutputContains(output string, port int) bool {
+func portProtectionOutputContains(output string, protocol string, port int) bool {
 	portText := fmt.Sprintf("--dport %d", port)
+	protocolText := "-p " + protocol
 	for _, line := range strings.Split(output, "\n") {
 		if strings.Contains(line, portText) &&
+			strings.Contains(line, protocolText) &&
 			strings.Contains(line, "--uid-owner 0") &&
 			strings.Contains(line, "--gid-owner") &&
 			strings.Contains(line, "-j DROP") {

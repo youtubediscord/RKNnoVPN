@@ -288,6 +288,9 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 		snapshot.CoreReady = true
 	}
 	if result == nil {
+		if latestRuntimeReportCompleted(stageReportFromSnapshot(snapshot)) && (state == core.StateRunning || state == core.StateDegraded) {
+			snapshot.RoutingReady = true
+		}
 		snapshot.EgressReady = d.hasRecentEgress()
 		return snapshot
 	}
@@ -351,6 +354,18 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 		snapshot.LastError = diagnostic.Detail
 	}
 	return snapshot
+}
+
+func stageReportFromSnapshot(snapshot runtimev2.HealthSnapshot) core.RuntimeStageReport {
+	report, _ := snapshot.StageReport.(core.RuntimeStageReport)
+	return report
+}
+
+func latestRuntimeReportCompleted(report core.RuntimeStageReport) bool {
+	if report.Empty() {
+		return false
+	}
+	return report.Status == "ok"
 }
 
 func (d *daemon) latestRuntimeStageReport() core.RuntimeStageReport {
