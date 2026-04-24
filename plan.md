@@ -75,6 +75,14 @@ Acceptance:
   поля: версии daemon/module/schema/control protocol, release status и последнюю
   runtime stage summary; compatibility summary также показывает current release
   version и результат `sing-box check`;
+- APK IPC client имеет typed `selfCheck()` с fallback на legacy alias
+  `self.check`, чтобы UI мог получать короткий repair summary без полного
+  doctor bundle;
+- `StatusRepository` прокидывает typed `selfCheck()` наверх, чтобы будущий
+  Settings/Audit экран не зависел от низкоуровневого IPC клиента;
+- Audit fallback для старого daemon теперь одинаково распознаёт `method not
+  found` и `unknown command`, чтобы legacy builds не превращались в красную
+  ошибку UI;
 - `backend.reset` и `network-reset` не блокируются из-за version mismatch или
   отсутствующего `sing-box`;
 - кривой module update zip отбрасывается до остановки рабочего runtime.

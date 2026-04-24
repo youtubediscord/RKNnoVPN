@@ -174,7 +174,8 @@ class AuditViewModel @Inject constructor(
                     is DaemonClientResult.DaemonError -> {
                         // Old daemon builds do not expose the audit RPC yet.
                         if (result.code == -32601 ||
-                            result.message.contains("method not found", ignoreCase = true)
+                            result.message.contains("method not found", ignoreCase = true) ||
+                            result.message.contains("unknown command", ignoreCase = true)
                         ) {
                             delay(1_200L)
                             buildAuditState(executeChecks())

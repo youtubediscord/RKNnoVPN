@@ -3,6 +3,7 @@ package com.privstack.panel.repository
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.ipc.PollingStatusSource
+import com.privstack.panel.ipc.SelfCheckSummary
 import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.R
 import com.privstack.panel.model.AuditReport
@@ -110,6 +111,11 @@ class StatusRepository @Inject constructor(
      * Run a privacy/security audit against the current configuration.
      */
     suspend fun audit(): DaemonClientResult<AuditReport> = client.audit()
+
+    /**
+     * Fetch the daemon's concise repair summary without the full doctor bundle.
+     */
+    suspend fun selfCheck(): DaemonClientResult<SelfCheckSummary> = client.selfCheck()
 
     /**
      * Fetch recent log lines from the daemon.

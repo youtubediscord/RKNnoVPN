@@ -10,6 +10,9 @@
 - Unified runtime listener readiness for start/hot-swap across TPROXY, DNS, and optional API ports, and fixed successful start reports to finish cleanly in both status and doctor payloads.
 - Extended netstack/status privacy verification to check local listener DROP rules and tightened diagnostic redaction for WireGuard/Amnezia pre-shared keys.
 - Expanded self-check/doctor summary with compact compatibility, current-release, sing-box check, and runtime stage metadata for quick support triage.
+- Added typed APK IPC access to `self-check` with `self.check` fallback for quick repair summaries.
+- Exposed self-check through the APK status repository so Settings/Audit can use concise repair summaries without depending on raw IPC.
+- Treated legacy `unknown command` audit responses like method-not-found so old daemons still fall back to local audit checks.
 
 ## v1.6.4
 

@@ -714,6 +714,22 @@ class DaemonClient @Inject constructor(
         }
     }
 
+    suspend fun selfCheck(): DaemonClientResult<SelfCheckSummary> {
+        return when (val result = call("self-check", timeoutMs = 15_000L) { element ->
+            json.decodeFromJsonElement(SelfCheckSummary.serializer(), element)
+        }) {
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) {
+                    call("self.check", timeoutMs = 15_000L) { element ->
+                        json.decodeFromJsonElement(SelfCheckSummary.serializer(), element)
+                    }
+                } else {
+                    result
+                }
+            else -> result
+        }
+    }
+
     // ---- App management ----
 
     suspend fun resolveUid(uid: Int): DaemonClientResult<AppInfo> {
@@ -1258,6 +1274,66 @@ data class RuntimeLogsInfo(
             }
         }
 }
+
+@Serializable
+data class SelfCheckSummary(
+    val status: String = "unknown",
+    val healthCode: String = "",
+    val healthDetail: String = "",
+    val operationalHealthy: Boolean = false,
+    val rebootRequired: Boolean = false,
+    val issueCount: Int = 0,
+    val issues: List<String> = emptyList(),
+    val compatibilityIssues: List<String> = emptyList(),
+    val privacyIssues: List<String> = emptyList(),
+    val compatibility: SelfCheckCompatibility = SelfCheckCompatibility(),
+    val runtime: SelfCheckRuntime = SelfCheckRuntime(),
+    val routing: SelfCheckRouting = SelfCheckRouting(),
+    val nodeTests: SelfCheckNodeTests = SelfCheckNodeTests(),
+)
+
+@Serializable
+data class SelfCheckCompatibility(
+    val daemonVersion: String = "",
+    val moduleVersion: String = "",
+    val controlProtocolVersion: Int = 0,
+    val schemaVersion: Int = 0,
+    val panelMinVersion: String = "",
+    val currentReleaseVersion: String = "",
+    val currentReleaseOk: Boolean = false,
+    val singBoxCheckOk: Boolean = false,
+)
+
+@Serializable
+data class SelfCheckRuntime(
+    val stageOperation: String = "",
+    val stageStatus: String = "",
+    val failedStage: String = "",
+    val lastCode: String = "",
+    val rollbackApplied: Boolean = false,
+    val runtimeReportAge: String = "",
+)
+
+@Serializable
+data class SelfCheckRouting(
+    val mode: String = "",
+    val activeNodeMode: String = "",
+    val activeNodeId: String = "",
+    val activeNodeName: String = "",
+    val activeNodeProtocol: String = "",
+    val nodeCount: Int = 0,
+    val groups: List<String> = emptyList(),
+    val appGroupRouteCount: Int = 0,
+    val sharingEnabled: Boolean = false,
+)
+
+@Serializable
+data class SelfCheckNodeTests(
+    val total: Int = 0,
+    val usable: Int = 0,
+    val unusable: Int = 0,
+    val tcpOnly: Int = 0,
+)
 
 data class NodeTestResult(
     val id: String,
