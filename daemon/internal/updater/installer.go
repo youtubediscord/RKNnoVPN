@@ -33,17 +33,18 @@ const (
 // InstallModuleUpdate performs a hot-install of a new module.zip WITHOUT
 // requiring a reboot. The sequence is:
 //
-//  1. Stop the current proxy (sing-box + iptables teardown)
-//  2. Extract the new module.zip to a temp staging directory
-//  3. Back up current binaries so we can roll back on failure
-//  4. Atomically replace binaries in <dataDir>/bin/ (unlink+rename)
-//  5. Copy new scripts to <dataDir>/scripts/
-//  6. Update module files in <moduleDir>/
-//  7. Set correct permissions
-//  8. Verify the new privd binary can at least print its version
-//  9. Fork the new privd daemon
+//  1. Extract the new module.zip to a temp staging directory
+//  2. Validate required binaries/scripts/module metadata before downtime
+//  3. Stop the current proxy (sing-box + iptables teardown)
+//  4. Back up current binaries so we can roll back on failure
+//  5. Atomically replace binaries in <dataDir>/bin/ (unlink+rename)
+//  6. Copy new scripts to <dataDir>/scripts/
+//  7. Update module files in <moduleDir>/
+//  8. Set correct permissions
+//  9. Verify the new privd binary can at least print its version
 //
-// 10. Schedule self-termination of the old daemon (after IPC response)
+// 10. Fork the new privd daemon
+// 11. Schedule self-termination of the old daemon (after IPC response)
 //
 // If any step before the fork fails, binaries are rolled back from backup
 // and the caller can restart the old daemon normally.
@@ -57,13 +58,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		moduleDir = DefaultModuleDir
 	}
 
-	// --- 1. Stop the current proxy ---
-	logger.Println("stopping current proxy before module update")
-	if err := stopCurrentProxy(dataDir); err != nil {
-		logger.Printf("warning: stop proxy: %v (continuing anyway)", err)
-	}
-
-	// --- 2. Extract zip to staging ---
+	// --- 1. Extract zip to staging ---
 	staging, err := os.MkdirTemp(dataDir, "update-staging-*")
 	if err != nil {
 		return fmt.Errorf("create staging dir: %w", err)
@@ -75,7 +70,26 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		return fmt.Errorf("extract zip: %w", err)
 	}
 
-	// --- 3. Back up current binaries ---
+	// --- 2. Validate the staged release before we stop the working runtime. ---
+	// Binaries may be in <staging>/binaries/<device-arch>/ or directly in <staging>/.
+	stagedBinDir, err := stagedBinaryDir(staging)
+	if err != nil {
+		return err
+	}
+	if stagedBinDir == "" {
+		stagedBinDir = staging
+	}
+	if err := validateModuleStaging(staging, stagedBinDir); err != nil {
+		return err
+	}
+
+	// --- 3. Stop the current proxy ---
+	logger.Println("stopping current proxy before module update")
+	if err := stopCurrentProxy(dataDir); err != nil {
+		logger.Printf("warning: stop proxy: %v (continuing anyway)", err)
+	}
+
+	// --- 4. Back up current binaries ---
 	binDir := filepath.Join(dataDir, "bin")
 	if err := os.MkdirAll(binDir, 0750); err != nil {
 		return fmt.Errorf("mkdir bin: %w", err)
@@ -113,21 +127,12 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		}
 	}
 
-	// --- 4. Atomically replace binaries ---
-	// Binaries may be in <staging>/binaries/<device-arch>/ or directly in <staging>/.
-	stagedBinDir, err := stagedBinaryDir(staging)
-	if err != nil {
-		rollbackBinaries()
-		return err
-	}
-	if stagedBinDir == "" {
-		stagedBinDir = staging
-	}
-
+	// --- 5. Atomically replace binaries ---
 	for _, name := range binaries {
 		src := filepath.Join(stagedBinDir, name)
 		if _, err := os.Stat(src); os.IsNotExist(err) {
-			continue // binary not in this release
+			rollbackBinaries()
+			return fmt.Errorf("release bundle missing required binary %s", name)
 		}
 		dst := filepath.Join(binDir, name)
 		logger.Printf("installing binary %s (atomic)", name)
@@ -137,7 +142,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		}
 	}
 
-	// --- 5. Copy scripts ---
+	// --- 6. Copy scripts ---
 	scriptsDir := filepath.Join(dataDir, "scripts")
 	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
 		rollbackBinaries()
@@ -153,7 +158,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		}
 	}
 
-	// --- 6. Update module directory ---
+	// --- 7. Update module directory ---
 	logger.Println("updating module files")
 	moduleFiles := []string{
 		"module.prop",
@@ -188,7 +193,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		}
 	}
 
-	// --- 7. Set permissions ---
+	// --- 8. Set permissions ---
 	logger.Println("setting permissions")
 	setPerms(binDir, 0750)
 	setPerms(scriptsDir, 0755)
@@ -201,7 +206,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		logger.Printf("warning: post-copy cleanup: %v", err)
 	}
 
-	// --- 8. Verify new privd binary ---
+	// --- 9. Verify new privd binary ---
 	newPrivd := filepath.Join(binDir, "privd")
 	if _, err := os.Stat(newPrivd); err == nil {
 		logger.Println("verifying new privd binary")
@@ -213,7 +218,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		logger.Println("new privd binary verified OK")
 	}
 
-	// --- 9. Fork the new daemon ---
+	// --- 10. Fork the new daemon ---
 	logger.Println("forking new privd")
 	if err := relaunchDaemon(dataDir); err != nil {
 		rollbackBinaries()
@@ -228,7 +233,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		return fmt.Errorf("relaunch daemon: %w; previous daemon restored", err)
 	}
 
-	// --- 10. Clean up backup (success path) ---
+	// --- 11. Clean up backup (success path) ---
 	// Keep the backup around for a while in case manual rollback is needed.
 	// It will be cleaned on next update.
 	logger.Println("module update installed successfully — old daemon should self-terminate shortly")
@@ -409,6 +414,89 @@ func stagedBinaryDir(staging string) (string, error) {
 	}
 
 	return "", fmt.Errorf("module update does not contain binaries for %s", arch)
+}
+
+func validateModuleStaging(staging string, stagedBinDir string) error {
+	if stagedBinDir == "" {
+		stagedBinDir = staging
+	}
+
+	for _, name := range []string{"sing-box", "privd", "privctl"} {
+		path := filepath.Join(stagedBinDir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("release bundle missing required binary %s", name)
+			}
+			return fmt.Errorf("stat staged binary %s: %w", name, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("staged binary %s is a directory", name)
+		}
+		if info.Mode().Perm()&0111 == 0 {
+			return fmt.Errorf("staged binary %s is not executable", name)
+		}
+	}
+
+	for _, path := range []string{
+		"module.prop",
+		"service.sh",
+		"post-fs-data.sh",
+		"uninstall.sh",
+		"customize.sh",
+		"scripts/dns.sh",
+		"scripts/iptables.sh",
+		"scripts/net_handler.sh",
+		"scripts/rescue_reset.sh",
+		"scripts/routing.sh",
+		"defaults/config.json",
+	} {
+		fullPath := filepath.Join(staging, path)
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("release bundle missing required file %s", path)
+			}
+			return fmt.Errorf("stat staged file %s: %w", path, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("staged file %s is a directory", path)
+		}
+	}
+
+	if err := validateModuleProp(filepath.Join(staging, "module.prop")); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateModuleProp(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read module.prop: %w", err)
+	}
+	props := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		props[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	for _, key := range []string{"id", "version", "versionCode"} {
+		if props[key] == "" {
+			return fmt.Errorf("module.prop missing required %s", key)
+		}
+	}
+	if props["id"] != "privstack" {
+		return fmt.Errorf("module.prop has unexpected id %q", props["id"])
+	}
+	return nil
 }
 
 func runtimeBinaryArch() string {

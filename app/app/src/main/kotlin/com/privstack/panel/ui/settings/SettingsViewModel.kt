@@ -566,6 +566,8 @@ class SettingsViewModel @Inject constructor(
                     val info = result.data
                     val missingMethods = info.missingRequiredMethods(DaemonClient.REQUIRED_METHODS)
                     val compatibilityWarning = when {
+                        info.releaseMismatch(BuildConfig.VERSION_NAME) != null ->
+                            info.releaseMismatch(BuildConfig.VERSION_NAME)
                         info.controlProtocolVersion in 1 until DaemonClient.MIN_CONTROL_PROTOCOL_VERSION ->
                             messages.get(
                                 com.privstack.panel.R.string.daemon_status_incompatible_protocol,
@@ -577,21 +579,31 @@ class SettingsViewModel @Inject constructor(
                                 com.privstack.panel.R.string.daemon_status_missing_methods,
                                 missingMethods.joinToString(", "),
                             )
+                        !info.singBoxAvailable ->
+                            messages.get(
+                                com.privstack.panel.R.string.daemon_status_sing_box_unavailable,
+                                info.singBoxError.ifBlank { "unknown" },
+                            )
                         else -> null
                     }
                     _uiState.update {
                         it.copy(
-                            moduleVersion = info.daemonVersion,
+                            moduleVersion = info.moduleVersion.ifBlank { info.daemonVersion },
                             daemonStatusText = compatibilityWarning
                                 ?: messages.get(
                                     com.privstack.panel.R.string.daemon_status_running_with_core,
-                                    info.coreVersion,
+                                    messages.get(
+                                        com.privstack.panel.R.string.daemon_status_runtime_versions,
+                                        info.daemonVersion,
+                                        info.moduleVersion.ifBlank { "unknown" },
+                                        info.coreVersion,
+                                    ),
                                 ),
                             errorMessage = compatibilityWarning,
                         )
                     }
                     _updateState.update {
-                        it.copy(currentVersion = info.daemonVersion)
+                        it.copy(currentVersion = BuildConfig.VERSION_NAME)
                     }
                     when (val statusResult = daemonClient.status()) {
                         is DaemonClientResult.Ok -> {

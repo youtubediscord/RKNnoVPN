@@ -80,12 +80,17 @@ class UserMessageFormatter @Inject constructor(
             "CORE_PID_LOOKUP_FAILED",
             "CORE_PROCESS_DEAD" -> get(R.string.health_issue_core_crashed)
             "TPROXY_PORT_DOWN" -> get(R.string.health_issue_tproxy_port_down)
+            "CORE_LOG_OPEN_FAILED",
+            "CORE_SPAWN_FAILED",
+            "CONFIG_RENDER_FAILED",
+            "CONFIG_CHECK_FAILED" -> get(R.string.health_issue_readiness_failed)
             "RULES_NOT_APPLIED" -> get(R.string.health_issue_rules_not_applied)
             "ROUTING_CHECK_FAILED",
             "ROUTING_V4_MISSING",
             "ROUTING_V6_MISSING",
             "ROUTING_NOT_APPLIED" -> get(R.string.health_issue_routing_not_applied)
-            "DNS_LISTENER_DOWN" -> get(R.string.health_issue_dns_listener_down)
+            "DNS_LISTENER_DOWN",
+            "DNS_APPLY_FAILED" -> get(R.string.health_issue_dns_listener_down)
             "DNS_LOOKUP_TIMEOUT" -> get(R.string.health_issue_dns_lookup_timeout)
             "DNS_EMPTY_RESPONSE",
             "DNS_LOOKUP_FAILED",

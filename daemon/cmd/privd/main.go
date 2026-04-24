@@ -1905,7 +1905,7 @@ func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCEr
 // --------------------------------------------------------------------------
 
 func (d *daemon) handleUpdateCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	info, err := updater.CheckForUpdate("v" + Version)
+	info, err := updater.CheckForUpdate(updater.NormalizeVersionTag(Version))
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
@@ -1917,7 +1917,7 @@ func (d *daemon) handleUpdateCheck(params *json.RawMessage) (interface{}, *ipc.R
 
 func (d *daemon) handleUpdateDownload(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	// First, run a check to get the download URLs.
-	info, err := updater.CheckForUpdate("v" + Version)
+	info, err := updater.CheckForUpdate(updater.NormalizeVersionTag(Version))
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,

@@ -263,10 +263,12 @@
     <string name="daemon_status_resetting">Сброс службы…</string>
     <string name="daemon_status_stopped">Остановлено</string>
     <string name="daemon_status_partial_reset">Частичный сброс</string>
-    <string name="daemon_status_running_with_core">Запущено (core: %1$s)</string>
+    <string name="daemon_status_running_with_core">Запущено (%1$s)</string>
+    <string name="daemon_status_runtime_versions">daemon %1$s · module %2$s · core %3$s</string>
     <string name="daemon_status_running_degraded">Запущено (degraded: %1$s)</string>
     <string name="daemon_status_incompatible_protocol">APK и модуль несовместимы: control protocol %1$d, нужен %2$d</string>
     <string name="daemon_status_missing_methods">APK и модуль несовместимы: нет методов %1$s</string>
+    <string name="daemon_status_sing_box_unavailable">APK и модуль несовместимы: sing-box недоступен (%1$s)</string>
     <string name="daemon_status_error_with_reason">Ошибка: %1$s</string>
     <string name="daemon_status_module_not_installed">Модуль не установлен</string>
     <string name="daemon_status_root_denied">Root-доступ запрещён</string>

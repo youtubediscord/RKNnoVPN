@@ -263,10 +263,12 @@
     <string name="daemon_status_resetting">Resetting backend…</string>
     <string name="daemon_status_stopped">Stopped</string>
     <string name="daemon_status_partial_reset">Partial reset</string>
-    <string name="daemon_status_running_with_core">Running (core: %1$s)</string>
+    <string name="daemon_status_running_with_core">Running (%1$s)</string>
+    <string name="daemon_status_runtime_versions">daemon %1$s · module %2$s · core %3$s</string>
     <string name="daemon_status_running_degraded">Running (degraded: %1$s)</string>
     <string name="daemon_status_incompatible_protocol">APK and module are incompatible: control protocol %1$d, expected %2$d</string>
     <string name="daemon_status_missing_methods">APK and module are incompatible: missing methods %1$s</string>
+    <string name="daemon_status_sing_box_unavailable">APK and module are incompatible: sing-box unavailable (%1$s)</string>
     <string name="daemon_status_error_with_reason">Error: %1$s</string>
     <string name="daemon_status_module_not_installed">Module not installed</string>
     <string name="daemon_status_root_denied">Root access denied</string>

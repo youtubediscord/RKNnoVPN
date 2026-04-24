@@ -71,6 +71,7 @@ type ghAsset struct {
 // tag against currentVersion. Both are expected in "vX.Y.Z" format.
 func CheckForUpdate(currentVersion string) (*UpdateInfo, error) {
 	client := &http.Client{Timeout: httpTimeout}
+	currentVersion = NormalizeVersionTag(currentVersion)
 
 	req, err := http.NewRequest("GET", releasesURL, nil)
 	if err != nil {
@@ -117,6 +118,15 @@ func CheckForUpdate(currentVersion string) (*UpdateInfo, error) {
 
 	info.HasUpdate = compareSemver(currentVersion, release.TagName)
 	return info, nil
+}
+
+func NormalizeVersionTag(version string) string {
+	trimmed := strings.TrimSpace(version)
+	trimmed = strings.TrimLeft(trimmed, "vV")
+	if trimmed == "" {
+		return "v0.0.0"
+	}
+	return "v" + trimmed
 }
 
 // --------------------------------------------------------------------------
@@ -299,8 +309,8 @@ func sha256File(path string) (string, error) {
 // compareSemver returns true when latest is strictly newer than current.
 // Both inputs should start with "v" (e.g. "v1.2.3").
 func compareSemver(current, latest string) bool {
-	cur := parseSemver(current)
-	lat := parseSemver(latest)
+	cur := parseSemver(NormalizeVersionTag(current))
+	lat := parseSemver(NormalizeVersionTag(latest))
 
 	for i := 0; i < 3; i++ {
 		if lat[i] > cur[i] {

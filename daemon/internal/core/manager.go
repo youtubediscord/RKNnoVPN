@@ -30,6 +30,51 @@ const (
 	StateStopping              // teardown in progress
 )
 
+// RuntimeError carries a stable startup/runtime code across package
+// boundaries so the control plane can show the failing stage.
+type RuntimeError struct {
+	Layer string
+	Code  string
+	Hard  bool
+	Err   error
+}
+
+func (e *RuntimeError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Layer != "" {
+		return fmt.Sprintf("core: %s: %v", e.Layer, e.Err)
+	}
+	return fmt.Sprintf("core: %v", e.Err)
+}
+
+func (e *RuntimeError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *RuntimeError) RuntimeCode() string {
+	if e == nil {
+		return ""
+	}
+	return e.Code
+}
+
+func runtimeError(layer string, code string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &RuntimeError{
+		Layer: layer,
+		Code:  code,
+		Hard:  true,
+		Err:   err,
+	}
+}
+
 // String returns a human-readable label for the state.
 func (s State) String() string {
 	switch s {
@@ -148,11 +193,11 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	configPath := filepath.Join(m.dataDir, "config", "rendered", "singbox.json")
 	if err := renderConfig(m.config, profile, configPath); err != nil {
 		m.state = StateStopped
-		return fmt.Errorf("core: render config: %w", err)
+		return runtimeError("render config", "CONFIG_RENDER_FAILED", err)
 	}
 	if err := m.checkSingBoxConfig(configPath); err != nil {
 		m.state = StateStopped
-		return fmt.Errorf("core: config check: %w", err)
+		return runtimeError("config check", "CONFIG_CHECK_FAILED", err)
 	}
 
 	// 2. Spawn sing-box.
@@ -161,7 +206,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	logFile, logPath, err := m.openSingBoxLog()
 	if err != nil {
 		m.state = StateStopped
-		return fmt.Errorf("core: open sing-box log: %w", err)
+		return runtimeError("open sing-box log", "CORE_LOG_OPEN_FAILED", err)
 	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -174,7 +219,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		m.state = StateStopped
-		return fmt.Errorf("core: spawn sing-box: %w", err)
+		return runtimeError("spawn sing-box", "CORE_SPAWN_FAILED", err)
 	}
 	logFile.Close()
 	m.process = cmd.Process
@@ -206,7 +251,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		m.startedAt = time.Time{}
 		m.state = StateStopped
 		_ = os.Remove(pidPath)
-		return fmt.Errorf("core: port %d not ready: %w", tproxyPort, err)
+		return runtimeError("wait tproxy port", "TPROXY_PORT_DOWN", fmt.Errorf("port %d not ready: %w", tproxyPort, err))
 	}
 	m.logger.Printf("port %d is listening", tproxyPort)
 
@@ -221,7 +266,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		m.startedAt = time.Time{}
 		m.state = StateStopped
 		_ = os.Remove(pidPath)
-		return fmt.Errorf("core: iptables start: %w", err)
+		return runtimeError("iptables start", "RULES_NOT_APPLIED", err)
 	}
 	m.logger.Println("iptables rules applied")
 
@@ -237,7 +282,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		m.startedAt = time.Time{}
 		m.state = StateStopped
 		_ = os.Remove(pidPath)
-		return fmt.Errorf("core: dns start: %w", err)
+		return runtimeError("dns start", "DNS_APPLY_FAILED", err)
 	}
 	m.logger.Println("DNS interception applied")
 

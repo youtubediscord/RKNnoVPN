@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -276,5 +277,15 @@ func TestReadLogTailReturnsBoundedTail(t *testing.T) {
 	}
 	if got := strings.Join(lines, ","); got != "three,four" {
 		t.Fatalf("unexpected tail: %q", got)
+	}
+}
+
+func TestMissingCommandErrorIsIgnorableForOptionalIptablesVariants(t *testing.T) {
+	err := fmt.Errorf(`exec: "iptables-nft": executable file not found in $PATH`)
+	if !isMissingCommandError(err) {
+		t.Fatalf("expected missing optional command to be ignorable")
+	}
+	if isMissingCommandError(errors.New("exit status 1")) {
+		t.Fatalf("real command failure must not be ignored")
 	}
 }

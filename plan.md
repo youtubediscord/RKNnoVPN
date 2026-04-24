@@ -43,6 +43,152 @@
 6. Не включать тяжёлые build tags без понятного runtime-смысла.
 7. Не скрывать ошибки core за таймаутами: лог должен быть виден пользователю.
 
+## Актуальный план стабилизации v1.6.4+
+
+Этот блок важнее старого feature-roadmap ниже. Новые функции нельзя делать,
+пока data-plane не стал предсказуемым и диагностируемым.
+
+### M0. Emergency stabilization
+
+Цель: не ломать сеть и не требовать reboot, если core уже поднялся, а мягкая
+диагностика DNS/egress не прошла.
+
+Сделано/закрывается в v1.6.4:
+
+- hard readiness отделён от soft DNS/egress diagnostics;
+- DNS timeout переводит runtime в degraded, а не в hard error;
+- APK показывает `Подключено / degraded`, если core+routing живы;
+- reset возвращает структурный `ResetReport`;
+- `doctor` и `logs` доступны из UI;
+- update/version gate различает repair-команды и команды запуска core.
+
+Acceptance:
+
+- TCP до node есть, core запущен, routing готов -> UI не показывает большую
+  красную `Ошибка` только из-за DNS/URL probe;
+- `node-test` сохраняет TCP-direct диагностику даже если tunnel/url недоступен;
+- `backend.reset` и `network-reset` не блокируются из-за version mismatch или
+  отсутствующего `sing-box`;
+- кривой module update zip отбрасывается до остановки рабочего runtime.
+
+### M1. Transactional runtime
+
+Разбить старт на typed стадии:
+
+```text
+render config
+sing-box check
+spawn sing-box
+wait tproxy/dns/api ports
+apply routing
+apply iptables
+apply DNS
+probe runtime
+commit state
+```
+
+Каждая стадия должна возвращать:
+
+```text
+layer
+code
+hard
+userMessage
+debug
+rollbackApplied
+```
+
+Acceptance:
+
+- rollback чистит только применённые стадии;
+- `CoreManager.Start()` больше не является одним большим error string;
+- UI может показать, где именно остановился запуск:
+  `CONFIG_CHECKED`, `CORE_SPAWNED`, `CORE_LISTENING`, `RULES_APPLIED`,
+  `DNS_APPLIED`, `OUTBOUND_CHECKED`, `DEGRADED`.
+
+### M2. Netstack ownership
+
+Собрать `iptables`, DNS redirect и policy routing в единый контракт:
+
+```text
+netstack apply
+netstack cleanup
+netstack verify
+netstack report
+```
+
+Acceptance:
+
+- cleanup удаляет только PrivStack-owned artifacts;
+- проверка остатков смотрит IPv4/IPv6 и raw/mangle/nat/filter;
+- DNS остаётся network-layer redirect, без изменения Android system DNS;
+- local API/DNS/TProxy/helper ports закрыты от non-root/non-core UID.
+
+### M3. Compatibility and release safety
+
+Строго разделить:
+
+- APK version;
+- daemon version;
+- module version;
+- control protocol version;
+- supported methods;
+- `sing-box` availability.
+
+Acceptance:
+
+- APK не вызывает неподдерживаемый RPC;
+- start/restart требуют working `sing-box`;
+- reset/logs/doctor/node TCP diagnostics остаются доступны для ремонта;
+- update installer проверяет zip до downtime.
+
+### M4. Privacy invariants
+
+Добавить self-test/audit для поверхности RKNHardering:
+
+```text
+no VpnService
+no TRANSPORT_VPN
+no tun0/wg0/tap0/ppp/ipsec interface
+no system proxy
+no loopback DNS in LinkProperties
+no public SOCKS/HTTP listener
+no public Xray/Clash API
+protected/direct-only app set is active
+```
+
+Не делать:
+
+- Xposed hooks;
+- PackageManager masking;
+- root hiding;
+- подмену Android API.
+
+### M5. UX diagnostics
+
+Один экран должен отвечать на вопрос `что сломалось`:
+
+- core binary/config;
+- listener ports;
+- iptables/routing;
+- DNS listener;
+- proxy DNS;
+- outbound URL;
+- selected node;
+- APK/module mismatch.
+
+Отчёт должен быть redacted по умолчанию.
+
+### M6. Feature roadmap after stabilization
+
+Только после M0-M5:
+
+1. selector + manual override;
+2. speed/throughput probes;
+3. per-app groups;
+4. WireGuard outbound import/render without kernel WG interface;
+5. hotspot/sharing mode.
+
 ## Этап 1. Stabilize current multi-outbound layer
 
 Статус: частично сделано.

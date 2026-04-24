@@ -1,6 +1,7 @@
 package runtimev2
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -96,11 +97,12 @@ func (o *Orchestrator) Start() (Status, error) {
 	o.mu.Unlock()
 
 	if err := backend.Start(desired); err != nil {
+		health := healthFromError(err)
 		o.mu.Lock()
-		o.health = HealthSnapshot{LastError: err.Error(), CheckedAt: time.Now()}
+		o.health = health
 		o.applied = AppliedState{
 			BackendKind:     desired.BackendKind,
-			Phase:           PhaseFailed,
+			Phase:           phaseFromHealth(health, PhaseFailed),
 			ActiveProfileID: desired.ActiveProfileID,
 			Generation:      generation,
 		}
@@ -232,11 +234,12 @@ func (o *Orchestrator) Restart() (Status, error) {
 	o.mu.Unlock()
 
 	if err := backend.Restart(desired, generation); err != nil {
+		health := healthFromError(err)
 		o.mu.Lock()
-		o.health = HealthSnapshot{LastError: err.Error(), CheckedAt: time.Now()}
+		o.health = health
 		o.applied = AppliedState{
 			BackendKind:     desired.BackendKind,
-			Phase:           PhaseFailed,
+			Phase:           phaseFromHealth(health, PhaseFailed),
 			ActiveProfileID: desired.ActiveProfileID,
 			Generation:      generation,
 		}
@@ -475,7 +478,8 @@ func phaseFromHealth(health HealthSnapshot, fallback Phase) Phase {
 		"ROUTING_V6_MISSING",
 		"ROUTING_NOT_APPLIED":
 		return PhaseCoreListening
-	case "DNS_LISTENER_DOWN":
+	case "DNS_LISTENER_DOWN",
+		"DNS_APPLY_FAILED":
 		return PhaseRulesApplied
 	case "DNS_LOOKUP_TIMEOUT",
 		"DNS_EMPTY_RESPONSE",
@@ -487,10 +491,35 @@ func phaseFromHealth(health HealthSnapshot, fallback Phase) Phase {
 		return PhaseOutboundChecked
 	case "CORE_PID_MISSING",
 		"CORE_PID_LOOKUP_FAILED",
-		"CORE_PROCESS_DEAD":
+		"CORE_PROCESS_DEAD",
+		"CORE_LOG_OPEN_FAILED",
+		"CORE_SPAWN_FAILED":
 		return PhaseFailed
+	case "CONFIG_RENDER_FAILED":
+		return PhaseStarting
+	case "CONFIG_CHECK_FAILED":
+		return PhaseConfigChecked
+	}
+	if !health.Healthy() {
+		return fallback
 	}
 	return PhaseDegraded
+}
+
+type runtimeCodedError interface {
+	RuntimeCode() string
+}
+
+func healthFromError(err error) HealthSnapshot {
+	health := HealthSnapshot{
+		LastError: err.Error(),
+		CheckedAt: time.Now(),
+	}
+	var coded runtimeCodedError
+	if errors.As(err, &coded) {
+		health.LastCode = coded.RuntimeCode()
+	}
+	return health
 }
 
 func firstError(errors []string) string {

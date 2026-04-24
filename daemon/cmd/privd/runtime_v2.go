@@ -631,9 +631,28 @@ func (d *daemon) collectNetworkLeftovers(cfg *config.Config) []string {
 		{bin: "ip6tables", table: "mangle"},
 		{bin: "ip6tables", table: "nat"},
 		{bin: "ip6tables", table: "filter"},
+		{bin: "iptables-legacy", table: "raw"},
+		{bin: "iptables-legacy", table: "mangle"},
+		{bin: "iptables-legacy", table: "nat"},
+		{bin: "iptables-legacy", table: "filter"},
+		{bin: "ip6tables-legacy", table: "raw"},
+		{bin: "ip6tables-legacy", table: "mangle"},
+		{bin: "ip6tables-legacy", table: "nat"},
+		{bin: "ip6tables-legacy", table: "filter"},
+		{bin: "iptables-nft", table: "raw"},
+		{bin: "iptables-nft", table: "mangle"},
+		{bin: "iptables-nft", table: "nat"},
+		{bin: "iptables-nft", table: "filter"},
+		{bin: "ip6tables-nft", table: "raw"},
+		{bin: "ip6tables-nft", table: "mangle"},
+		{bin: "ip6tables-nft", table: "nat"},
+		{bin: "ip6tables-nft", table: "filter"},
 	} {
 		out, err := core.ExecCommand(spec.bin, "-w", "100", "-t", spec.table, "-S")
 		if err != nil {
+			if isMissingCommandError(err) {
+				continue
+			}
 			if isMissingKernelTableOutput(out) {
 				continue
 			}
@@ -729,6 +748,15 @@ func isMissingKernelTableOutput(output string) bool {
 	return strings.Contains(lower, "table does not exist") ||
 		strings.Contains(lower, "can't initialize") ||
 		strings.Contains(lower, "does not exist")
+}
+
+func isMissingCommandError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "executable file not found") ||
+		strings.Contains(lower, "no such file or directory")
 }
 
 func isMissingRouteTableOutput(output string) bool {

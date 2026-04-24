@@ -1,6 +1,7 @@
 package com.privstack.panel.ipc
 
 import com.privstack.panel.`import`.UriExporter
+import com.privstack.panel.BuildConfig
 import com.privstack.panel.model.AppInfo
 import com.privstack.panel.model.AuditReport
 import com.privstack.panel.model.BackendHealthSnapshot
@@ -151,10 +152,10 @@ class DaemonClient @Inject constructor(
 
     /** Force-remove PrivStack network rules and stop the proxy core. */
     suspend fun networkReset(): DaemonClientResult<ResetReport> {
-        requireCompatible("backend.reset", "network-reset")?.let { return it.asFailure() }
         return when (val result = backendReset()) {
             is DaemonClientResult.Ok -> result
-            is DaemonClientResult.DaemonError -> result.asFailure()
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) legacyNetworkReset() else result.asFailure()
             else -> result.asFailure()
         }
     }
@@ -538,6 +539,11 @@ class DaemonClient @Inject constructor(
             json.decodeFromJsonElement(ResetReport.serializer(), it)
         }
 
+    suspend fun legacyNetworkReset(): DaemonClientResult<ResetReport> =
+        call("network-reset", timeoutMs = 60_000L) {
+            json.decodeFromJsonElement(ResetReport.serializer(), it)
+        }
+
     suspend fun backendApplyDesiredState(desiredState: DesiredStateV2): DaemonClientResult<BackendStatusV2> =
         call(
             method = "backend.applyDesiredState",
@@ -710,6 +716,11 @@ class DaemonClient @Inject constructor(
                 daemonVersion = obj["daemon"]?.jsonPrimitive?.content ?: "unknown",
                 coreVersion = obj["core"]?.jsonPrimitive?.content ?: "unknown",
                 privctlVersion = obj["privctl"]?.jsonPrimitive?.content ?: "unknown",
+                moduleVersion = obj["module"]?.jsonObject?.get("version")?.jsonPrimitive?.content ?: "unknown",
+                moduleVersionCode = obj["module"]?.jsonObject?.get("versionCode")?.jsonPrimitive?.content ?: "",
+                modulePath = obj["module"]?.jsonObject?.get("path")?.jsonPrimitive?.content ?: "",
+                singBoxAvailable = obj["sing_box"]?.jsonObject?.get("error")?.jsonPrimitive?.contentOrNull.isNullOrBlank(),
+                singBoxError = obj["sing_box"]?.jsonObject?.get("error")?.jsonPrimitive?.contentOrNull ?: "",
                 controlProtocolVersion = obj["control_protocol_version"]?.jsonPrimitive?.intOrNull
                     ?: obj["control_protocol"]?.jsonPrimitive?.intOrNull
                     ?: 0,
@@ -770,11 +781,24 @@ class DaemonClient @Inject constructor(
         return when (val result = version()) {
             is DaemonClientResult.Ok -> {
                 val info = result.data
+                val required = requiredMethods.toSet()
+                val enforceReleaseMatch = required.none { it in REPAIR_METHODS }
+                val requiresSingBox = required.any { it in SING_BOX_METHODS }
                 when {
+                    enforceReleaseMatch && info.releaseMismatch(BuildConfig.VERSION_NAME) != null ->
+                        DaemonClientResult.DaemonError(
+                            COMPATIBILITY_ERROR_CODE,
+                            info.releaseMismatch(BuildConfig.VERSION_NAME)!!,
+                        )
                     info.controlProtocolVersion < MIN_CONTROL_PROTOCOL_VERSION ->
                         DaemonClientResult.DaemonError(
                             COMPATIBILITY_ERROR_CODE,
-                            "APK и модуль несовместимы: control protocol ${info.controlProtocolVersion}, нужен $MIN_CONTROL_PROTOCOL_VERSION",
+                            "APK и модуль несовместимы: APK ${BuildConfig.VERSION_NAME}, daemon ${info.daemonVersion}, module ${info.moduleVersion}; control protocol ${info.controlProtocolVersion}, нужен $MIN_CONTROL_PROTOCOL_VERSION",
+                        )
+                    requiresSingBox && !info.singBoxAvailable ->
+                        DaemonClientResult.DaemonError(
+                            COMPATIBILITY_ERROR_CODE,
+                            "APK и модуль несовместимы: sing-box недоступен (${info.singBoxError.ifBlank { "unknown" }})",
                         )
                     else -> {
                         val missing = info.missingRequiredMethods(requiredMethods.toList() + "version")
@@ -783,7 +807,7 @@ class DaemonClient @Inject constructor(
                         } else {
                             DaemonClientResult.DaemonError(
                                 COMPATIBILITY_ERROR_CODE,
-                                "APK и модуль несовместимы: нет методов ${missing.joinToString(", ")}",
+                                "APK и модуль несовместимы: APK ${BuildConfig.VERSION_NAME}, daemon ${info.daemonVersion}, module ${info.moduleVersion}; нет методов ${missing.joinToString(", ")}",
                             )
                         }
                     }
@@ -969,6 +993,11 @@ data class VersionInfo(
     val daemonVersion: String,
     val coreVersion: String,
     val privctlVersion: String,
+    val moduleVersion: String = "unknown",
+    val moduleVersionCode: String = "",
+    val modulePath: String = "",
+    val singBoxAvailable: Boolean = true,
+    val singBoxError: String = "",
     val controlProtocolVersion: Int = 0,
     val supportedMethods: List<String> = emptyList(),
 ) {
@@ -976,7 +1005,29 @@ data class VersionInfo(
         if (supportedMethods.isEmpty()) return required.toList()
         return required.filterNot { it in supportedMethods }
     }
+
+    fun releaseMismatch(apkVersion: String): String? {
+        val apk = stableReleaseVersion(apkVersion) ?: return null
+        val daemon = stableReleaseVersion(daemonVersion)
+        if (daemon != null && daemon != apk) {
+            return "APK и daemon несовместимы: APK $apkVersion, daemon $daemonVersion. Установите matching release."
+        }
+        val module = stableReleaseVersion(moduleVersion)
+        if (module != null && module != apk) {
+            return "APK и модуль несовместимы: APK $apkVersion, module $moduleVersion. Установите matching release."
+        }
+        return null
+    }
 }
+
+private fun stableReleaseVersion(raw: String): String? {
+    val normalized = raw.trim().removePrefix("v")
+    if (!Regex("""\d+\.\d+\.\d+""").matches(normalized)) return null
+    return normalized
+}
+
+private val REPAIR_METHODS = setOf("backend.stop", "backend.reset", "network-reset", "network.reset")
+private val SING_BOX_METHODS = setOf("backend.start", "backend.restart")
 
 data class UpdateCheckInfo(
     val currentVersion: String,
@@ -1059,9 +1110,16 @@ private fun BackendStatusV2.toDaemonStatus(
 ): DaemonStatus {
     val effectiveHealth = healthOverride ?: health
     val connectionState = when (appliedState.phase) {
-        com.privstack.panel.model.BackendPhase.HEALTHY ->
-            if (effectiveHealth.operationalHealthy) com.privstack.panel.model.ConnectionState.CONNECTED
-            else com.privstack.panel.model.ConnectionState.ERROR
+        com.privstack.panel.model.BackendPhase.HEALTHY,
+        com.privstack.panel.model.BackendPhase.RULES_APPLIED,
+        com.privstack.panel.model.BackendPhase.DNS_APPLIED,
+        com.privstack.panel.model.BackendPhase.OUTBOUND_CHECKED,
+        com.privstack.panel.model.BackendPhase.DEGRADED ->
+            if (effectiveHealth.healthy) {
+                com.privstack.panel.model.ConnectionState.CONNECTED
+            } else {
+                com.privstack.panel.model.ConnectionState.ERROR
+            }
         com.privstack.panel.model.BackendPhase.STOPPED -> com.privstack.panel.model.ConnectionState.DISCONNECTED
         com.privstack.panel.model.BackendPhase.APPLYING,
         com.privstack.panel.model.BackendPhase.STARTING,
@@ -1070,10 +1128,6 @@ private fun BackendStatusV2.toDaemonStatus(
         com.privstack.panel.model.BackendPhase.RESETTING -> com.privstack.panel.model.ConnectionState.CONNECTING
         com.privstack.panel.model.BackendPhase.CORE_SPAWNED,
         com.privstack.panel.model.BackendPhase.CORE_LISTENING,
-        com.privstack.panel.model.BackendPhase.RULES_APPLIED,
-        com.privstack.panel.model.BackendPhase.DNS_APPLIED,
-        com.privstack.panel.model.BackendPhase.OUTBOUND_CHECKED,
-        com.privstack.panel.model.BackendPhase.DEGRADED,
         com.privstack.panel.model.BackendPhase.FAILED -> com.privstack.panel.model.ConnectionState.ERROR
     }
 

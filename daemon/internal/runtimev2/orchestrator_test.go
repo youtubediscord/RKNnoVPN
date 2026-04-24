@@ -37,6 +37,9 @@ func TestPhaseFromHealthUsesStableFailureCodeForStage(t *testing.T) {
 		{name: "dns upstream", code: "DNS_LOOKUP_TIMEOUT", want: PhaseDNSApplied},
 		{name: "outbound", code: "OUTBOUND_URL_FAILED", want: PhaseOutboundChecked},
 		{name: "core crash", code: "CORE_PROCESS_DEAD", want: PhaseFailed},
+		{name: "config render", code: "CONFIG_RENDER_FAILED", want: PhaseStarting},
+		{name: "config check", code: "CONFIG_CHECK_FAILED", want: PhaseConfigChecked},
+		{name: "dns apply", code: "DNS_APPLY_FAILED", want: PhaseRulesApplied},
 	}
 
 	for _, tc := range cases {
@@ -73,14 +76,34 @@ func TestStopCallsBackendEvenWhenAppliedPhaseStopped(t *testing.T) {
 	}
 }
 
+func TestStartErrorUsesCodedRuntimePhase(t *testing.T) {
+	backend := &fakeBackend{
+		kind:     BackendRootTProxy,
+		startErr: codedTestError{code: "RULES_NOT_APPLIED", message: "iptables start failed"},
+	}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+
+	status, err := o.Start()
+	if err == nil {
+		t.Fatal("expected start error")
+	}
+	if status.Health.LastCode != "RULES_NOT_APPLIED" {
+		t.Fatalf("expected LastCode RULES_NOT_APPLIED, got %#v", status.Health)
+	}
+	if status.AppliedState.Phase != PhaseCoreListening {
+		t.Fatalf("expected phase %s, got %#v", PhaseCoreListening, status.AppliedState)
+	}
+}
+
 type fakeBackend struct {
 	kind      BackendKind
 	stopCalls int
+	startErr  error
 }
 
 func (f *fakeBackend) Kind() BackendKind         { return f.kind }
 func (f *fakeBackend) Supported() (bool, string) { return true, "" }
-func (f *fakeBackend) Start(DesiredState) error  { return nil }
+func (f *fakeBackend) Start(DesiredState) error  { return f.startErr }
 func (f *fakeBackend) Stop() error {
 	f.stopCalls++
 	return nil
@@ -97,3 +120,11 @@ func (f *fakeBackend) RefreshHealth() HealthSnapshot {
 func (f *fakeBackend) TestNodes(DesiredState, string, int, []string) ([]NodeProbeResult, error) {
 	return nil, nil
 }
+
+type codedTestError struct {
+	code    string
+	message string
+}
+
+func (e codedTestError) Error() string       { return e.message }
+func (e codedTestError) RuntimeCode() string { return e.code }
