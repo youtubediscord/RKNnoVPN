@@ -79,7 +79,9 @@ type doctorCompatSummary struct {
 	ControlProtocolVersion int    `json:"controlProtocolVersion"`
 	SchemaVersion          int    `json:"schemaVersion"`
 	PanelMinVersion        string `json:"panelMinVersion"`
+	CurrentReleaseVersion  string `json:"currentReleaseVersion,omitempty"`
 	CurrentReleaseOK       bool   `json:"currentReleaseOk"`
+	SingBoxCheckOK         bool   `json:"singBoxCheckOk"`
 }
 
 type doctorRuntimeSummary struct {
@@ -357,7 +359,9 @@ func buildDoctorSummary(
 			ControlProtocolVersion: controlProtocolVersion,
 			SchemaVersion:          config.CurrentSchemaVersion,
 			PanelMinVersion:        Version,
+			CurrentReleaseVersion:  releaseIntegrity.Version,
 			CurrentReleaseOK:       releaseIntegrity.OK,
+			SingBoxCheckOK:         singBoxCheck.Error == "",
 		},
 		Runtime:   summarizeDoctorRuntime(healthSnapshot),
 		Routing:   routingSummary,

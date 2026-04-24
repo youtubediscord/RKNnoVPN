@@ -73,7 +73,8 @@ Acceptance:
   полного diagnostic bundle;
 - self-check/doctor summary включает компактные `compatibility` и `runtime`
   поля: версии daemon/module/schema/control protocol, release status и последнюю
-  runtime stage summary;
+  runtime stage summary; compatibility summary также показывает current release
+  version и результат `sing-box check`;
 - `backend.reset` и `network-reset` не блокируются из-за version mismatch или
   отсутствующего `sing-box`;
 - кривой module update zip отбрасывается до остановки рабочего runtime.

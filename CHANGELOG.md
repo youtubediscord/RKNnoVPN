@@ -9,7 +9,7 @@
 - Kept production privacy defaults off for localhost SOCKS/HTTP/API helpers and tightened APK privacy guardrails.
 - Unified runtime listener readiness for start/hot-swap across TPROXY, DNS, and optional API ports, and fixed successful start reports to finish cleanly in both status and doctor payloads.
 - Extended netstack/status privacy verification to check local listener DROP rules and tightened diagnostic redaction for WireGuard/Amnezia pre-shared keys.
-- Expanded self-check/doctor summary with compact compatibility and runtime stage metadata for quick support triage.
+- Expanded self-check/doctor summary with compact compatibility, current-release, sing-box check, and runtime stage metadata for quick support triage.
 
 ## v1.6.4
 
