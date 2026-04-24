@@ -200,7 +200,7 @@ func printUsage() {
 	order := []string{
 		"backend.status", "backend.start", "backend.stop", "backend.restart", "backend.reset", "backend.applyDesiredState",
 		"diagnostics.health", "diagnostics.testNodes",
-		"status", "start", "stop", "reload", "network-reset", "network.reset", "health", "audit", "doctor",
+		"status", "start", "stop", "reload", "network-reset", "network.reset", "health", "audit", "doctor", "self-check", "self.check",
 		"app.list", "app.resolveUid",
 		"panel-get", "panel-set",
 		"config-get", "config-set", "config-set-many", "config-list", "config-import", "config.import", "subscription-fetch", "node-test", "node.test",
@@ -221,6 +221,7 @@ func printUsage() {
 	fmt.Println("  privctl start")
 	fmt.Println("  privctl audit")
 	fmt.Println("  privctl doctor")
+	fmt.Println("  privctl self-check")
 	fmt.Println("  printf '{\"panel\":{\"id\":\"default\",\"name\":\"Default\"},\"reload\":false}\\n' | PRIVSTACK_STDIN_PARAMS=1 privctl panel-set")
 	fmt.Println("  privctl app.resolveUid '{\"uid\":10123}'")
 	fmt.Println("  privctl config-get '{\"key\":\"proxy\"}'")

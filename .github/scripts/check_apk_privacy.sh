@@ -6,6 +6,8 @@ manifest="${repo_root}/app/app/src/main/AndroidManifest.xml"
 kotlin_src="${repo_root}/app/app/src/main/kotlin"
 profile_config="${repo_root}/app/app/src/main/kotlin/com/privstack/panel/model/ProfileConfig.kt"
 daemon_config="${repo_root}/daemon/internal/config/config.go"
+module_default_config="${repo_root}/module/defaults/config.json"
+module_default_panel="${repo_root}/module/defaults/panel.json"
 
 fail=0
 
@@ -45,7 +47,7 @@ check_present_file() {
 check_absent_file "No INTERNET permission" 'android[.]permission[.]INTERNET' "${manifest}"
 check_absent_file "No ACCESS_NETWORK_STATE permission" 'android[.]permission[.]ACCESS_NETWORK_STATE' "${manifest}"
 check_absent_file "No VPN service permission" 'android[.]permission[.]BIND_VPN_SERVICE' "${manifest}"
-check_absent_file "No VpnService declaration" 'android[.]net[.]VpnService|foregroundServiceType="[^"]*vpn' "${manifest}"
+check_absent_file "No VpnService declaration" 'android[.]net[.]VpnService|foregroundServiceType="[^"]*(vpn|dataSync)' "${manifest}"
 
 check_absent_tree "No direct APK HTTP client" 'HttpURLConnection|OkHttpClient|Retrofit|import java[.]net[.]URL$|java[.]net[.]URL[ (]' "${kotlin_src}"
 
@@ -53,5 +55,7 @@ check_present_file "SOCKS helper disabled by default" 'val socksPort: Int = 0' "
 check_present_file "HTTP helper disabled by default" 'val httpPort: Int = 0' "${profile_config}"
 check_present_file "TUN disabled by default" 'val enabled: Boolean = false' "${profile_config}"
 check_present_file "Clash API disabled by default" 'APIPort:[[:space:]]+0' "${daemon_config}"
+check_absent_file "No default local helper ports in module config" '10808|10809|9090|"api_port"[[:space:]]*:[[:space:]]*[1-9]' "${module_default_config}"
+check_absent_file "No default local helper ports in panel defaults" '10808|10809|9090|"socksPort"[[:space:]]*:[[:space:]]*[1-9]|"httpPort"[[:space:]]*:[[:space:]]*[1-9]|"api_port"[[:space:]]*:[[:space:]]*[1-9]' "${module_default_panel}"
 
 exit "${fail}"
