@@ -37,11 +37,13 @@
     <string name="health_issue_tproxy_port_down">TPROXY listener не принимает подключения.</string>
     <string name="health_issue_api_port_down">Локальный control API listener не принимает подключения.</string>
     <string name="health_issue_rules_not_applied">Правила перехвата трафика не применены.</string>
+    <string name="health_issue_netstack_verify_failed">Правила трафика применены, но проверка netstack не прошла.</string>
+    <string name="health_issue_netstack_cleanup_failed">Предыдущее сетевое состояние не удалось очистить.</string>
     <string name="health_issue_routing_not_applied">Policy routing не применён.</string>
     <string name="health_issue_dns_listener_down">DNS listener 127.0.0.1 не отвечает.</string>
     <string name="health_issue_dns_lookup_timeout">DNS-запрос через локальный listener ушёл в таймаут.</string>
     <string name="health_issue_proxy_dns_unavailable">Proxy DNS недоступен.</string>
-    <string name="health_issue_outbound_url_failed">URL-проверка не прошла через туннель.</string>
+    <string name="health_issue_outbound_url_failed">URL-проверка не прошла через выбранный proxy-маршрут.</string>
     <string name="health_issue_readiness_failed">Проверки готовности runtime не пройдены.</string>
     <string name="health_issue_operational_degraded">Runtime запущен, но data-plane проверки degraded.</string>
     <string name="uptime">Время работы</string>
@@ -59,9 +61,15 @@
     <string name="action_scan_qr">Сканировать QR-код</string>
     <string name="nodes_empty">Узлы не настроены.\nДобавьте узел через QR-код или буфер обмена.</string>
     <string name="label_active_node">Активный узел</string>
+    <string name="active_node_mode_auto">Автоматический выбор</string>
+    <string name="active_node_mode_manual">Ручной выбор: %1$s</string>
+    <string name="active_node_mode_missing">Выбранный вручную сервер отсутствует</string>
     <string name="add_node">Добавить сервер</string>
+    <string name="node_selector_auto">Авто</string>
+    <string name="node_selector_manual">Вручную</string>
     <string name="sort_by_name">Имя</string>
     <string name="sort_by_latency">Задержка</string>
+    <string name="sort_by_throughput">Скорость</string>
     <string name="sort_by_country">Страна</string>
     <string name="edit">Изменить</string>
     <string name="edit_node_title">Изменить сервер</string>
@@ -139,6 +147,10 @@
     <string name="urltest_url">URL для проверки</string>
     <string name="always_direct_apps">Всегда напрямую</string>
     <string name="always_direct_apps_desc">Имена пакетов, по одному в строке. Эти приложения обходят TPROXY и DNS-перехват до маршрутизации.</string>
+    <string name="sharing_mode">Раздача через PrivStack</string>
+    <string name="sharing_mode_desc">Направлять трафик клиентов хотспота через PrivStack. Оставьте выключенным, если не раздаёте прокси другим устройствам.</string>
+    <string name="sharing_interfaces">Интерфейсы раздачи</string>
+    <string name="sharing_interfaces_desc">Необязательные имена интерфейсов, по одному в строке. Пусто — автоопределение ap, wlan, rndis, usb, bt-pan и swlan.</string>
     <string name="settings_module">Модуль</string>
     <string name="module_version">Версия</string>
     <string name="daemon_status">Статус демона</string>
@@ -245,7 +257,7 @@
     <string name="node_test_reason_runtime_not_ready">runtime не готов</string>
     <string name="node_test_reason_runtime_degraded">runtime degraded</string>
     <string name="node_test_reason_proxy_dns_unavailable">proxy DNS недоступен</string>
-    <string name="node_test_reason_outbound_url_failed">URL-проверка через туннель не прошла</string>
+    <string name="node_test_reason_outbound_url_failed">URL-проверка через выбранный proxy-маршрут не прошла</string>
     <string name="node_test_reason_http_helper_unavailable">HTTP helper недоступен</string>
     <string name="node_test_reason_api_disabled">URL-тест узла отключен в production-режиме</string>
     <string name="node_test_reason_api_unavailable">локальный control API недоступен</string>
@@ -254,11 +266,13 @@
     <string name="node_test_reason_unknown">ошибка</string>
     <string name="node_test_tcp_ms">TCP %1$d мс</string>
     <string name="node_test_url_ms">URL %1$d мс</string>
+    <string name="node_test_speed">%1$s/с</string>
     <string name="node_latency_error">Ошибка</string>
 
     <!-- Приложения -->
     <string name="app_picker_error_selection_unavailable">Выбор приложений недоступен в текущем режиме маршрутизации</string>
     <string name="app_picker_error_save_selection">Не удалось сохранить выбор приложений</string>
+    <string name="app_group_route_none">Маршрут по умолчанию</string>
     <string name="app_picker_error_load_apps">Не удалось загрузить приложения: %1$s</string>
 
     <!-- Настройки runtime -->
@@ -288,6 +302,7 @@
     <string name="update_error_download_failed">Не удалось скачать обновление</string>
     <string name="reset_summary_all_done">Все шаги очистки выполнены</string>
     <string name="reset_summary_partial_prefix">Частичная очистка:</string>
+    <string name="reset_summary_warning_prefix">Очистка завершена с предупреждениями:</string>
     <string name="reset_summary_step">%1$s: %2$s</string>
     <string name="reset_summary_leftovers_prefix">Осталось:</string>
     <string name="reset_summary_reboot_required">Нужен ребут, чтобы убрать оставшееся сетевое состояние.</string>
@@ -343,13 +358,13 @@
     <string name="audit_check_api_port_protected_detail">В production-режиме Clash API отключен; включенные локальные управляющие порты доступны только root/core.</string>
     <string name="audit_check_api_port_protected_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_dns_leak_title">DNS-запросы могут уходить в системный резолвер</string>
-    <string name="audit_check_dns_leak_detail">Часть запросов обходит туннельный DNS и попадает к DNS-резолверу провайдера напрямую.</string>
-    <string name="audit_check_dns_leak_remediation">Включите fake-DNS или принудительно направляйте весь DNS через удалённый DNS сервера туннеля.</string>
+    <string name="audit_check_dns_leak_detail">Часть запросов обходит DNS PrivStack и попадает к DNS-резолверу провайдера напрямую.</string>
+    <string name="audit_check_dns_leak_remediation">Оставьте DNS interception включённым для proxied-приложений и направляйте их DNS через настроенный удалённый резолвер.</string>
     <string name="audit_check_package_visibility_title">Пакет прокси виден другим приложениям</string>
     <string name="audit_check_package_visibility_detail">Приложения могут через PackageManager определить, что proxy-приложение установлено.</string>
     <string name="audit_check_package_visibility_remediation">Используйте случайное имя пакета или включите фильтрацию package visibility на Android 11+.</string>
     <string name="audit_check_iptables_loop_safe_title">Правила iptables предотвращают петли маршрутизации</string>
-    <string name="audit_check_iptables_loop_safe_detail">Цепочка OUTPUT помечает пакеты демона, чтобы они не возвращались в TUN повторно.</string>
+    <string name="audit_check_iptables_loop_safe_detail">Цепочка OUTPUT помечает пакеты демона, чтобы они не маршрутизировались через PrivStack повторно.</string>
     <string name="audit_check_iptables_loop_safe_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_proc_net_leak_title">/proc/net раскрывает proxy-соединения</string>
     <string name="audit_check_proc_net_leak_detail">Файлы tcp/tcp6 показывают входящий SOCKS-порт, и другие приложения могут это увидеть.</string>
@@ -357,7 +372,7 @@
     <string name="audit_check_ipv6_rules_mirror_title">Правила IPv6 повторяют IPv4</string>
     <string name="audit_check_ipv6_rules_mirror_detail">Правила ip6tables согласованы с iptables и не допускают обхода по IPv6.</string>
     <string name="audit_check_ipv6_rules_mirror_remediation">Ничего делать не нужно.</string>
-    <string name="audit_check_icmp_handling_title">ICMP идёт через туннель</string>
+    <string name="audit_check_icmp_handling_title">ICMP следует proxy-политике маршрутизации</string>
     <string name="audit_check_icmp_handling_detail">Ping-трафик перехватывается и маршрутизируется корректно.</string>
     <string name="audit_check_icmp_handling_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_selinux_status_title">SELinux работает в enforcing</string>
@@ -399,13 +414,13 @@
     <string name="advisor_profile_personal">Личный профиль</string>
     <string name="advisor_profile_work">Рабочий профиль</string>
     <string name="advisor_error_load_failed">Не удалось загрузить установленные приложения</string>
-    <string name="advisor_reason_banking">Банковские приложения могут отказываться работать, если видят TUN или VPN-интерфейс. Перенесите их в рабочий профиль, чтобы скрыть это.</string>
+    <string name="advisor_reason_banking">Банковские приложения могут отказываться работать, если видят VPN или proxy-артефакты. Перенесите их в рабочий профиль, чтобы снизить риск детекта.</string>
     <string name="advisor_reason_government">Госприложения часто проверяют окружение устройства. Изоляция в рабочем профиле снижает шанс детекта proxy.</string>
     <string name="advisor_reason_telecom">Приложения операторов могут реагировать на сетевые аномалии. В рабочем профиле им проще не мешать.</string>
     <string name="advisor_reason_browser">Браузерам полезно идти через proxy, чтобы обходить ограничения.</string>
     <string name="advisor_reason_social">Мессенджеры и соцсети лучше держать под proxy для устойчивости к блокировкам.</string>
     <string name="advisor_reason_streaming">Стриминговым приложениям proxy может понадобиться для доступа к контенту по регионам.</string>
-    <string name="advisor_reason_vpn_proxy">VPN и proxy-инструменты должны оставаться в том же профиле, где находится TUN-интерфейс.</string>
+    <string name="advisor_reason_vpn_proxy">VPN и proxy-инструменты лучше держать рядом с панелью PrivStack и не добавлять в proxied-набор.</string>
     <string name="advisor_reason_system">Системными приложениями управляет Android, обычно их не стоит переносить.</string>
     <string name="advisor_reason_other">Явного риска не найдено. По умолчанию подходит личный профиль.</string>
     <string name="advisor_setup_guide_title">Как настроить рабочий профиль</string>
@@ -416,7 +431,7 @@
     <string name="advisor_setup_step_2">2. Создайте рабочий профиль, когда приложение предложит это сделать.</string>
     <string name="advisor_setup_step_3">3. Клонируйте банковские и государственные приложения в рабочий профиль.</string>
     <string name="advisor_setup_step_4">4. Не устанавливайте proxy или VPN-приложение внутри рабочего профиля.</string>
-    <string name="advisor_setup_step_5">5. Приложения в рабочем профиле будут использовать системное прямое подключение и останутся изолированными от TUN-интерфейса в личном профиле.</string>
+    <string name="advisor_setup_step_5">5. Приложения в рабочем профиле будут использовать системное прямое подключение и останутся изолированными от приложений личного профиля, маршрутизируемых PrivStack.</string>
     <string name="advisor_setup_step_6">6. Проверьте это, открыв банковское приложение в рабочем профиле: оно должно перестать видеть VPN.</string>
     <string name="advisor_setup_tip">Подсказка: Shelter открытый и лёгкий. Он создаёт стандартный рабочий профиль Android без device owner и без root.</string>
 </resources>

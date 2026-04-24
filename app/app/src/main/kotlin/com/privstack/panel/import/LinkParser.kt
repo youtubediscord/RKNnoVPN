@@ -22,7 +22,7 @@ import java.util.UUID
  * Universal proxy link parser.
  *
  * Handles vless://, vmess://, trojan://, ss:// (SIP002 + legacy),
- * socks:// / socks5://, and vpn:// (Amnezia).
+ * socks:// / socks5://, WireGuard config text, and vpn:// (Amnezia).
  * Produces [Node] instances with the protocol-specific outbound stored as a [JsonObject]
  * in the daemon's canonical xray schema.
  */
@@ -36,7 +36,7 @@ object LinkParser {
     private val KNOWN_SCHEMES = listOf(
         "vless://", "vmess://", "trojan://", "ss://", "vpn://",
         "socks://", "socks4://", "socks4a://", "socks5://",
-        "hysteria2://", "hy2://", "tuic://",
+        "hysteria2://", "hy2://", "tuic://", "wireguard://", "wg://",
     )
 
     // Subscription URL heuristics.
@@ -66,6 +66,9 @@ object LinkParser {
                 trimmed.startsWith("hysteria2://", ignoreCase = true) ||
                     trimmed.startsWith("hy2://", ignoreCase = true)   -> parseHysteria2(trimmed)
                 trimmed.startsWith("tuic://", ignoreCase = true)      -> parseTuic(trimmed)
+                trimmed.startsWith("wireguard://", ignoreCase = true) ||
+                    trimmed.startsWith("wg://", ignoreCase = true)    -> parseWireGuardUri(trimmed)
+                looksLikeWireGuardConfig(trimmed)                     -> parseWireGuardConfig(trimmed, trimmed)
                 else -> null
             }
         } catch (e: Exception) {
@@ -98,6 +101,9 @@ object LinkParser {
                     start = end
                 }
             }
+        }
+        if (results.isEmpty() && looksLikeWireGuardConfig(text)) {
+            results += text.trim()
         }
         return results.distinct()
     }
@@ -523,6 +529,76 @@ object LinkParser {
         )
     }
 
+    private fun parseWireGuardUri(uri: String): Node? {
+        val scheme = uri.substringBefore("://")
+        val payload = removeSchemePrefix(uri.substringBefore('#'), scheme)
+        val decoded = tryBase64Decode(payload) ?: urlDecode(payload)
+        val node = parseWireGuardConfig(decoded, uri) ?: return null
+        val name = uri.substringAfter('#', "")
+            .takeIf { it.isNotBlank() }
+            ?.let { urlDecode(it) }
+        return if (name.isNullOrBlank()) node else node.copy(name = name)
+    }
+
+    private fun parseWireGuardConfig(config: String, original: String): Node? {
+        val sections = parseIniSections(config)
+        val iface = sections["interface"] ?: return null
+        val peer = sections["peer"] ?: return null
+
+        val endpoint = peer["endpoint"]?.firstOrNull() ?: return null
+        val (host, port) = parseHostPort(endpoint) ?: return null
+        val privateKey = iface["privatekey"]?.firstOrNull().orEmpty()
+        val peerPublicKey = peer["publickey"]?.firstOrNull().orEmpty()
+        if (privateKey.isBlank() || peerPublicKey.isBlank()) return null
+
+        val localAddresses = iface["address"].orEmpty()
+            .flatMap { it.split(',') }
+            .map(String::trim)
+            .filter(String::isNotBlank)
+        if (localAddresses.isEmpty()) return null
+
+        val mtu = iface["mtu"]?.firstOrNull()?.toIntOrNull()
+        val reserved = peer["reserved"]?.firstOrNull()
+            ?.split(',', ' ')
+            ?.mapNotNull { it.trim().toIntOrNull() }
+            .orEmpty()
+
+        val outbound = buildJsonObject {
+            put("protocol", "wireguard")
+            putJsonObject("settings") {
+                put("address", host)
+                put("port", port)
+                put("private_key", privateKey)
+                put("peer_public_key", peerPublicKey)
+                peer["presharedkey"]?.firstOrNull()?.takeIf { it.isNotBlank() }?.let {
+                    put("pre_shared_key", it)
+                }
+                putJsonArray("local_address") {
+                    localAddresses.forEach { add(JsonPrimitive(it)) }
+                }
+                mtu?.let { put("mtu", it) }
+                if (reserved.isNotEmpty()) {
+                    putJsonArray("reserved") {
+                        reserved.forEach { add(JsonPrimitive(it)) }
+                    }
+                }
+                peer["allowedips"]?.firstOrNull()?.takeIf { it.isNotBlank() }?.let {
+                    put("allowed_ips", it)
+                }
+            }
+        }
+
+        return Node(
+            id = UUID.randomUUID().toString(),
+            name = "WireGuard $host:$port",
+            protocol = Protocol.WIREGUARD,
+            server = host,
+            port = port,
+            link = original,
+            outbound = outbound,
+        )
+    }
+
     // ---------- shared builders ----------
 
     /**
@@ -794,6 +870,36 @@ object LinkParser {
         val host = trimmed.substring(0, lastColon)
         if (host.isBlank()) return null
         return host to trimmed.substring(lastColon + 1)
+    }
+
+    private fun looksLikeWireGuardConfig(text: String): Boolean {
+        val lower = text.lowercase()
+        return lower.contains("[interface]") && lower.contains("[peer]") &&
+            lower.contains("privatekey") && lower.contains("publickey") &&
+            lower.contains("endpoint")
+    }
+
+    private fun parseIniSections(text: String): Map<String, Map<String, List<String>>> {
+        val result = linkedMapOf<String, MutableMap<String, MutableList<String>>>()
+        var section = ""
+        for (rawLine in text.lines()) {
+            val line = rawLine.substringBefore('#').substringBefore(';').trim()
+            if (line.isBlank()) continue
+            if (line.startsWith("[") && line.endsWith("]")) {
+                section = line.substring(1, line.length - 1).trim().lowercase()
+                result.getOrPut(section) { linkedMapOf() }
+                continue
+            }
+            val eq = line.indexOf('=')
+            if (eq == -1 || section.isBlank()) continue
+            val key = line.substring(0, eq).trim().lowercase()
+            val value = line.substring(eq + 1).trim()
+            if (key.isBlank() || value.isBlank()) continue
+            result.getOrPut(section) { linkedMapOf() }
+                .getOrPut(key) { mutableListOf() }
+                .add(value)
+        }
+        return result
     }
 
     private fun firstPortFromToken(token: String): Int? {

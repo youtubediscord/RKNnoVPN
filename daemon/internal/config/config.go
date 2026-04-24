@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const CurrentSchemaVersion = 4
@@ -22,6 +23,7 @@ type Config struct {
 	Apps          AppsConfig      `json:"apps"`
 	DNS           DNSConfig       `json:"dns"`
 	IPv6          IPv6Config      `json:"ipv6"`
+	Sharing       SharingConfig   `json:"sharing,omitempty"`
 	Health        HealthConfig    `json:"health"`
 	Rescue        RescueConfig    `json:"rescue"`
 	Autostart     bool            `json:"autostart"`
@@ -49,7 +51,7 @@ type TransportConfig struct {
 type NodeConfig struct {
 	Address  string `json:"address"`
 	Port     int    `json:"port"`
-	Protocol string `json:"protocol"` // "vless", "trojan", "vmess", "shadowsocks", "socks", "hysteria2", "tuic"
+	Protocol string `json:"protocol"` // "vless", "trojan", "vmess", "shadowsocks", "socks", "hysteria2", "tuic", "wireguard"
 	UUID     string `json:"uuid"`
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
@@ -76,6 +78,16 @@ type NodeConfig struct {
 	// REALITY-specific fields.
 	RealityPublicKey string `json:"reality_public_key,omitempty"`
 	RealityShortID   string `json:"reality_short_id,omitempty"`
+
+	// WireGuard outbound fields. These are rendered as a sing-box outbound,
+	// never as a kernel/Android WireGuard interface.
+	WGPrivateKey    string   `json:"wg_private_key,omitempty"`
+	WGPeerPublicKey string   `json:"wg_peer_public_key,omitempty"`
+	WGPresharedKey  string   `json:"wg_preshared_key,omitempty"`
+	WGLocalAddress  []string `json:"wg_local_address,omitempty"`
+	WGAllowedIPs    string   `json:"wg_allowed_ips,omitempty"`
+	WGMTU           int      `json:"wg_mtu,omitempty"`
+	WGReserved      []int    `json:"wg_reserved,omitempty"`
 }
 
 // PanelConfig stores APK-facing metadata that the daemon itself does not need
@@ -124,8 +136,9 @@ type RoutingConfig struct {
 
 // AppsConfig controls per-app routing (Android split tunnel).
 type AppsConfig struct {
-	Mode     string   `json:"mode"` // "all", "whitelist", "blacklist", "off"
-	Packages []string `json:"list"` // package names for whitelist/blacklist (matches config.json apps.list)
+	Mode      string            `json:"mode"`       // "all", "whitelist", "blacklist", "off"
+	Packages  []string          `json:"list"`       // package names for whitelist/blacklist (matches config.json apps.list)
+	AppGroups map[string]string `json:"app_groups"` // package name -> panel node group outbound
 }
 
 // DNSConfig controls DNS resolution.
@@ -141,6 +154,14 @@ type DNSConfig struct {
 // IPv6Config controls IPv6 behavior.
 type IPv6Config struct {
 	Mode string `json:"mode"` // "mirror", "disable", etc. (matches config.json ipv6.mode)
+}
+
+// SharingConfig controls forwarded hotspot/tethering client traffic.
+// It is explicit because forwarding other devices is a different privacy
+// surface from per-app local TPROXY.
+type SharingConfig struct {
+	Enabled    bool     `json:"enabled"`
+	Interfaces []string `json:"interfaces,omitempty"`
 }
 
 // HealthConfig controls automatic health checking.
@@ -165,33 +186,40 @@ type RescueConfig struct {
 // NodeProfile is a resolved node profile ready for sing-box config rendering.
 // It merges NodeConfig + TransportConfig into a flat structure.
 type NodeProfile struct {
-	ID             string            `json:"id,omitempty"`
-	Name           string            `json:"name,omitempty"`
-	Group          string            `json:"group,omitempty"`
-	Tag            string            `json:"tag,omitempty"`
-	Protocol       string            `json:"protocol"`
-	Address        string            `json:"address"`
-	Port           int               `json:"port"`
-	UUID           string            `json:"uuid"`
-	Username       string            `json:"username,omitempty"`
-	Password       string            `json:"password,omitempty"`
-	Flow           string            `json:"flow,omitempty"`
-	Transport      string            `json:"transport"`
-	TLSServer      string            `json:"tls_server"`
-	Fingerprint    string            `json:"fingerprint"`
-	SSMethod       string            `json:"ss_method,omitempty"`
-	SSPlugin       string            `json:"ss_plugin,omitempty"`
-	SSPluginOpts   string            `json:"ss_plugin_opts,omitempty"`
-	SocksVersion   string            `json:"socks_version,omitempty"`
-	Network        string            `json:"network,omitempty"`
-	ServerPorts    []string          `json:"server_ports,omitempty"`
-	ObfsType       string            `json:"obfs_type,omitempty"`
-	ObfsPassword   string            `json:"obfs_password,omitempty"`
-	AlterID        int               `json:"alter_id,omitempty"`
-	Security       string            `json:"security,omitempty"`
-	RealityPubKey  string            `json:"reality_public_key,omitempty"`
-	RealityShortID string            `json:"reality_short_id,omitempty"`
-	Extra          map[string]string `json:"extra,omitempty"`
+	ID              string            `json:"id,omitempty"`
+	Name            string            `json:"name,omitempty"`
+	Group           string            `json:"group,omitempty"`
+	Tag             string            `json:"tag,omitempty"`
+	Protocol        string            `json:"protocol"`
+	Address         string            `json:"address"`
+	Port            int               `json:"port"`
+	UUID            string            `json:"uuid"`
+	Username        string            `json:"username,omitempty"`
+	Password        string            `json:"password,omitempty"`
+	Flow            string            `json:"flow,omitempty"`
+	Transport       string            `json:"transport"`
+	TLSServer       string            `json:"tls_server"`
+	Fingerprint     string            `json:"fingerprint"`
+	SSMethod        string            `json:"ss_method,omitempty"`
+	SSPlugin        string            `json:"ss_plugin,omitempty"`
+	SSPluginOpts    string            `json:"ss_plugin_opts,omitempty"`
+	SocksVersion    string            `json:"socks_version,omitempty"`
+	Network         string            `json:"network,omitempty"`
+	ServerPorts     []string          `json:"server_ports,omitempty"`
+	ObfsType        string            `json:"obfs_type,omitempty"`
+	ObfsPassword    string            `json:"obfs_password,omitempty"`
+	AlterID         int               `json:"alter_id,omitempty"`
+	Security        string            `json:"security,omitempty"`
+	RealityPubKey   string            `json:"reality_public_key,omitempty"`
+	RealityShortID  string            `json:"reality_short_id,omitempty"`
+	WGPrivateKey    string            `json:"wg_private_key,omitempty"`
+	WGPeerPublicKey string            `json:"wg_peer_public_key,omitempty"`
+	WGPresharedKey  string            `json:"wg_preshared_key,omitempty"`
+	WGLocalAddress  []string          `json:"wg_local_address,omitempty"`
+	WGAllowedIPs    string            `json:"wg_allowed_ips,omitempty"`
+	WGMTU           int               `json:"wg_mtu,omitempty"`
+	WGReserved      []int             `json:"wg_reserved,omitempty"`
+	Extra           map[string]string `json:"extra,omitempty"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -242,6 +270,9 @@ func DefaultConfig() *Config {
 		IPv6: IPv6Config{
 			Mode: "mirror",
 		},
+		Sharing: SharingConfig{
+			Enabled: false,
+		},
 		Health: HealthConfig{
 			Enabled:         true,
 			IntervalSec:     30,
@@ -262,6 +293,27 @@ func DefaultConfig() *Config {
 		},
 		Autostart: true,
 	}
+}
+
+func (c *Config) SharingModeEnv() string {
+	if c != nil && c.Sharing.Enabled {
+		return "hotspot"
+	}
+	return "off"
+}
+
+func (c *Config) SharingInterfacesEnv() string {
+	if c == nil || len(c.Sharing.Interfaces) == 0 {
+		return ""
+	}
+	values := make([]string, 0, len(c.Sharing.Interfaces))
+	for _, iface := range c.Sharing.Interfaces {
+		iface = strings.TrimSpace(iface)
+		if iface != "" {
+			values = append(values, iface)
+		}
+	}
+	return strings.Join(values, " ")
 }
 
 // DefaultPanelConfig returns the APK-facing metadata defaults stored in panel.json.
@@ -457,10 +509,10 @@ func (c *Config) Validate() error {
 
 	validProto := map[string]bool{
 		"vless": true, "trojan": true, "vmess": true, "shadowsocks": true, "socks": true,
-		"hysteria2": true, "tuic": true,
+		"hysteria2": true, "tuic": true, "wireguard": true,
 	}
 	if c.Node.Protocol != "" && !validProto[c.Node.Protocol] {
-		return fmt.Errorf("node.protocol must be one of vless/trojan/vmess/shadowsocks/socks/hysteria2/tuic, got %q", c.Node.Protocol)
+		return fmt.Errorf("node.protocol must be one of vless/trojan/vmess/shadowsocks/socks/hysteria2/tuic/wireguard, got %q", c.Node.Protocol)
 	}
 	if c.Node.Address != "" && c.Node.Protocol == "" {
 		return fmt.Errorf("node.protocol is required when node.address is set")
@@ -481,6 +533,10 @@ func (c *Config) Validate() error {
 	case "tuic":
 		if c.Node.Address != "" && (c.Node.UUID == "" || c.Node.Password == "") {
 			return fmt.Errorf("node.uuid and node.password are required for tuic")
+		}
+	case "wireguard":
+		if c.Node.Address != "" && (c.Node.WGPrivateKey == "" || c.Node.WGPeerPublicKey == "" || len(c.Node.WGLocalAddress) == 0) {
+			return fmt.Errorf("node.wireguard keys and local address are required for wireguard")
 		}
 	}
 	if c.Transport.Protocol != "" {
@@ -543,29 +599,36 @@ func (c *Config) Validate() error {
 // suitable for rendering a sing-box outbound.
 func (c *Config) ResolveProfile() *NodeProfile {
 	return &NodeProfile{
-		Protocol:       c.Node.Protocol,
-		Address:        c.Node.Address,
-		Port:           c.Node.Port,
-		UUID:           c.Node.UUID,
-		Username:       c.Node.Username,
-		Password:       c.Node.Password,
-		Flow:           c.Node.Flow,
-		Transport:      c.Transport.Protocol,
-		TLSServer:      c.Transport.TLSServer,
-		Fingerprint:    c.Transport.Fingerprint,
-		SSMethod:       c.Node.SSMethod,
-		SSPlugin:       c.Node.SSPlugin,
-		SSPluginOpts:   c.Node.SSPluginOpts,
-		SocksVersion:   c.Node.SocksVersion,
-		Network:        c.Node.Network,
-		ServerPorts:    c.Node.ServerPorts,
-		ObfsType:       c.Node.ObfsType,
-		ObfsPassword:   c.Node.ObfsPassword,
-		AlterID:        c.Node.AlterID,
-		Security:       c.Node.Security,
-		RealityPubKey:  c.Node.RealityPublicKey,
-		RealityShortID: c.Node.RealityShortID,
-		Extra:          c.Transport.Extra,
+		Protocol:        c.Node.Protocol,
+		Address:         c.Node.Address,
+		Port:            c.Node.Port,
+		UUID:            c.Node.UUID,
+		Username:        c.Node.Username,
+		Password:        c.Node.Password,
+		Flow:            c.Node.Flow,
+		Transport:       c.Transport.Protocol,
+		TLSServer:       c.Transport.TLSServer,
+		Fingerprint:     c.Transport.Fingerprint,
+		SSMethod:        c.Node.SSMethod,
+		SSPlugin:        c.Node.SSPlugin,
+		SSPluginOpts:    c.Node.SSPluginOpts,
+		SocksVersion:    c.Node.SocksVersion,
+		Network:         c.Node.Network,
+		ServerPorts:     c.Node.ServerPorts,
+		ObfsType:        c.Node.ObfsType,
+		ObfsPassword:    c.Node.ObfsPassword,
+		AlterID:         c.Node.AlterID,
+		Security:        c.Node.Security,
+		RealityPubKey:   c.Node.RealityPublicKey,
+		RealityShortID:  c.Node.RealityShortID,
+		WGPrivateKey:    c.Node.WGPrivateKey,
+		WGPeerPublicKey: c.Node.WGPeerPublicKey,
+		WGPresharedKey:  c.Node.WGPresharedKey,
+		WGLocalAddress:  append([]string(nil), c.Node.WGLocalAddress...),
+		WGAllowedIPs:    c.Node.WGAllowedIPs,
+		WGMTU:           c.Node.WGMTU,
+		WGReserved:      append([]int(nil), c.Node.WGReserved...),
+		Extra:           c.Transport.Extra,
 	}
 }
 
@@ -632,6 +695,13 @@ func (c *Config) SyncFromPanel(authoritative bool) {
 		c.Node.Security = profile.Security
 		c.Node.RealityPublicKey = profile.RealityPubKey
 		c.Node.RealityShortID = profile.RealityShortID
+		c.Node.WGPrivateKey = profile.WGPrivateKey
+		c.Node.WGPeerPublicKey = profile.WGPeerPublicKey
+		c.Node.WGPresharedKey = profile.WGPresharedKey
+		c.Node.WGLocalAddress = append([]string(nil), profile.WGLocalAddress...)
+		c.Node.WGAllowedIPs = profile.WGAllowedIPs
+		c.Node.WGMTU = profile.WGMTU
+		c.Node.WGReserved = append([]int(nil), profile.WGReserved...)
 		c.Transport.Protocol = profile.Transport
 		c.Transport.TLSServer = profile.TLSServer
 		c.Transport.Fingerprint = profile.Fingerprint

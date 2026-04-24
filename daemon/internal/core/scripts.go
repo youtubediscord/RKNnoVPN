@@ -13,6 +13,11 @@ import (
 
 const networkStackUID = "1073"
 
+var SelfTestProtectedPackages = []string{
+	"com.notcvnt.rknhardering",
+	"com.yourvpndead",
+}
+
 var builtInAlwaysDirectExact = map[string]bool{
 	// Sensitive Russian apps that should never be routed through PrivStack.
 	"ru.oneme.app":                   true, // MAX
@@ -71,7 +76,8 @@ var builtInAlwaysDirectExact = map[string]bool{
 	"com.getsurfboard":                     true,
 	"com.github.kr328.clash":               true,
 	"com.github.metacubex.clash.meta":      true,
-	"com.notcvnt.rknhardering":             true,
+	SelfTestProtectedPackages[0]:           true,
+	SelfTestProtectedPackages[1]:           true,
 }
 
 var builtInAlwaysDirectPrefixes = []string{

@@ -22,7 +22,7 @@ set -eu
 # ============================================================================
 
 TAG="PrivStack:iptables"
-SCRIPT_VERSION="v1.6.3"
+SCRIPT_VERSION="v1.7.0"
 
 # Chain name prefix — all PrivStack chains start with this
 CHAIN_PREFIX="PRIVSTACK"
@@ -116,6 +116,7 @@ validate_env() {
     PROXY_UIDS="${PROXY_UIDS:-}"
     DIRECT_UIDS="${DIRECT_UIDS:-}"
     BYPASS_UIDS="${BYPASS_UIDS:-}"
+    SOCKS_PORT="${SOCKS_PORT:-0}"
     HTTP_PORT="${HTTP_PORT:-0}"
     DNS_MODE="${DNS_MODE:-per_uid}"
     DNS_SCOPE="${DNS_SCOPE:-}"
@@ -151,6 +152,7 @@ save_snapshot() {
 TPROXY_PORT=${TPROXY_PORT}
 DNS_PORT=${DNS_PORT}
 API_PORT=${API_PORT}
+SOCKS_PORT=${SOCKS_PORT}
 HTTP_PORT=${HTTP_PORT}
 FWMARK=${FWMARK}
 ROUTE_TABLE=${ROUTE_TABLE}
@@ -182,6 +184,10 @@ http_port_enabled() {
     [ "${HTTP_PORT:-0}" -gt 0 ] 2>/dev/null
 }
 
+socks_port_enabled() {
+    [ "${SOCKS_PORT:-0}" -gt 0 ] 2>/dev/null
+}
+
 api_port_enabled() {
     [ "${API_PORT:-0}" -gt 0 ] 2>/dev/null
 }
@@ -199,6 +205,14 @@ emit_http_port_protection() {
     if http_port_enabled; then
         echo "-A ${chain} -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
         echo "-A ${chain} -p tcp --dport ${HTTP_PORT} -j RETURN"
+    fi
+}
+
+emit_socks_port_protection() {
+    local chain="$1"
+    if socks_port_enabled; then
+        echo "-A ${chain} -p tcp --dport ${SOCKS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${chain} -p tcp --dport ${SOCKS_PORT} -j RETURN"
     fi
 }
 
@@ -287,6 +301,7 @@ fi)
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
 $(emit_api_port_protection "${CHAIN_OUT}")
+$(emit_socks_port_protection "${CHAIN_OUT}")
 $(emit_http_port_protection "${CHAIN_OUT}")
 
 # 6. Bypass UIDs: specific UIDs that must always go direct.
@@ -394,6 +409,7 @@ fi)
 -A ${CHAIN_OUT} -p tcp --dport ${DNS_PORT} -j RETURN
 -A ${CHAIN_OUT} -p udp --dport ${DNS_PORT} -j RETURN
 $(emit_api_port_protection "${CHAIN_OUT}")
+$(emit_socks_port_protection "${CHAIN_OUT}")
 $(emit_http_port_protection "${CHAIN_OUT}")
 
 # 6. Bypass UIDs
@@ -623,6 +639,7 @@ do_start() {
     log_info "  TPROXY_PORT=${TPROXY_PORT}"
     log_info "  DNS_PORT=${DNS_PORT}"
     log_info "  API_PORT=${API_PORT}"
+    log_info "  SOCKS_PORT=${SOCKS_PORT}"
     log_info "  HTTP_PORT=${HTTP_PORT}"
     log_info "  FWMARK=${FWMARK}"
     log_info "  CORE_GID=${CORE_GID}"
@@ -737,6 +754,70 @@ do_stop() {
     log_info "PrivStack iptables rules removed"
 }
 
+do_status() {
+    local missing=0
+
+    if ! iptables ${IPT_WAIT} -t mangle -L "${CHAIN_OUT}" -n >/dev/null 2>&1; then
+        log_error "missing IPv4 mangle chain ${CHAIN_OUT}"
+        missing=1
+    fi
+    if ! iptables ${IPT_WAIT} -t mangle -L "${CHAIN_PRE}" -n >/dev/null 2>&1; then
+        log_error "missing IPv4 mangle chain ${CHAIN_PRE}"
+        missing=1
+    fi
+    if ! iptables ${IPT_WAIT} -t mangle -C OUTPUT -j "${CHAIN_OUT}" >/dev/null 2>&1; then
+        log_error "missing IPv4 OUTPUT hook for ${CHAIN_OUT}"
+        missing=1
+    fi
+    if ! iptables ${IPT_WAIT} -t mangle -C PREROUTING -j "${CHAIN_PRE}" >/dev/null 2>&1; then
+        log_error "missing IPv4 PREROUTING hook for ${CHAIN_PRE}"
+        missing=1
+    fi
+
+    if ip6tables ${IPT_WAIT} -t mangle -L >/dev/null 2>&1; then
+        if ! ip6tables ${IPT_WAIT} -t mangle -L "${CHAIN_OUT}" -n >/dev/null 2>&1; then
+            log_error "missing IPv6 mangle chain ${CHAIN_OUT}"
+            missing=1
+        fi
+        if ! ip6tables ${IPT_WAIT} -t mangle -L "${CHAIN_PRE}" -n >/dev/null 2>&1; then
+            log_error "missing IPv6 mangle chain ${CHAIN_PRE}"
+            missing=1
+        fi
+        if ! ip6tables ${IPT_WAIT} -t mangle -C OUTPUT -j "${CHAIN_OUT}" >/dev/null 2>&1; then
+            log_error "missing IPv6 OUTPUT hook for ${CHAIN_OUT}"
+            missing=1
+        fi
+        if ! ip6tables ${IPT_WAIT} -t mangle -C PREROUTING -j "${CHAIN_PRE}" >/dev/null 2>&1; then
+            log_error "missing IPv6 PREROUTING hook for ${CHAIN_PRE}"
+            missing=1
+        fi
+    fi
+
+    if ! ip rule show | grep -q "fwmark ${FWMARK}.*lookup ${ROUTE_TABLE}"; then
+        log_error "missing IPv4 policy rule fwmark ${FWMARK} lookup ${ROUTE_TABLE}"
+        missing=1
+    fi
+    if ! ip route show table "${ROUTE_TABLE}" | grep -q "local default dev lo"; then
+        log_error "missing IPv4 local route in table ${ROUTE_TABLE}"
+        missing=1
+    fi
+    if ip -6 rule show >/dev/null 2>&1; then
+        if ! ip -6 rule show | grep -q "fwmark ${FWMARK}.*lookup ${ROUTE_TABLE_V6}"; then
+            log_error "missing IPv6 policy rule fwmark ${FWMARK} lookup ${ROUTE_TABLE_V6}"
+            missing=1
+        fi
+        if ! ip -6 route show table "${ROUTE_TABLE_V6}" | grep -q "local default dev lo"; then
+            log_error "missing IPv6 local route in table ${ROUTE_TABLE_V6}"
+            missing=1
+        fi
+    fi
+
+    if [ "$missing" -ne 0 ]; then
+        exit 1
+    fi
+    log_info "PrivStack iptables hooks are present"
+}
+
 # ============================================================================
 # MAIN — dispatch based on command
 # ============================================================================
@@ -759,8 +840,12 @@ case "${1:-}" in
         ROUTE_TABLE_V6="${ROUTE_TABLE_V6:-2024}"
         do_stop
         ;;
+    status)
+        validate_env
+        do_status
+        ;;
     *)
-        echo "Usage: $0 {start|stop}"
+        echo "Usage: $0 {start|stop|status}"
         echo ""
         echo "Environment variables must be set by the caller (privd)."
         echo "See script header for the full list."

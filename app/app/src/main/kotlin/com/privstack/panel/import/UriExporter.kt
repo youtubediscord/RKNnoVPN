@@ -32,6 +32,7 @@ object UriExporter {
         Protocol.SOCKS -> toSocksUri(node)
         Protocol.HYSTERIA2 -> toHysteria2Uri(node)
         Protocol.TUIC -> toTuicUri(node)
+        Protocol.WIREGUARD -> toWireGuardUri(node)
         else -> node.link
     }
 
@@ -323,6 +324,50 @@ object UriExporter {
             query = query,
             name = name,
         )
+    }
+
+    /**
+     * wireguard://base64([Interface]/[Peer] config)
+     */
+    fun toWireGuardUri(node: Node): String {
+        val settings = node.outbound.obj("settings") ?: return node.link
+        val privateKey = settings.str("private_key").ifEmpty { return node.link }
+        val peerPublicKey = settings.str("peer_public_key").ifEmpty { return node.link }
+        val endpointHost = settings.str("address").ifEmpty { node.server }
+        val endpointPort = settings.str("port").ifEmpty { node.port.toString() }
+        val localAddress = settings.arr("local_address")
+            ?.joinToString(", ") { it.jsonPrimitive.content }
+            ?.takeIf { it.isNotBlank() }
+            ?: return node.link
+
+        val lines = mutableListOf(
+            "[Interface]",
+            "PrivateKey = $privateKey",
+            "Address = $localAddress",
+        )
+        settings.str("mtu").takeIf { it.isNotBlank() }?.let {
+            lines += "MTU = $it"
+        }
+        lines += ""
+        lines += "[Peer]"
+        lines += "PublicKey = $peerPublicKey"
+        settings.str("pre_shared_key").takeIf { it.isNotBlank() }?.let {
+            lines += "PresharedKey = $it"
+        }
+        settings.arr("reserved")
+            ?.joinToString(", ") { it.jsonPrimitive.content }
+            ?.takeIf { it.isNotBlank() }
+            ?.let { lines += "Reserved = $it" }
+        lines += "Endpoint = ${formatHost(endpointHost)}:$endpointPort"
+        lines += "AllowedIPs = ${settings.str("allowed_ips").ifEmpty { "0.0.0.0/0, ::/0" }}"
+
+        val config = lines.joinToString("\n")
+        val payload = Base64.encodeToString(
+            config.toByteArray(Charsets.UTF_8),
+            Base64.NO_WRAP or Base64.NO_PADDING or Base64.URL_SAFE,
+        )
+        val name = urlEncode(node.name)
+        return if (name.isNotEmpty()) "wireguard://$payload#$name" else "wireguard://$payload"
     }
 
     // ---------- stream-settings helpers ----------

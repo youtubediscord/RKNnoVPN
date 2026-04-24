@@ -208,11 +208,13 @@ class DashboardViewModel @Inject constructor(
             val healthIssueMessage = messages.formatHealthIssue(
                 status.health.lastCode,
                 status.health.lastError,
+                status.health.lastUserMessage,
+                status.health.stageReport,
             )
             it.copy(
                 connectionState = status.state,
                 activeNodeName = status.activeNodeName,
-                activeNodeProtocol = status.activeNodeProtocol,
+                activeNodeProtocol = formatActiveNodeSubtitle(status),
                 egressIp = status.egressIp,
                 countryFlag = status.countryFlag,
                 latencyMs = status.latencyMs,
@@ -234,6 +236,18 @@ class DashboardViewModel @Inject constructor(
                     else -> null
                 },
             )
+        }
+    }
+
+    private fun formatActiveNodeSubtitle(status: DaemonStatus): String? {
+        return when (status.activeNodeMode) {
+            "auto_selector" -> messages.get(com.privstack.panel.R.string.active_node_mode_auto)
+            "manual" -> status.activeNodeProtocol?.let {
+                messages.get(com.privstack.panel.R.string.active_node_mode_manual, it)
+            }
+            "manual_missing" -> messages.get(com.privstack.panel.R.string.active_node_mode_missing)
+            "single_node" -> status.activeNodeProtocol
+            else -> status.activeNodeProtocol
         }
     }
 

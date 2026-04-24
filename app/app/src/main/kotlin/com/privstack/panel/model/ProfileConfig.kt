@@ -20,6 +20,7 @@ data class ProfileConfig(
     val routing: RoutingConfig = RoutingConfig(),
     val dns: DnsConfig = DnsConfig(),
     val health: HealthConfig = HealthConfig(),
+    val sharing: SharingConfig = SharingConfig(),
     val tun: TunConfig = TunConfig(),
     val inbounds: InboundsConfig = InboundsConfig(),
     /** Arbitrary extension fields the daemon may add in future versions. */
@@ -28,11 +29,13 @@ data class ProfileConfig(
 
 @Serializable
 data class RoutingConfig(
-    val mode: RoutingMode = RoutingMode.PROXY_ALL,
+    val mode: RoutingMode = RoutingMode.PER_APP,
     /** Package names routed through the proxy (only for PER_APP mode). */
     val appProxyList: List<String> = emptyList(),
     /** Package names bypassing the proxy (only for PER_APP_BYPASS mode). */
     val appBypassList: List<String> = emptyList(),
+    /** Optional package -> node group routing overrides. */
+    val appGroupRoutes: Map<String, String> = emptyMap(),
     /** Domain rules for direct access (e.g. "domain:ru", "geosite:ru"). */
     val directDomains: List<String> = emptyList(),
     /** Domain rules forced through the proxy. */
@@ -68,7 +71,7 @@ data class DnsConfig(
     /** Remote DNS server used for proxied queries. */
     val remoteDns: String = "https://1.1.1.1/dns-query",
     /** Direct DNS server for domains resolved without proxy. */
-    val directDns: String = "https://77.88.8.8/dns-query",
+    val directDns: String = "https://dns.google/dns-query",
     /** Whether to block QUIC to force HTTP/2 fallback. */
     val blockQuic: Boolean = false,
     /** Fake-DNS / DNS-hijack enabled. */
@@ -95,17 +98,23 @@ data class HealthConfig(
 )
 
 @Serializable
+data class SharingConfig(
+    val enabled: Boolean = false,
+    val interfaces: List<String> = emptyList(),
+)
+
+@Serializable
 data class TunConfig(
     val enabled: Boolean = false,
-    /** TUN interface MTU. */
+    /** Legacy/inactive compatibility field; root TPROXY runtime does not create a TUN interface. */
     val mtu: Int = 9000,
-    /** IPv4 address assigned to the TUN interface. */
+    /** Legacy/inactive compatibility field; root TPROXY runtime does not assign this address. */
     val ipv4Address: String = "172.19.0.1/30",
-    /** Whether to enable IPv6 on the TUN interface. */
+    /** Legacy/inactive compatibility field; IPv6 is controlled by the root routing layer. */
     val ipv6: Boolean = false,
     /** Auto-route: let the daemon manage system routing table. */
     val autoRoute: Boolean = true,
-    /** Strict-route: block leaks outside the TUN. */
+    /** Strict-route legacy flag; leak prevention is enforced by root routing/DNS rules. */
     val strictRoute: Boolean = true
 )
 

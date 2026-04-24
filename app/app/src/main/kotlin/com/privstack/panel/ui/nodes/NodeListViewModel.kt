@@ -20,7 +20,7 @@ import javax.inject.Inject
 
 private const val TAG = "NodeListViewModel"
 
-enum class NodeSortMode { NAME, LATENCY, COUNTRY }
+enum class NodeSortMode { NAME, LATENCY, THROUGHPUT, COUNTRY }
 enum class ImportSheetTab { PASTE_URI, SCAN_QR, SUBSCRIPTION }
 
 data class NodeListUiState(
@@ -82,6 +82,29 @@ class NodeListViewModel @Inject constructor(
                 }
             } else {
                 Log.d(TAG, "Active node set to $nodeId via panel-set")
+                profileRepository.error.value?.let { persistedWarning ->
+                    _uiState.update { it.copy(errorMessage = persistedWarning) }
+                }
+            }
+        }
+    }
+
+    fun selectAuto() {
+        viewModelScope.launch {
+            val previousNodeId = _uiState.value.activeNodeId
+            _uiState.update { it.copy(activeNodeId = null, errorMessage = null) }
+            val ok = profileRepository.clearActiveNode()
+            if (!ok) {
+                val err = profileRepository.error.value
+                profileRepository.refresh()
+                _uiState.update {
+                    it.copy(
+                        activeNodeId = previousNodeId,
+                        errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_set_active_failed),
+                    )
+                }
+            } else {
+                Log.d(TAG, "Active node cleared; selector will use auto mode")
                 profileRepository.error.value?.let { persistedWarning ->
                     _uiState.update { it.copy(errorMessage = persistedWarning) }
                 }
@@ -178,6 +201,7 @@ class NodeListViewModel @Inject constructor(
                                 node.copy(
                                     latencyMs = test.tcpMs ?: -1,
                                     responseMs = test.urlMs,
+                                    throughputBps = test.throughputBps,
                                     testStatus = when {
                                         test.tcpError != null -> messages.get(
                                             com.privstack.panel.R.string.node_test_status_tcp_error,
@@ -458,6 +482,11 @@ class NodeListViewModel @Inject constructor(
         NodeSortMode.NAME -> nodes.sortedBy { it.name.lowercase() }
         NodeSortMode.LATENCY -> nodes.sortedWith(
             compareBy<Node> { it.responseMs == null }
+                .thenBy { it.responseMs ?: Int.MAX_VALUE }
+                .thenBy { it.latencyMs ?: Int.MAX_VALUE },
+        )
+        NodeSortMode.THROUGHPUT -> nodes.sortedWith(
+            compareByDescending<Node> { it.throughputBps ?: -1L }
                 .thenBy { it.responseMs ?: Int.MAX_VALUE }
                 .thenBy { it.latencyMs ?: Int.MAX_VALUE },
         )

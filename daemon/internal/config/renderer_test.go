@@ -157,6 +157,45 @@ func TestRenderSocksOutboundDoesNotInheritTransport(t *testing.T) {
 	}
 }
 
+func TestRenderWireGuardOutboundWithoutKernelInterface(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "203.0.113.1"
+	cfg.Node.Port = 51820
+	cfg.Node.Protocol = "wireguard"
+	cfg.Node.WGPrivateKey = "private-key"
+	cfg.Node.WGPeerPublicKey = "peer-public-key"
+	cfg.Node.WGPresharedKey = "psk"
+	cfg.Node.WGLocalAddress = []string{"10.7.0.2/32", "fd42::2/128"}
+	cfg.Node.WGMTU = 1280
+	cfg.Node.WGReserved = []int{1, 2, 3}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	outbound := rendered["outbounds"].([]any)[0].(map[string]any)
+	if outbound["type"] != "wireguard" {
+		t.Fatalf("expected wireguard outbound, got %#v", outbound)
+	}
+	if outbound["server"] != "203.0.113.1" || outbound["server_port"].(float64) != 51820 {
+		t.Fatalf("unexpected wireguard endpoint: %#v", outbound)
+	}
+	if outbound["private_key"] != "private-key" || outbound["peer_public_key"] != "peer-public-key" {
+		t.Fatalf("wireguard keys were not rendered: %#v", outbound)
+	}
+	if _, ok := outbound["transport"]; ok {
+		t.Fatalf("wireguard outbound must not render v2ray transport: %#v", outbound)
+	}
+	if _, ok := outbound["interface_name"]; ok {
+		t.Fatalf("wireguard outbound must not request a kernel interface: %#v", outbound)
+	}
+}
+
 func TestRenderPanelNodesAsURLTestOutbounds(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = ""
@@ -324,6 +363,79 @@ func TestRenderPanelNodeGroupsAsSelectorOutbounds(t *testing.T) {
 	groupSelectorTags := groupSelector["outbounds"].([]any)
 	if len(groupSelectorTags) != 3 || groupSelectorTags[0] != "group-europe-auto" || groupSelectorTags[1] != "node-first-node" || groupSelectorTags[2] != "node-second-node" {
 		t.Fatalf("unexpected group selector members: %#v", groupSelectorTags)
+	}
+}
+
+func TestRenderAppGroupRouteRules(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Routing.CustomDirect = []string{"example.org"}
+	cfg.Routing.AlwaysDirectApps = []string{"com.privstack.panel"}
+	cfg.Apps.AppGroups = map[string]string{
+		"com.chat.app":  "Europe",
+		"com.video.app": "Europe",
+		"com.unknown":   "Missing",
+	}
+	cfg.Panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"first-node",
+			"name":"First",
+			"group":"Europe",
+			"protocol":"SOCKS",
+			"server":"127.0.0.1",
+			"port":1081,
+			"outbound":{
+				"protocol":"socks",
+				"settings":{"address":"127.0.0.1","port":1081,"version":"5"}
+			}
+		}`),
+		json.RawMessage(`{
+			"id":"second-node",
+			"name":"Second",
+			"group":"Europe",
+			"protocol":"SOCKS",
+			"server":"127.0.0.1",
+			"port":1082,
+			"outbound":{
+				"protocol":"socks",
+				"settings":{"address":"127.0.0.1","port":1082,"version":"5"}
+			}
+		}`),
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	rules := rendered["route"].(map[string]any)["rules"].([]any)
+	var directRule map[string]any
+	var groupRule map[string]any
+	for _, rawRule := range rules {
+		rule := rawRule.(map[string]any)
+		switch rule["outbound"] {
+		case "direct":
+			if packages, ok := rule["package_name"].([]any); ok && len(packages) == 1 && packages[0] == "com.privstack.panel" {
+				directRule = rule
+			}
+		case "group-europe":
+			groupRule = rule
+		}
+	}
+	if directRule == nil {
+		t.Fatalf("expected always-direct package route, got %#v", rules)
+	}
+	if groupRule == nil {
+		t.Fatalf("expected app group route, got %#v", rules)
+	}
+	packages := groupRule["package_name"].([]any)
+	if len(packages) != 2 || packages[0] != "com.chat.app" || packages[1] != "com.video.app" {
+		t.Fatalf("unexpected app group packages: %#v", packages)
 	}
 }
 

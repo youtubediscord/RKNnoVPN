@@ -30,6 +30,8 @@ private data class RoutingSelection(
     val routingMode: RoutingMode,
     val selectedPackages: Set<String>,
     val alwaysDirectPackages: Set<String>,
+    val appGroupRoutes: Map<String, String>,
+    val nodeGroups: List<String>,
 )
 
 /**
@@ -41,6 +43,7 @@ data class AppInfo(
     val isSystemApp: Boolean,
     val isProxied: Boolean = false,
     val isAlwaysDirect: Boolean = false,
+    val nodeGroup: String = "",
 )
 
 data class AppPickerUiState(
@@ -48,6 +51,7 @@ data class AppPickerUiState(
     val routingMode: RoutingMode = RoutingMode.PER_APP,
     val searchQuery: String = "",
     val showSystemApps: Boolean = false,
+    val nodeGroups: List<String> = emptyList(),
     val isLoading: Boolean = true,
     /** Error message from the last operation, or null. */
     val errorMessage: String? = null,
@@ -165,6 +169,31 @@ class AppPickerViewModel @Inject constructor(
         }
     }
 
+    fun setAppGroup(packageName: String, group: String) {
+        _uiState.update { state ->
+            state.copy(
+                apps = state.apps.map { app ->
+                    if (app.packageName == packageName) {
+                        app.copy(
+                            nodeGroup = group,
+                            isProxied = if (
+                                group.isNotBlank() &&
+                                state.routingMode == RoutingMode.PER_APP &&
+                                !app.isAlwaysDirect
+                            ) {
+                                true
+                            } else {
+                                app.isProxied
+                            },
+                        )
+                    } else {
+                        app
+                    }
+                },
+            )
+        }
+    }
+
     fun applyTemplate(template: AppTemplate) {
         if (!_uiState.value.supportsPerAppSelection) return
         _uiState.update { state ->
@@ -210,10 +239,22 @@ class AppPickerViewModel @Inject constructor(
 
     fun applySelection() {
         val selectedPackages = _uiState.value.apps
-            .filter { it.isProxied }
+            .filter {
+                it.isProxied ||
+                    (
+                        _uiState.value.routingMode == RoutingMode.PER_APP &&
+                            it.nodeGroup.isNotBlank() &&
+                            !it.isAlwaysDirect
+                    )
+            }
             .filterNot { it.isAlwaysDirect && _uiState.value.routingMode == RoutingMode.PER_APP }
             .map { it.packageName }
         val routingMode = _uiState.value.routingMode
+        val appGroupRoutes = _uiState.value.apps
+            .mapNotNull { app ->
+                app.nodeGroup.takeIf { it.isNotBlank() }?.let { group -> app.packageName to group }
+            }
+            .toMap()
 
         viewModelScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
@@ -234,6 +275,7 @@ class AppPickerViewModel @Inject constructor(
                     routing = config.routing.copy(
                         appProxyList = if (routingMode == RoutingMode.PER_APP) selectedPackages else emptyList(),
                         appBypassList = if (routingMode == RoutingMode.PER_APP_BYPASS) selectedPackages else emptyList(),
+                        appGroupRoutes = appGroupRoutes,
                     ),
                 )
             }
@@ -281,6 +323,7 @@ class AppPickerViewModel @Inject constructor(
                         label = label,
                         isSystemApp = isSystem,
                         isAlwaysDirect = isAlwaysDirect,
+                        nodeGroup = daemonSelection.appGroupRoutes[pkg].orEmpty(),
                         isProxied = if (isAlwaysDirect && daemonSelection.routingMode == RoutingMode.PER_APP_BYPASS) {
                             true
                         } else {
@@ -293,6 +336,7 @@ class AppPickerViewModel @Inject constructor(
                     it.copy(
                         apps = appInfoList,
                         routingMode = daemonSelection.routingMode,
+                        nodeGroups = daemonSelection.nodeGroups,
                         isLoading = false,
                     )
                 }
@@ -347,12 +391,12 @@ class AppPickerViewModel @Inject constructor(
             return config.toRoutingSelection()
         }
 
-        // Fallback: daemon unreachable, return empty set
+        // Fallback: daemon unreachable, keep the privacy-first empty whitelist.
         val err = profileRepository.error.value
         if (err != null) {
             Log.w(TAG, "Could not load proxied apps from daemon: $err")
         }
-        return RoutingSelection(RoutingMode.PROXY_ALL, emptySet(), emptySet())
+        return RoutingSelection(RoutingMode.PER_APP, emptySet(), emptySet(), emptyMap(), emptyList())
     }
 
     private fun observeProfile() {
@@ -364,6 +408,7 @@ class AppPickerViewModel @Inject constructor(
                     _uiState.update { state ->
                         state.copy(
                             routingMode = selection.routingMode,
+                            nodeGroups = selection.nodeGroups,
                             apps = state.apps.map { app ->
                                 val isAlwaysDirect = AlwaysDirectApps.matches(
                                     app.packageName,
@@ -371,7 +416,14 @@ class AppPickerViewModel @Inject constructor(
                                 )
                                 app.copy(
                                     isAlwaysDirect = isAlwaysDirect,
+                                    nodeGroup = selection.appGroupRoutes[app.packageName].orEmpty(),
                                     isProxied = if (isAlwaysDirect && selection.routingMode == RoutingMode.PER_APP_BYPASS) {
+                                        true
+                                    } else if (
+                                        selection.routingMode == RoutingMode.PER_APP &&
+                                        selection.appGroupRoutes.containsKey(app.packageName) &&
+                                        !isAlwaysDirect
+                                    ) {
                                         true
                                     } else {
                                         app.packageName in selection.selectedPackages
@@ -396,7 +448,17 @@ private fun ProfileConfig.toRoutingSelection(): RoutingSelection {
         RoutingMode.PER_APP_BYPASS -> routing.appBypassList.toSet()
         else -> emptySet()
     }
-    return RoutingSelection(routingMode, selected, routing.alwaysDirectAppList.toSet())
+    val nodeGroups = nodes.map { it.group.trim() }
+        .filter(String::isNotBlank)
+        .distinct()
+        .sorted()
+    return RoutingSelection(
+        routingMode,
+        selected,
+        routing.alwaysDirectAppList.toSet(),
+        routing.appGroupRoutes,
+        nodeGroups,
+    )
 }
 
 enum class AppTemplate {

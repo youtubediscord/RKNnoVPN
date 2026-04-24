@@ -120,6 +120,11 @@ class ProfileRepository @Inject constructor(
         config.copy(activeNodeId = nodeId)
     }
 
+    /** Let the daemon selector use automatic node selection. */
+    suspend fun clearActiveNode(): Boolean = mutatePanel("clearActiveNode") { config ->
+        config.copy(activeNodeId = null)
+    }
+
     /** Import nodes from share links or refresh a subscription URL. */
     suspend fun importNodes(input: String): List<Node> = withContext(Dispatchers.IO) {
         mutex.withLock {

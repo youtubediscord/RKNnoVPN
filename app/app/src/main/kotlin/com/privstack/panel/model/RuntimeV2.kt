@@ -70,6 +70,10 @@ data class BackendHealthSnapshot(
     val egressReady: Boolean = false,
     val lastCode: String = "",
     val lastError: String = "",
+    val lastUserMessage: String = "",
+    val lastDebug: String = "",
+    val rollbackApplied: Boolean = false,
+    val stageReport: RuntimeStageReport? = null,
     val checkedAt: String? = null,
     val checks: Map<String, BackendHealthCheck> = emptyMap(),
 ) {
@@ -79,6 +83,32 @@ data class BackendHealthSnapshot(
     val operationalHealthy: Boolean
         get() = healthy && dnsReady && egressReady
 }
+
+@Serializable
+data class RuntimeStageReport(
+    val operation: String = "",
+    val status: String = "",
+    val stages: List<RuntimeStage> = emptyList(),
+    val failedStage: String = "",
+    val lastCode: String = "",
+    val rollbackApplied: Boolean = false,
+    val startedAt: String? = null,
+    val finishedAt: String? = null,
+) {
+    val failedStageOrLast: RuntimeStage?
+        get() = stages.lastOrNull { it.status.equals("failed", ignoreCase = true) }
+            ?: stages.lastOrNull()
+}
+
+@Serializable
+data class RuntimeStage(
+    val name: String = "",
+    val status: String = "",
+    val code: String = "",
+    val detail: String = "",
+    val rollbackApplied: Boolean = false,
+    val at: String? = null,
+)
 
 @Serializable
 data class BackendHealthCheck(
@@ -108,6 +138,7 @@ data class ResetReport(
     val generation: Long = 0L,
     val status: String = "ok",
     val steps: List<ResetStep> = emptyList(),
+    val warnings: List<String> = emptyList(),
     val errors: List<String> = emptyList(),
     val leftovers: List<String> = emptyList(),
     val rebootRequired: Boolean = false,
@@ -122,9 +153,12 @@ data class NodeProbeResultV2(
     val port: Int = 0,
     val tcpDirect: Long? = null,
     val tunnelDelay: Long? = null,
+    val responseBytes: Long? = null,
+    val throughputBps: Long? = null,
     val dnsBootstrap: Boolean = false,
     val tcpStatus: String = "",
     val urlStatus: String = "",
+    val throughputStatus: String = "",
     val verdict: String = "",
     val errorClass: String = "",
     val errorDetail: String = "",

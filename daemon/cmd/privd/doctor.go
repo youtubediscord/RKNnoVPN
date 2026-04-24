@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +16,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -47,8 +52,9 @@ type doctorJSONSection struct {
 }
 
 type doctorPortStatus struct {
-	Port         int  `json:"port"`
-	TCPListening bool `json:"tcpListening"`
+	Role         string `json:"role,omitempty"`
+	Port         int    `json:"port"`
+	TCPListening bool   `json:"tcpListening"`
 }
 
 type doctorSummary struct {
@@ -61,6 +67,7 @@ type doctorSummary struct {
 	Issues              []string              `json:"issues,omitempty"`
 	CompatibilityIssues []string              `json:"compatibilityIssues,omitempty"`
 	PrivacyIssues       []string              `json:"privacyIssues,omitempty"`
+	Routing             doctorRoutingSummary  `json:"routing"`
 	NodeTests           doctorNodeTestSummary `json:"nodeTests"`
 }
 
@@ -69,6 +76,39 @@ type doctorNodeTestSummary struct {
 	Usable   int `json:"usable"`
 	Unusable int `json:"unusable"`
 	TCPOnly  int `json:"tcpOnly"`
+}
+
+type doctorRoutingSummary struct {
+	Mode               string   `json:"mode,omitempty"`
+	ActiveNodeMode     string   `json:"activeNodeMode"`
+	ActiveNodeID       string   `json:"activeNodeId,omitempty"`
+	ActiveNodeName     string   `json:"activeNodeName,omitempty"`
+	ActiveNodeProtocol string   `json:"activeNodeProtocol,omitempty"`
+	NodeCount          int      `json:"nodeCount"`
+	Groups             []string `json:"groups,omitempty"`
+	AppGroupRouteCount int      `json:"appGroupRouteCount,omitempty"`
+	SharingEnabled     bool     `json:"sharingEnabled"`
+}
+
+type doctorReleaseIntegrity struct {
+	CurrentPath     string   `json:"currentPath"`
+	ReleasePath     string   `json:"releasePath,omitempty"`
+	ManifestPath    string   `json:"manifestPath,omitempty"`
+	Version         string   `json:"version,omitempty"`
+	InstalledAt     string   `json:"installedAt,omitempty"`
+	CheckedFiles    int      `json:"checkedFiles"`
+	OK              bool     `json:"ok"`
+	MissingCurrent  bool     `json:"missingCurrent,omitempty"`
+	MissingManifest bool     `json:"missingManifest,omitempty"`
+	MissingFiles    []string `json:"missingFiles,omitempty"`
+	Mismatches      []string `json:"mismatches,omitempty"`
+	Error           string   `json:"error,omitempty"`
+}
+
+type doctorReleaseManifest struct {
+	Version     string            `json:"version"`
+	InstalledAt string            `json:"installed_at"`
+	Files       map[string]string `json:"files_sha256"`
 }
 
 func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -103,10 +143,17 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	}
 	moduleVersion := readModuleVersion()
 	ports := doctorPortStatuses(cfg)
-	leftovers := d.collectNetworkLeftovers(cfg)
-	nodeResults := d.testNodeProbesV2(cfg.Health.URL, 2500, nil)
+	netstackReport := d.doctorNetstackReport(cfg)
+	netstackRuntimeReport := d.doctorNetstackRuntimeReport(cfg)
+	leftovers := netstackReport.Leftovers
+	var nodeResults []runtimev2.NodeProbeResult
+	if cfg != nil {
+		nodeResults = d.testNodeProbesV2(cfg.Health.URL, 2500, nil)
+	}
 	privacy := d.privacyDiagnostics(cfg, lines)
 	singBoxCheck := d.singBoxCheck(singBoxPath, renderedConfigPath, lines)
+	releaseIntegrity := doctorReleaseIntegrityReport(dataDir)
+	routingSummary := doctorRoutingSummaryFromConfig(cfg)
 	versions := map[string]interface{}{
 		"daemon":                   Version,
 		"core":                     Version,
@@ -122,7 +169,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 
 	report := map[string]interface{}{
 		"generated_at": time.Now().Format(time.RFC3339),
-		"summary":      buildDoctorSummary(healthSnapshot, leftovers, nodeResults, ports, privacy, moduleVersion, singBoxCheck),
+		"summary":      buildDoctorSummary(healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, routingSummary),
 		"versions":     versions,
 		"device":       d.doctorDevice(lines),
 		"paths": map[string]doctorFileStatus{
@@ -142,18 +189,25 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 			"snapshot": healthSnapshot,
 			"raw":      healthResult,
 		},
-		"backend_status": backendStatus,
-		"ports":          ports,
-		"leftovers":      leftovers,
-		"node_tests":     redactNodeProbeResults(nodeResults),
-		"logs":           d.doctorLogs(lines),
+		"backend_status":      backendStatus,
+		"core_start_report":   d.coreMgr.LastStartReport(),
+		"core_runtime_report": d.coreMgr.LastRuntimeReport(),
+		"reload_report":       d.LastReloadReport(),
+		"ports":               ports,
+		"routing":             routingSummary,
+		"netstack":            netstackReport,
+		"netstack_runtime":    netstackRuntimeReport,
+		"leftovers":           leftovers,
+		"node_tests":          redactNodeProbeResults(nodeResults),
+		"logs":                d.doctorLogs(lines),
 		"config": map[string]doctorJSONSection{
 			"daemon":           readRedactedJSONFile(cfgPath),
 			"panel":            readRedactedJSONFile(panelPath),
 			"rendered_singbox": readRedactedJSONFile(renderedConfigPath),
 		},
-		"runtime": d.runtimeDiagnostics(lines),
-		"privacy": privacy,
+		"runtime":           d.runtimeDiagnostics(lines),
+		"privacy":           privacy,
+		"release_integrity": releaseIntegrity,
 	}
 
 	report["sing_box_check"] = singBoxCheck
@@ -183,31 +237,101 @@ func (d *daemon) buildSelfCheckSummary(lines int) (doctorSummary, error) {
 	singBoxPath := filepath.Join(dataDir, "bin", "sing-box")
 	healthResult := d.healthMon.RunOnce()
 	healthSnapshot := d.buildRuntimeV2HealthSnapshot(healthResult, true)
+	netstackReport := d.doctorNetstackReport(cfg)
+	netstackRuntimeReport := d.doctorNetstackRuntimeReport(cfg)
+	var nodeResults []runtimev2.NodeProbeResult
+	if cfg != nil {
+		nodeResults = d.testNodeProbesV2(cfg.Health.URL, 2500, nil)
+	}
 	return buildDoctorSummary(
 		healthSnapshot,
-		d.collectNetworkLeftovers(cfg),
-		d.testNodeProbesV2(cfg.Health.URL, 2500, nil),
+		netstackReport.Leftovers,
+		netstackRuntimeReport,
+		nodeResults,
 		doctorPortStatuses(cfg),
 		d.privacyDiagnostics(cfg, lines),
 		readModuleVersion(),
 		d.singBoxCheck(singBoxPath, renderedConfigPath, lines),
+		doctorReleaseIntegrityReport(dataDir),
+		doctorRoutingSummaryFromConfig(cfg),
 	), nil
+}
+
+func (d *daemon) doctorNetstackReport(cfg *config.Config) netstack.Report {
+	if cfg == nil {
+		return netstack.Report{
+			Operation: "verify-cleanup",
+			Status:    "failed",
+			Steps: []netstack.Step{{
+				Name:   "verify-cleanup",
+				Status: "failed",
+				Detail: "config unavailable for cleanup verification",
+			}},
+			Leftovers: []string{"config unavailable for cleanup verification"},
+		}
+	}
+	return netstack.New(d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript).
+		WithExecCommand(core.ExecCommand).
+		VerifyCleanup()
+}
+
+func (d *daemon) doctorNetstackRuntimeReport(cfg *config.Config) netstack.Report {
+	if cfg == nil {
+		return netstack.Report{
+			Operation: "verify",
+			Status:    "failed",
+			Steps: []netstack.Step{{
+				Name:   "netstack-verify",
+				Status: "failed",
+				Detail: "config unavailable for runtime netstack verification",
+			}},
+			Errors: []string{"config unavailable for runtime netstack verification"},
+		}
+	}
+	if d.coreMgr == nil {
+		return netstack.Report{
+			Operation: "verify",
+			Status:    "skipped",
+			Steps: []netstack.Step{{
+				Name:   "netstack-verify",
+				Status: "skipped",
+				Detail: "core manager unavailable",
+			}},
+		}
+	}
+	status := d.coreMgr.Status()
+	if status.State != core.StateRunning.String() && status.State != core.StateDegraded.String() {
+		return netstack.Report{
+			Operation: "verify",
+			Status:    "skipped",
+			Steps: []netstack.Step{{
+				Name:   "netstack-verify",
+				Status: "skipped",
+				Detail: "runtime is not active",
+			}},
+		}
+	}
+	return netstack.New(d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript).Verify()
 }
 
 func buildDoctorSummary(
 	healthSnapshot runtimev2.HealthSnapshot,
 	leftovers []string,
+	netstackRuntimeReport netstack.Report,
 	nodeResults []runtimev2.NodeProbeResult,
 	ports []doctorPortStatus,
 	privacy map[string]interface{},
 	moduleVersion map[string]string,
 	singBoxCheck doctorCommandResult,
+	releaseIntegrity doctorReleaseIntegrity,
+	routingSummary doctorRoutingSummary,
 ) doctorSummary {
 	summary := doctorSummary{
 		Status:             "ok",
 		HealthCode:         healthSnapshot.LastCode,
 		HealthDetail:       healthSnapshot.LastError,
 		OperationalHealthy: healthSnapshot.OperationalHealthy(),
+		Routing:            routingSummary,
 		NodeTests:          summarizeDoctorNodeTests(nodeResults),
 	}
 	addIssue := func(issue string) {
@@ -243,11 +367,20 @@ func buildDoctorSummary(
 		summary.Status = "partial_reset"
 		addIssue("network cleanup leftovers remain")
 	}
+	for _, issue := range doctorNetstackRuntimeIssues(netstackRuntimeReport) {
+		addIssue(issue)
+		if summary.Status == "ok" || summary.Status == "degraded" {
+			summary.Status = "failed"
+		}
+	}
 	if singBoxCheck.Error != "" {
 		addCompatibility("sing-box config check failed: " + singBoxCheck.Error)
 	}
 	if moduleVersion["version"] == "" || moduleVersion["version"] == "unknown" {
 		addCompatibility("module version is unknown")
+	}
+	for _, issue := range doctorReleaseIntegrityIssues(releaseIntegrity) {
+		addCompatibility(issue)
 	}
 	for _, port := range ports {
 		switch port.Port {
@@ -271,6 +404,27 @@ func buildDoctorSummary(
 	return summary
 }
 
+func doctorNetstackRuntimeIssues(report netstack.Report) []string {
+	switch report.Status {
+	case "failed", "partial":
+	default:
+		return nil
+	}
+	detail := strings.Join(report.Errors, "; ")
+	if detail == "" {
+		for _, step := range report.Steps {
+			if step.Status == "failed" && step.Detail != "" {
+				detail = step.Detail
+				break
+			}
+		}
+	}
+	if detail == "" {
+		detail = firstNonEmpty(report.Operation, "verify")
+	}
+	return []string{"runtime netstack verification failed: " + detail}
+}
+
 func summarizeDoctorNodeTests(results []runtimev2.NodeProbeResult) doctorNodeTestSummary {
 	summary := doctorNodeTestSummary{Total: len(results)}
 	for _, result := range results {
@@ -287,6 +441,71 @@ func summarizeDoctorNodeTests(results []runtimev2.NodeProbeResult) doctorNodeTes
 	return summary
 }
 
+func doctorRoutingSummaryFromConfig(cfg *config.Config) doctorRoutingSummary {
+	if cfg == nil {
+		return doctorRoutingSummary{ActiveNodeMode: "config_unavailable"}
+	}
+	type nodeMeta struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Protocol string `json:"protocol"`
+		Group    string `json:"group"`
+	}
+	nodes := make([]nodeMeta, 0, len(cfg.Panel.Nodes))
+	groupSet := map[string]bool{}
+	for _, raw := range cfg.Panel.Nodes {
+		var node nodeMeta
+		if err := json.Unmarshal(raw, &node); err != nil {
+			continue
+		}
+		nodes = append(nodes, node)
+		if group := strings.TrimSpace(node.Group); group != "" {
+			groupSet[group] = true
+		}
+	}
+	groups := make([]string, 0, len(groupSet))
+	for group := range groupSet {
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
+
+	summary := doctorRoutingSummary{
+		Mode:               cfg.Routing.Mode,
+		ActiveNodeMode:     "none",
+		NodeCount:          len(nodes),
+		Groups:             groups,
+		AppGroupRouteCount: len(cfg.Apps.AppGroups),
+		SharingEnabled:     cfg.Sharing.Enabled,
+	}
+	activeID := strings.TrimSpace(cfg.Panel.ActiveNodeID)
+	if activeID != "" {
+		summary.ActiveNodeMode = "manual"
+		summary.ActiveNodeID = activeID
+		for _, node := range nodes {
+			if node.ID == activeID {
+				summary.ActiveNodeName = node.Name
+				summary.ActiveNodeProtocol = node.Protocol
+				return summary
+			}
+		}
+		summary.ActiveNodeMode = "manual_missing"
+		return summary
+	}
+	if len(nodes) == 1 {
+		summary.ActiveNodeMode = "single_node"
+		summary.ActiveNodeID = nodes[0].ID
+		summary.ActiveNodeName = nodes[0].Name
+		summary.ActiveNodeProtocol = nodes[0].Protocol
+		return summary
+	}
+	if len(nodes) > 1 {
+		summary.ActiveNodeMode = "auto_selector"
+		summary.ActiveNodeName = "Auto"
+		summary.ActiveNodeProtocol = "selector"
+	}
+	return summary
+}
+
 func doctorPrivacyIssues(privacy map[string]interface{}) []string {
 	rawChecks, _ := privacy["checks"].(map[string]interface{})
 	if len(rawChecks) == 0 {
@@ -295,12 +514,14 @@ func doctorPrivacyIssues(privacy map[string]interface{}) []string {
 	labels := map[string]string{
 		"no_vpn_like_interfaces":      "VPN-like network interface is visible",
 		"no_transport_vpn_hint":       "Connectivity diagnostics expose VPN transport",
+		"no_loopback_dns":             "LinkProperties exposes loopback DNS",
 		"system_proxy_unset":          "system proxy setting is not empty",
 		"clash_api_disabled":          "Clash/API port is enabled",
 		"helper_inbounds_disabled":    "HTTP/SOCKS helper inbound is enabled",
 		"helper_inbounds_local_only":  "helper inbound allows LAN access",
 		"per_app_whitelist_default":   "app routing is not whitelist/off",
 		"dns_hijack_per_uid":          "DNS hijack is not scoped per UID",
+		"self_test_apps_direct":       "self-test packages are not protected direct-only",
 		"localhost_proxy_ports_clear": "localhost proxy port is visible",
 	}
 	issues := make([]string, 0)
@@ -318,20 +539,133 @@ func doctorPrivacyIssues(privacy map[string]interface{}) []string {
 	return issues
 }
 
+func doctorReleaseIntegrityIssues(report doctorReleaseIntegrity) []string {
+	if report.MissingCurrent {
+		return nil
+	}
+	issues := make([]string, 0)
+	if report.Error != "" {
+		issues = append(issues, "release integrity check failed: "+report.Error)
+	}
+	if report.MissingManifest {
+		issues = append(issues, "current release manifest is missing")
+	}
+	if len(report.MissingFiles) > 0 {
+		issues = append(issues, fmt.Sprintf("current release has %d missing file(s)", len(report.MissingFiles)))
+	}
+	if len(report.Mismatches) > 0 {
+		issues = append(issues, fmt.Sprintf("current release has %d checksum mismatch(es)", len(report.Mismatches)))
+	}
+	return issues
+}
+
+func doctorReleaseIntegrityReport(dataDir string) doctorReleaseIntegrity {
+	currentPath := filepath.Join(dataDir, "current")
+	report := doctorReleaseIntegrity{
+		CurrentPath: currentPath,
+	}
+
+	releasePath, err := filepath.EvalSymlinks(currentPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			report.MissingCurrent = true
+			report.OK = true
+			return report
+		}
+		report.Error = err.Error()
+		return report
+	}
+	report.ReleasePath = releasePath
+	manifestPath := filepath.Join(releasePath, "install-manifest.json")
+	report.ManifestPath = manifestPath
+
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			report.MissingManifest = true
+		} else {
+			report.Error = err.Error()
+		}
+		return report
+	}
+	var manifest doctorReleaseManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		report.Error = err.Error()
+		return report
+	}
+	report.Version = manifest.Version
+	report.InstalledAt = manifest.InstalledAt
+	if len(manifest.Files) == 0 {
+		report.Error = "manifest contains no files"
+		return report
+	}
+
+	paths := make([]string, 0, len(manifest.Files))
+	for rel := range manifest.Files {
+		paths = append(paths, rel)
+	}
+	sort.Strings(paths)
+	for _, rel := range paths {
+		expected := strings.TrimSpace(manifest.Files[rel])
+		if expected == "" {
+			report.Mismatches = append(report.Mismatches, rel+": empty manifest hash")
+			continue
+		}
+		fullPath := filepath.Join(releasePath, filepath.FromSlash(rel))
+		actual, err := doctorSHA256File(fullPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				report.MissingFiles = append(report.MissingFiles, rel)
+			} else {
+				report.Mismatches = append(report.Mismatches, rel+": "+err.Error())
+			}
+			continue
+		}
+		report.CheckedFiles++
+		if !strings.EqualFold(actual, expected) {
+			report.Mismatches = append(report.Mismatches, rel)
+		}
+	}
+	report.OK = report.Error == "" && !report.MissingManifest && len(report.MissingFiles) == 0 && len(report.Mismatches) == 0
+	return report
+}
+
+func doctorSHA256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 func supportedCapabilities() []string {
 	return []string{
 		"backend.root-tproxy",
 		"backend.reset.structured",
+		"backend.reset.warnings.v1",
 		"config.import.v2",
 		"config.schema.v4",
 		"diagnostics.bundle.v2",
 		"diagnostics.health.v2",
 		"diagnostics.testNodes.v2",
+		"netstack.report.v1",
+		"netstack.runtime.verify.v1",
+		"netstack.verify.v1",
 		"node-test.tcp-direct",
 		"node-test.url",
 		"panel.nodes",
 		"privacy.audit.v2",
+		"privacy.localhost-listeners.v1",
+		"privacy.loopback-dns.v1",
 		"privacy.self-check.v1",
+		"privacy.self-test-protected-apps.v1",
+		"privacy.vpn-interface-patterns.v1",
 		"runtime.logs",
 	}
 }
@@ -435,9 +769,11 @@ func (d *daemon) privacyDiagnostics(cfg *config.Config, maxLines int) map[string
 	settingsProxyHost := runDoctorCommand(maxLines, "settings", "get", "global", "http_proxy")
 	settingsProxyPort := runDoctorCommand(maxLines, "settings", "get", "global", "global_http_proxy_port")
 	checks := map[string]interface{}{
-		"no_vpn_like_interfaces": !doctorLinesContainAny(ipLinks.Lines, "tun0", "wg0", "tap0", "ppp0", "ipsec"),
-		"no_transport_vpn_hint":  !doctorLinesContainAny(connectivity.Lines, "TRANSPORT_VPN", "VpnTransportInfo"),
-		"system_proxy_unset":     doctorCommandLooksEmptySetting(settingsProxyHost) && doctorCommandLooksEmptySetting(settingsProxyPort),
+		"no_vpn_like_interfaces":      firstVPNLikeInterfaceLine(ipLinks.Lines) == "",
+		"no_transport_vpn_hint":       !doctorLinesContainAny(connectivity.Lines, "TRANSPORT_VPN", "VpnTransportInfo"),
+		"no_loopback_dns":             !doctorLinesContainLoopbackDNS(connectivity.Lines),
+		"system_proxy_unset":          doctorCommandLooksEmptySetting(settingsProxyHost) && doctorCommandLooksEmptySetting(settingsProxyPort),
+		"localhost_proxy_ports_clear": doctorLocalhostProxyPortsClear(cfg),
 	}
 	if cfg != nil {
 		panelInbounds := cfg.ResolvePanelInbounds()
@@ -446,9 +782,13 @@ func (d *daemon) privacyDiagnostics(cfg *config.Config, maxLines int) map[string
 		checks["helper_inbounds_local_only"] = !panelInbounds.AllowLAN
 		checks["per_app_whitelist_default"] = cfg.Apps.Mode == "whitelist" || cfg.Apps.Mode == "off"
 		checks["dns_hijack_per_uid"] = cfg.DNS.HijackPerUID
+		checks["self_test_apps_direct"] = selfTestProtectedAppsDirect()
 	}
 	return map[string]interface{}{
 		"checks": checks,
+		"protected_packages": map[string]interface{}{
+			"self_test": core.SelfTestProtectedPackages,
+		},
 		"commands": map[string]doctorCommandResult{
 			"ip_link":                    ipLinks,
 			"dumpsys_connectivity":       connectivity,
@@ -456,6 +796,34 @@ func (d *daemon) privacyDiagnostics(cfg *config.Config, maxLines int) map[string
 			"settings_global_proxy_port": settingsProxyPort,
 		},
 	}
+}
+
+func selfTestProtectedAppsDirect() bool {
+	for _, pkgName := range core.SelfTestProtectedPackages {
+		if !core.IsBuiltInAlwaysDirectPackage(pkgName) {
+			return false
+		}
+	}
+	return true
+}
+
+func doctorLocalhostProxyPortsClear(cfg *config.Config) bool {
+	ports := []int{10808, 10809, 9090}
+	if cfg != nil {
+		panelInbounds := cfg.ResolvePanelInbounds()
+		ports = append(ports, cfg.Proxy.APIPort, panelInbounds.SocksPort, panelInbounds.HTTPPort)
+	}
+	seen := map[int]bool{}
+	for _, port := range ports {
+		if port <= 0 || seen[port] {
+			continue
+		}
+		seen[port] = true
+		if isTCPPortListening("127.0.0.1", port, 150*time.Millisecond) {
+			return false
+		}
+	}
+	return true
 }
 
 func runDoctorCommand(maxLines int, name string, args ...string) doctorCommandResult {
@@ -473,14 +841,44 @@ func runDoctorCommand(maxLines int, name string, args ...string) doctorCommandRe
 
 func doctorPortStatuses(cfg *config.Config) []doctorPortStatus {
 	ports := effectiveLocalPorts(cfg)
+	roles := doctorLocalPortRoles(cfg)
 	result := make([]doctorPortStatus, 0, len(ports))
 	for _, port := range ports {
 		result = append(result, doctorPortStatus{
+			Role:         strings.Join(roles[port], ","),
 			Port:         port,
 			TCPListening: isTCPPortListening("127.0.0.1", port, 150*time.Millisecond),
 		})
 	}
 	return result
+}
+
+func doctorLocalPortRoles(cfg *config.Config) map[int][]string {
+	if cfg == nil {
+		return nil
+	}
+	panelInbounds := cfg.ResolvePanelInbounds()
+	candidates := []struct {
+		role string
+		port int
+	}{
+		{"tproxy", valueOrDefaultInt(cfg.Proxy.TProxyPort, 10853)},
+		{"dns", valueOrDefaultInt(cfg.Proxy.DNSPort, 10856)},
+		{"clash_api", cfg.Proxy.APIPort},
+		{"socks_helper", panelInbounds.SocksPort},
+		{"http_helper", panelInbounds.HTTPPort},
+	}
+	roles := map[int][]string{}
+	for _, candidate := range candidates {
+		if candidate.port <= 0 {
+			continue
+		}
+		roles[candidate.port] = append(roles[candidate.port], candidate.role)
+	}
+	for port := range roles {
+		sort.Strings(roles[port])
+	}
+	return roles
 }
 
 func (d *daemon) doctorLogs(maxLines int) []doctorLogSection {
@@ -606,10 +1004,10 @@ func redactDiagnosticValue(key string, value interface{}) interface{} {
 func isSensitiveDiagnosticKey(key string) bool {
 	lower := strings.ToLower(strings.TrimSpace(key))
 	switch lower {
-	case "uuid", "password", "private_key", "short_id", "public_key", "reality_public_key":
+	case "uuid", "password", "private_key", "pre_shared_key", "preshared_key", "psk", "short_id", "public_key", "reality_public_key":
 		return true
 	}
-	for _, token := range []string{"password", "private", "secret", "token", "uuid", "short_id", "public_key"} {
+	for _, token := range []string{"password", "private", "preshared", "pre_shared", "secret", "token", "uuid", "short_id", "public_key"} {
 		if strings.Contains(lower, token) {
 			return true
 		}
@@ -619,7 +1017,7 @@ func isSensitiveDiagnosticKey(key string) bool {
 
 var (
 	diagnosticUUIDPattern = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
-	diagnosticKeyPattern  = regexp.MustCompile(`(?i)("?(?:uuid|password|private_key|short_id|public_key|reality_public_key)"?\s*[:=]\s*)("[^"]*"|[^,\s}]+)`)
+	diagnosticKeyPattern  = regexp.MustCompile(`(?i)("?(?:uuid|password|private_key|pre_shared_key|preshared_key|psk|short_id|public_key|reality_public_key)"?\s*[:=]\s*)("[^"]*"|[^,\s}]+)`)
 )
 
 func redactDiagnosticText(text string) string {
@@ -638,6 +1036,63 @@ func doctorLinesContainAny(lines []string, needles ...string) bool {
 		}
 	}
 	return false
+}
+
+func firstVPNLikeInterfaceLine(lines []string) string {
+	for _, line := range lines {
+		name := ipLinkInterfaceName(line)
+		if name == "" {
+			continue
+		}
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "tun") ||
+			strings.HasPrefix(lower, "wg") ||
+			strings.HasPrefix(lower, "tap") ||
+			strings.HasPrefix(lower, "ppp") ||
+			strings.HasPrefix(lower, "ipsec") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
+func ipLinkInterfaceName(line string) string {
+	line = strings.TrimSpace(line)
+	firstColon := strings.Index(line, ":")
+	if firstColon < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(line[firstColon+1:])
+	secondColon := strings.Index(rest, ":")
+	if secondColon < 0 {
+		return ""
+	}
+	name := strings.TrimSpace(rest[:secondColon])
+	name = strings.TrimSuffix(name, "@NONE")
+	if at := strings.Index(name, "@"); at >= 0 {
+		name = name[:at]
+	}
+	return name
+}
+
+func doctorLinesContainLoopbackDNS(lines []string) bool {
+	return doctorFirstLoopbackDNSLine(lines) != ""
+}
+
+func doctorFirstLoopbackDNSLine(lines []string) string {
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if !strings.Contains(lower, "dns") && !strings.Contains(lower, "linkproperties") {
+			continue
+		}
+		if strings.Contains(lower, "127.") ||
+			strings.Contains(lower, "/::1") ||
+			strings.Contains(lower, "[::1]") ||
+			strings.Contains(lower, " localhost") {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
 }
 
 func doctorCommandLooksEmptySetting(result doctorCommandResult) bool {

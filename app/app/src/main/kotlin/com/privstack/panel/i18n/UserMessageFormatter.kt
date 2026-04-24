@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.annotation.StringRes
 import com.privstack.panel.R
 import com.privstack.panel.ipc.DaemonClientResult
+import com.privstack.panel.model.RuntimeStageReport
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -73,7 +74,12 @@ class UserMessageFormatter @Inject constructor(
     fun formatOperationFailure(@StringRes operationResId: Int, reason: String): String =
         get(R.string.error_operation_failed_with_reason, get(operationResId), reason)
 
-    fun formatHealthIssue(code: String?, detail: String?): String {
+    fun formatHealthIssue(
+        code: String?,
+        detail: String?,
+        userMessage: String? = null,
+        stageReport: RuntimeStageReport? = null,
+    ): String {
         val normalized = code?.trim().orEmpty()
         val mapped = when (normalized) {
             "CORE_PID_MISSING",
@@ -86,6 +92,8 @@ class UserMessageFormatter @Inject constructor(
             "CONFIG_CHECK_FAILED" -> get(R.string.health_issue_readiness_failed)
             "API_PORT_DOWN" -> get(R.string.health_issue_api_port_down)
             "RULES_NOT_APPLIED" -> get(R.string.health_issue_rules_not_applied)
+            "NETSTACK_VERIFY_FAILED" -> get(R.string.health_issue_netstack_verify_failed)
+            "NETSTACK_CLEANUP_FAILED" -> get(R.string.health_issue_netstack_cleanup_failed)
             "ROUTING_CHECK_FAILED",
             "ROUTING_V4_MISSING",
             "ROUTING_V6_MISSING",
@@ -101,8 +109,35 @@ class UserMessageFormatter @Inject constructor(
             "OPERATIONAL_DEGRADED" -> get(R.string.health_issue_operational_degraded)
             else -> ""
         }
-        return mapped.ifBlank { detail?.trim().orEmpty() }.ifBlank {
+        val base = mapped.ifBlank { userMessage?.trim().orEmpty() }.ifBlank { detail?.trim().orEmpty() }.ifBlank {
             get(R.string.runtime_operational_degraded)
+        }
+        val stage = formatRuntimeStage(stageReport)
+        return if (stage.isBlank()) base else "$base ($stage)"
+    }
+
+    private fun formatRuntimeStage(report: RuntimeStageReport?): String {
+        val stage = report?.failedStage?.trim()?.ifBlank { null }
+            ?: report?.failedStageOrLast?.name?.trim()?.ifBlank { null }
+            ?: return ""
+        return when (stage) {
+            "render-config" -> "рендер конфигурации"
+            "config-check" -> "проверка sing-box config"
+            "open-core-log" -> "открытие core log"
+            "spawn-core" -> "запуск sing-box"
+            "wait-tproxy" -> "ожидание TPROXY"
+            "wait-dns" -> "ожидание DNS listener"
+            "wait-api" -> "ожидание API listener"
+            "netstack-apply" -> "применение netstack"
+            "netstack-verify" -> "проверка netstack"
+            "commit-state" -> "фиксация состояния"
+            "stop-subsystems" -> "остановка watchers"
+            "hot-swap" -> "hot-swap core"
+            "netstack-reapply" -> "переустановка netstack"
+            "rescue-reset" -> "сброс rescue state"
+            "start-subsystems" -> "запуск watchers"
+            "health-refresh" -> "проверка health"
+            else -> stage
         }
     }
 

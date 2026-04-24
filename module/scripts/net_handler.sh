@@ -23,6 +23,8 @@
 #   ROUTE_TABLE    — IPv4 policy routing table number
 #   ROUTE_TABLE_V6 — IPv6 policy routing table number
 #   TPROXY_PORT    — sing-box TPROXY listener port
+#   SHARING_MODE   — off | hotspot (default off)
+#   SHARING_IFACES — optional explicit tethering interface names
 # ============================================================================
 
 set -eu
@@ -35,6 +37,8 @@ FWMARK="${FWMARK:-0x2023}"
 ROUTE_TABLE="${ROUTE_TABLE:-2023}"
 ROUTE_TABLE_V6="${ROUTE_TABLE_V6:-2024}"
 TPROXY_PORT="${TPROXY_PORT:-10853}"
+SHARING_MODE="${SHARING_MODE:-off}"
+SHARING_IFACES="${SHARING_IFACES:-}"
 IPT_WAIT="-w 100"
 
 LOG_FILE="$PRIVSTACK_DIR/logs/net_change.log"
@@ -203,10 +207,16 @@ verify_iptables_hooks
 # If one appears, ensure TPROXY rules cover traffic arriving on it.
 
 handle_tethering() {
+    if [ "$SHARING_MODE" != "hotspot" ]; then
+        log "sharing mode disabled; skipping tethering TPROXY rules"
+        return
+    fi
     log "checking for tethering interfaces"
 
-    for iface in $(ip -o link show 2>/dev/null | awk -F': ' '{ print $2 }' | \
-                   grep -E '^(ap[0-9]|wlan[1-9]|rndis[0-9]|usb[0-9]|bt-pan|swlan[0-9])'); do
+    ifaces="${SHARING_IFACES:-$(ip -o link show 2>/dev/null | awk -F': ' '{ print $2 }' | \
+                   grep -E '^(ap[0-9]|wlan[1-9]|rndis[0-9]|usb[0-9]|bt-pan|swlan[0-9])' || true)}"
+
+    for iface in $ifaces; do
 
         # Skip if a rule for this interface already exists.
         if iptables $IPT_WAIT -t mangle -C "$PRE4_CHAIN" -i "$iface" \

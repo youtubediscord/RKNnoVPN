@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -145,6 +146,7 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		filepath.Join(releaseDir, "bin", "sing-box"),
 		filepath.Join(releaseDir, "module", "module.prop"),
 		filepath.Join(releaseDir, "module", "scripts", "rescue_reset.sh"),
+		filepath.Join(releaseDir, "install-manifest.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("release artifact missing %s: %v", path, err)
@@ -160,6 +162,37 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 	}
 	if target != releaseDir {
 		t.Fatalf("current symlink = %q, want %q", target, releaseDir)
+	}
+
+	manifestData, err := os.ReadFile(filepath.Join(releaseDir, "install-manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest releaseManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Version != "v1.6.4" {
+		t.Fatalf("manifest version = %q, want v1.6.4", manifest.Version)
+	}
+	for _, rel := range []string{
+		"bin/privd",
+		"bin/privctl",
+		"bin/sing-box",
+		"module/module.prop",
+		"module/scripts/rescue_reset.sh",
+	} {
+		got := manifest.Files[rel]
+		if got == "" {
+			t.Fatalf("manifest missing hash for %s: %#v", rel, manifest.Files)
+		}
+		want, err := sha256File(filepath.Join(releaseDir, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("manifest hash for %s = %q, want %q", rel, got, want)
+		}
 	}
 }
 

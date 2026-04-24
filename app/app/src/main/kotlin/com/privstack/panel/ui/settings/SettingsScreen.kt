@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -222,6 +223,39 @@ fun SettingsScreen(
                 modifier = Modifier.padding(horizontal = 8.dp),
             ) {
                 Text(stringResource(R.string.apply))
+            }
+
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.sharing_mode)) },
+                supportingContent = { Text(stringResource(R.string.sharing_mode_desc)) },
+                trailingContent = {
+                    Switch(
+                        checked = state.sharingEnabled,
+                        onCheckedChange = viewModel::setSharingEnabled,
+                    )
+                },
+                colors = transparentListItemColors(),
+            )
+
+            if (state.sharingEnabled) {
+                OutlinedTextField(
+                    value = state.sharingInterfacesText,
+                    onValueChange = viewModel::setSharingInterfacesText,
+                    label = { Text(stringResource(R.string.sharing_interfaces)) },
+                    supportingText = { Text(stringResource(R.string.sharing_interfaces_desc)) },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                )
+
+                TextButton(
+                    onClick = viewModel::applySharingInterfaces,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) {
+                    Text(stringResource(R.string.apply))
+                }
             }
         }
 

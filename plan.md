@@ -126,8 +126,13 @@ Acceptance:
 
 - cleanup удаляет только PrivStack-owned artifacts;
 - проверка остатков смотрит IPv4/IPv6 и raw/mangle/nat/filter;
+- `netstack verify` вызывает `iptables.sh status`/`dns.sh status` и
+  отличает `NETSTACK_VERIFY_FAILED` от apply/cleanup ошибок;
+- reset с cleanup leftovers возвращает `clean_with_warnings`, а не hard
+  failure; hard `partial` остаётся для реальных ошибок шагов;
 - DNS остаётся network-layer redirect, без изменения Android system DNS;
-- local API/DNS/TProxy/helper ports закрыты от non-root/non-core UID.
+- local API/DNS/TProxy/SOCKS/HTTP helper ports закрыты от non-root/non-core UID
+  и участвуют в privacy/audit проверках.
 
 ### M3. Compatibility and release safety
 
@@ -150,6 +155,20 @@ Acceptance:
   `supported_methods`, module/core/daemon metadata.
 - APK gate проверяет schema/capabilities перед не-repair RPC, а repair-команды
   остаются доступными для восстановления.
+- APK больше не блокирует `backend.reset`/`network-reset` через `version()`, а
+  `node-test` имеет legacy fallback, чтобы TCP diagnostics оставался доступен
+  при mismatch нового diagnostics API.
+- APK `stop()` больше не блокируется через `version()` и падает назад на
+  legacy `stop`, если `backend.stop` отсутствует.
+- `diagnostics.testNodes` убран из hard-required APK methods, потому что
+  legacy `node-test` является поддерживаемым repair fallback.
+- Legacy `node-test` bridge сохраняет `url_error_class`, чтобы UI показывал
+  классифицированную причину отказа, а не только сырой error string.
+- Compatibility check считает `backend.reset`/`network-reset` и
+  `config-import`/`config.import` альтернативными entrypoint, а не разными
+  обязательными методами.
+- `panel-set` больше не hard-required для APK status: если метод отсутствует,
+  панель падает назад на legacy panel write через `config-set-many`.
 
 ### M4. Privacy invariants
 
@@ -167,8 +186,29 @@ protected/direct-only app set is active
 ```
 
 Часть self-test уже находится в `audit`/`doctor`: API/helper listeners,
-system proxy, VPN-like interfaces, per-app whitelist/off defaults и
-diagnostic privacy surface.
+system proxy, loopback DNS в LinkProperties, VPN-like interfaces,
+per-app whitelist/off defaults и
+diagnostic privacy surface. RKNHardering и YourVPNDead входят в built-in
+direct-only/self-test protected package set.
+Основной `audit` RPC тоже выдаёт отдельный `LOOPBACK_DNS_VISIBLE` finding,
+если `dumpsys connectivity` показывает loopback DNS в LinkProperties.
+HTTP/SOCKS helper inbound теперь считается audit finding даже на localhost;
+LAN exposure остаётся отдельной более конкретной причиной.
+Diagnostic privacy payload отдаёт `protected_packages.self_test`, чтобы
+проверяемый direct-only набор был виден в отчёте.
+Audit/doctor проверяют configured helper/API ports и common proxy ports
+10808/10809/9090 на stale localhost listeners.
+VPN-like interface detection теперь смотрит имя интерфейса из `ip link`, а не
+только фиксированные `tun0/wg0/tap0` имена.
+Doctor bundle теперь разделяет cleanup leftovers (`netstack`) и runtime
+apply/status verification (`netstack_runtime`), чтобы stopped runtime не
+выглядел как failed rules.
+Runtime netstack verification failure теперь попадает и в doctor summary, а не
+только в сырой payload.
+Daemon advertises `netstack.runtime.verify.v1`, чтобы APK/diagnostics могли
+отличать runtime apply/status checks от cleanup verification.
+Daemon, module defaults и APK model defaults выровнены на whitelist/per-app
+режим, без proxy-all как implicit empty-state.
 
 Не делать:
 
@@ -191,11 +231,22 @@ diagnostic privacy surface.
 - APK/module mismatch.
 - summary в diagnostic bundle сразу показывает health/privacy/compatibility
   issues, TCP-only node-test и необходимость reboot после cleanup leftovers.
+- diagnostic/status payload показывает `active_node_mode` (`auto_selector`,
+  `manual`, `single_node`, `manual_missing`), а Dashboard отображает auto/manual
+  понятным текстом.
+- UI formatter локализует `NETSTACK_VERIFY_FAILED` и
+  `NETSTACK_CLEANUP_FAILED`, чтобы typed runtime errors не выпадали английским
+  debug-сообщением.
+- Reset summary показывает warnings даже когда отдельные шаги формально `ok`,
+  чтобы `clean_with_warnings` не выглядел пустым результатом.
+- Кнопка `Скопировать отчёт` всегда запрашивает свежий diagnostic bundle и не
+  подменяет его ранее открытыми runtime logs.
 
 Отчёт должен быть redacted по умолчанию.
 
 Текущий redaction contract: credentials/keys/passwords/UUID скрываются,
-а server/port/SNI остаются видимыми для диагностики маршрута.
+включая WireGuard/Amnezia `pre_shared_key`/`preshared_key`/`psk`, а
+server/port/SNI остаются видимыми для диагностики маршрута.
 
 ### M6. Feature roadmap after stabilization
 
@@ -203,12 +254,27 @@ diagnostic privacy surface.
 
 1. selector + manual override; начальный slice сделан: `proxy` рендерится как
    selector, `auto` остаётся `urltest`, active node становится selector default.
-2. speed/throughput probes;
+   UI-slice тоже сделан: список серверов умеет переключать `Авто` /
+   `Вручную`, где `Авто` очищает `active_node_id`, а выбор карточки задаёт
+   manual override. APK config bridge сохраняет пустой `active_node_id` как
+   auto-mode для `panel.nodes`, а не подставляет первый сервер после refresh.
+2. speed/throughput probes; начальный slice сделан: прозрачная URL-проба
+   возвращает `responseBytes/throughputBps`, если probe URL отдаёт тело, а
+   Clash delay остаётся честным latency-only. UI-slice тоже сделан: список
+   серверов показывает скорость и умеет сортировать по throughput.
 3. per-app groups; начальный renderer-slice сделан: `panel.nodes[].group`
    протягивается в daemon profile и создаёт group selector/urltest outbounds
-   без изменения дефолтного маршрута.
-4. WireGuard outbound import/render without kernel WG interface;
-5. hotspot/sharing mode.
+   без изменения дефолтного маршрута. Следующий slice тоже сделан на уровне
+   config/renderer: `apps.app_groups` задаёт package -> node group и рендерит
+   `package_name` route rules на group selector. UI-slice тоже сделан:
+   App picker может назначать package -> node group.
+4. WireGuard outbound import/render without kernel WG interface; начальный slice
+   сделан: WireGuard config text/encoded URI импортируется как node, daemon
+   рендерит sing-box `wireguard` outbound без `interface_name`/kernel WG.
+5. hotspot/sharing mode; начальный control-plane slice сделан:
+   `sharing.enabled/interfaces` протянуты в daemon/APK config, а
+   `net_handler.sh` добавляет tethering TPROXY rules только при
+   `SHARING_MODE=hotspot`. UI-slice тоже сделан в Settings.
 
 ## Этап 1. Stabilize current multi-outbound layer
 

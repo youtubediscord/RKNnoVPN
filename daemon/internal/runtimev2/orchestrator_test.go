@@ -33,6 +33,7 @@ func TestPhaseFromHealthUsesStableFailureCodeForStage(t *testing.T) {
 	}{
 		{name: "tproxy", code: "TPROXY_PORT_DOWN", want: PhaseCoreSpawned},
 		{name: "rules", code: "RULES_NOT_APPLIED", want: PhaseCoreListening},
+		{name: "netstack cleanup", code: "NETSTACK_CLEANUP_FAILED", want: PhaseCoreListening},
 		{name: "dns listener", code: "DNS_LISTENER_DOWN", want: PhaseCoreListening},
 		{name: "api listener", code: "API_PORT_DOWN", want: PhaseCoreListening},
 		{name: "dns upstream", code: "DNS_LOOKUP_TIMEOUT", want: PhaseDNSApplied},
@@ -78,9 +79,10 @@ func TestStopCallsBackendEvenWhenAppliedPhaseStopped(t *testing.T) {
 }
 
 func TestStartErrorUsesCodedRuntimePhase(t *testing.T) {
+	stageReport := map[string]interface{}{"failedStage": "netstack-apply"}
 	backend := &fakeBackend{
 		kind:     BackendRootTProxy,
-		startErr: codedTestError{code: "RULES_NOT_APPLIED", message: "iptables start failed"},
+		startErr: codedTestError{code: "RULES_NOT_APPLIED", message: "iptables start failed", userMessage: "Routing rules failed.", debug: "iptables exit status 1", rollbackApplied: true, stageReport: stageReport},
 	}
 	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
 
@@ -93,6 +95,18 @@ func TestStartErrorUsesCodedRuntimePhase(t *testing.T) {
 	}
 	if status.AppliedState.Phase != PhaseCoreListening {
 		t.Fatalf("expected phase %s, got %#v", PhaseCoreListening, status.AppliedState)
+	}
+	if status.Health.LastUserMessage != "Routing rules failed." {
+		t.Fatalf("expected user message, got %#v", status.Health)
+	}
+	if status.Health.LastDebug != "iptables exit status 1" {
+		t.Fatalf("expected debug detail, got %#v", status.Health)
+	}
+	if !status.Health.RollbackApplied {
+		t.Fatalf("expected rollback flag, got %#v", status.Health)
+	}
+	if status.Health.StageReport == nil {
+		t.Fatalf("expected stage report, got %#v", status.Health)
 	}
 }
 
@@ -123,9 +137,19 @@ func (f *fakeBackend) TestNodes(DesiredState, string, int, []string) ([]NodeProb
 }
 
 type codedTestError struct {
-	code    string
-	message string
+	code            string
+	message         string
+	userMessage     string
+	debug           string
+	rollbackApplied bool
+	stageReport     interface{}
 }
 
-func (e codedTestError) Error() string       { return e.message }
-func (e codedTestError) RuntimeCode() string { return e.code }
+func (e codedTestError) Error() string                { return e.message }
+func (e codedTestError) RuntimeCode() string          { return e.code }
+func (e codedTestError) RuntimeUserMessage() string   { return e.userMessage }
+func (e codedTestError) RuntimeDebug() string         { return e.debug }
+func (e codedTestError) RuntimeRollbackApplied() bool { return e.rollbackApplied }
+func (e codedTestError) RuntimeStageReport() interface{} {
+	return e.stageReport
+}

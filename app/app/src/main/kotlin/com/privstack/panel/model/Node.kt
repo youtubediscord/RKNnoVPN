@@ -26,6 +26,8 @@ data class Node(
     val latencyMs: Int? = null,
     /** URL response delay through the outbound, null if never tested or core is stopped. */
     val responseMs: Int? = null,
+    /** Optional measured response throughput in bytes/sec when the probe URL has a body. */
+    val throughputBps: Long? = null,
     val testStatus: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 ) {
@@ -42,7 +44,8 @@ enum class Protocol {
     SHADOWSOCKS,
     SOCKS,
     HYSTERIA2,
-    TUIC;
+    TUIC,
+    WIREGUARD;
 
     companion object {
         /**
@@ -57,6 +60,7 @@ enum class Protocol {
             "socks", "socks4", "socks4a", "socks5" -> SOCKS
             "hysteria2", "hy2" -> HYSTERIA2
             "tuic" -> TUIC
+            "wg", "wireguard" -> WIREGUARD
             else -> null
         }
     }

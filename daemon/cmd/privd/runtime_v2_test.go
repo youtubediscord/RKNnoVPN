@@ -2,8 +2,9 @@ package main
 
 import (
 	"errors"
-	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -47,6 +50,38 @@ func TestBuildRuntimeV2HealthSnapshotSeparatesOperationalFailures(t *testing.T) 
 	}
 	if got := snapshot.Checks["dns"].Code; got != "DNS_LOOKUP_TIMEOUT" {
 		t.Fatalf("expected DNS check code in structured checks, got %q", got)
+	}
+}
+
+func TestBuildRuntimeV2HealthSnapshotIncludesLatestStageReport(t *testing.T) {
+	cfg := config.DefaultConfig()
+	manager := core.NewCoreManager(cfg, t.TempDir(), nil)
+	manager.SetState(core.StateRunning)
+	d := &daemon{coreMgr: manager}
+
+	report := core.NewRuntimeStageReport("apply config")
+	report.AddStage("wait-dns", "failed", "DNS_LISTENER_DOWN", "dns listener down", false)
+	d.setLastReloadReport(report)
+
+	result := &health.HealthResult{
+		Timestamp: time.Now(),
+		Overall:   false,
+		Checks: map[string]health.CheckResult{
+			"singbox_alive": {Pass: true, Detail: "alive"},
+			"tproxy_port":   {Pass: true, Detail: "listening"},
+			"iptables":      {Pass: true, Detail: "iptables"},
+			"routing":       {Pass: true, Detail: "routing"},
+			"dns_listener":  {Pass: false, Detail: "listener down", Code: "DNS_LISTENER_DOWN"},
+		},
+	}
+
+	snapshot := d.buildRuntimeV2HealthSnapshot(result, false)
+	stageReport, ok := snapshot.StageReport.(core.RuntimeStageReport)
+	if !ok {
+		t.Fatalf("expected core stage report, got %T", snapshot.StageReport)
+	}
+	if stageReport.FailedStage != "wait-dns" || stageReport.LastCode != "DNS_LISTENER_DOWN" {
+		t.Fatalf("unexpected stage report: %#v", stageReport)
 	}
 }
 
@@ -285,6 +320,122 @@ func TestRemoveStaleRuntimeFilesIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestResetNetworkStateReportSuccessIsStructuredAndIdempotent(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	for _, name := range []string{"singbox.pid", "active", "net_change.lock"} {
+		if err := os.WriteFile(filepath.Join(d.dataDir, "run", name), []byte("stale\n"), 0640); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report := d.resetNetworkStateReport(7, runtimev2.BackendRootTProxy)
+	if report.Status != "ok" {
+		t.Fatalf("expected ok reset report, got %#v", report)
+	}
+	if report.RebootRequired {
+		t.Fatalf("clean reset must not require reboot: %#v", report)
+	}
+	for _, stepName := range []string{"enter-reset-mode", "stop-subsystems", "stop-core", "rescue-cleanup-script", "clear-runtime-state", "remove-stale-runtime-files", "verify-cleanup", "leave-reset-mode"} {
+		if !resetReportHasStep(report, stepName) {
+			t.Fatalf("reset report missing step %s: %#v", stepName, report.Steps)
+		}
+	}
+
+	report = d.resetNetworkStateReport(8, runtimev2.BackendRootTProxy)
+	if report.Status != "ok" {
+		t.Fatalf("second reset should stay ok, got %#v", report)
+	}
+	if step := resetReportStep(report, "remove-stale-runtime-files"); step.Status != "already_clean" {
+		t.Fatalf("second reset should report already_clean stale files, got %#v", step)
+	}
+}
+
+func TestResetNetworkStateReportLeftoversAreWarningsAndRequireReboot(t *testing.T) {
+	d := newTestResetDaemon(t, []string{"iptables mangle rule remains: -A PRIVSTACK_PRE"}, true)
+
+	report := d.resetNetworkStateReport(9, runtimev2.BackendRootTProxy)
+	if report.Status != "clean_with_warnings" {
+		t.Fatalf("leftovers should make reset clean_with_warnings, got %#v", report)
+	}
+	if !report.RebootRequired {
+		t.Fatalf("leftovers should require reboot: %#v", report)
+	}
+	if len(report.Leftovers) != 1 {
+		t.Fatalf("expected leftovers in report, got %#v", report.Leftovers)
+	}
+	if len(report.Errors) != 0 {
+		t.Fatalf("leftovers should not be hard errors, got %#v", report.Errors)
+	}
+	if len(report.Warnings) == 0 {
+		t.Fatalf("leftovers should be warnings, got %#v", report)
+	}
+	if step := resetReportStep(report, "verify-cleanup"); step.Status != "warning" {
+		t.Fatalf("verify-cleanup should warn on leftovers, got %#v", step)
+	}
+}
+
+func TestResetNetworkStateReportMissingRescueScriptIsNoop(t *testing.T) {
+	d := newTestResetDaemon(t, nil, false)
+
+	report := d.resetNetworkStateReport(10, runtimev2.BackendRootTProxy)
+	if report.Status != "ok" {
+		t.Fatalf("missing rescue script should not fail reset, got %#v", report)
+	}
+	if step := resetReportStep(report, "rescue-cleanup-script"); step.Status != "already_clean" {
+		t.Fatalf("missing rescue script should be already_clean, got %#v", step)
+	}
+}
+
+func newTestResetDaemon(t *testing.T, leftovers []string, withRescueScript bool) *daemon {
+	t.Helper()
+	dataDir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.Proxy.APIPort = 0
+	if err := os.MkdirAll(filepath.Join(dataDir, "run"), 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, "config"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	scriptsDir := filepath.Join(dataDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"dns.sh", "iptables.sh"} {
+		if err := os.WriteFile(filepath.Join(scriptsDir, name), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if withRescueScript {
+		if err := os.WriteFile(filepath.Join(scriptsDir, "rescue_reset.sh"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	coreMgr := core.NewCoreManager(cfg, dataDir, log.New(os.Stderr, "", 0))
+	healthMon := health.NewHealthMonitor(coreMgr, time.Hour, 3, cfg.Proxy.TProxyPort, cfg.Proxy.DNSPort, cfg.Proxy.Mark, cfg.Health.URL, time.Second, nil)
+	return &daemon{
+		cfg:                      cfg,
+		dataDir:                  dataDir,
+		coreMgr:                  coreMgr,
+		healthMon:                healthMon,
+		rescueMgr:                rescue.NewRescueManager(coreMgr, cfg, dataDir, 3, time.Second, nil),
+		collectLeftoversOverride: func(*config.Config) []string { return leftovers },
+	}
+}
+
+func resetReportHasStep(report runtimev2.ResetReport, name string) bool {
+	return resetReportStep(report, name).Name != ""
+}
+
+func resetReportStep(report runtimev2.ResetReport, name string) runtimev2.ResetStep {
+	for _, step := range report.Steps {
+		if step.Name == name {
+			return step
+		}
+	}
+	return runtimev2.ResetStep{}
+}
+
 func TestBuildScriptEnvUsesExplicitDNSScopeForBlacklist(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Apps.Mode = "blacklist"
@@ -313,6 +464,63 @@ func TestBuildScriptEnvUsesExplicitDNSScopeForWhitelist(t *testing.T) {
 	}
 	if env["DIRECT_UIDS"] != "" {
 		t.Fatalf("whitelist mode must not put selected packages into DIRECT_UIDS: %q", env["DIRECT_UIDS"])
+	}
+}
+
+func TestBuildScriptEnvIncludesLocalHelperPorts(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Panel.Inbounds = []byte(`{"socksPort":10808,"httpPort":10809}`)
+
+	env := buildScriptEnv(cfg, t.TempDir())
+	if env["SOCKS_PORT"] != "10808" {
+		t.Fatalf("expected SOCKS_PORT=10808, got %q", env["SOCKS_PORT"])
+	}
+	if env["HTTP_PORT"] != "10809" {
+		t.Fatalf("expected HTTP_PORT=10809, got %q", env["HTTP_PORT"])
+	}
+}
+
+func TestBuildScriptEnvDisablesLocalHelperPortsByDefault(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	env := buildScriptEnv(cfg, t.TempDir())
+	if env["SOCKS_PORT"] != "0" {
+		t.Fatalf("default SOCKS_PORT must stay disabled, got %q", env["SOCKS_PORT"])
+	}
+	if env["HTTP_PORT"] != "0" {
+		t.Fatalf("default HTTP_PORT must stay disabled, got %q", env["HTTP_PORT"])
+	}
+}
+
+func TestReloadReportAccessorsPreserveLastReport(t *testing.T) {
+	d := &daemon{}
+	report := core.NewRuntimeStageReport("apply config")
+	report.AddStage("hot-swap", "ok", "", "", false)
+	report.FinishOK()
+
+	d.setLastReloadReport(report)
+	got := d.LastReloadReport()
+	if got.Operation != "apply config" || got.Status != "ok" || len(got.Stages) != 1 {
+		t.Fatalf("unexpected reload report: %#v", got)
+	}
+}
+
+func TestRuntimeErrorCodePrefersTypedNetstackCode(t *testing.T) {
+	err := &netstack.Error{
+		Operation: "apply",
+		Code:      "DNS_APPLY_FAILED",
+		Report: netstack.Report{
+			Operation: "apply",
+			Status:    "failed",
+			Errors:    []string{"dns-start: failed"},
+		},
+	}
+
+	if got := runtimeErrorCode(err, "fallback"); got != "DNS_APPLY_FAILED" {
+		t.Fatalf("expected DNS_APPLY_FAILED, got %q", got)
+	}
+	if got := runtimeErrorCode(errors.New("plain"), "fallback"); got != "fallback" {
+		t.Fatalf("expected fallback, got %q", got)
 	}
 }
 
@@ -350,15 +558,5 @@ func TestReadLogTailReturnsBoundedTail(t *testing.T) {
 	}
 	if got := strings.Join(lines, ","); got != "three,four" {
 		t.Fatalf("unexpected tail: %q", got)
-	}
-}
-
-func TestMissingCommandErrorIsIgnorableForOptionalIptablesVariants(t *testing.T) {
-	err := fmt.Errorf(`exec: "iptables-nft": executable file not found in $PATH`)
-	if !isMissingCommandError(err) {
-		t.Fatalf("expected missing optional command to be ignorable")
-	}
-	if isMissingCommandError(errors.New("exit status 1")) {
-		t.Fatalf("real command failure must not be ignored")
 	}
 }

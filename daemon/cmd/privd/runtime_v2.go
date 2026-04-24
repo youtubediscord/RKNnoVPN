@@ -15,6 +15,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -280,6 +281,9 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 		CoreReady: state == core.StateRunning,
 		CheckedAt: time.Now(),
 	}
+	if stageReport := d.latestRuntimeStageReport(); !stageReport.Empty() {
+		snapshot.StageReport = stageReport
+	}
 	if state == core.StateDegraded {
 		snapshot.CoreReady = true
 	}
@@ -347,6 +351,34 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 		snapshot.LastError = diagnostic.Detail
 	}
 	return snapshot
+}
+
+func (d *daemon) latestRuntimeStageReport() core.RuntimeStageReport {
+	if d == nil {
+		return core.RuntimeStageReport{}
+	}
+	candidates := make([]core.RuntimeStageReport, 0, 3)
+	if d.coreMgr != nil {
+		candidates = append(candidates, d.coreMgr.LastRuntimeReport(), d.coreMgr.LastStartReport())
+	}
+	candidates = append(candidates, d.LastReloadReport())
+
+	var latest core.RuntimeStageReport
+	var latestAt time.Time
+	for _, report := range candidates {
+		if report.Empty() {
+			continue
+		}
+		reportAt := report.FinishedAt
+		if reportAt.IsZero() {
+			reportAt = report.StartedAt
+		}
+		if latest.Empty() || reportAt.After(latestAt) {
+			latest = report
+			latestAt = reportAt
+		}
+	}
+	return latest
 }
 
 func runtimeHealthChecks(result *health.HealthResult) map[string]runtimev2.HealthCheckSnapshot {
@@ -477,8 +509,15 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 	d.mu.Unlock()
 	env := buildScriptEnv(cfg, d.dataDir)
 
-	runSimpleStep("rescue-cleanup-script", func() error {
-		return core.ExecScript(filepath.Join(d.dataDir, "scripts", "rescue_reset.sh"), "daemon-reset", env)
+	runStep("rescue-cleanup-script", func() (string, string, error) {
+		err := core.ExecScript(filepath.Join(d.dataDir, "scripts", "rescue_reset.sh"), "daemon-reset", env)
+		if isIgnorableResetScriptError(err) {
+			return "already_clean", err.Error(), nil
+		}
+		if err != nil {
+			return "", "", err
+		}
+		return "ok", "", nil
 	})
 
 	runStep("clear-runtime-state", func() (string, string, error) {
@@ -507,16 +546,18 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 			return "ok", "", nil
 		}
 		report.RebootRequired = true
-		return "failed", strings.Join(leftovers, "; "), fmt.Errorf("%d leftover(s) after reset", len(leftovers))
+		report.Warnings = append(report.Warnings, fmt.Sprintf("verify-cleanup: %d leftover(s) after reset", len(leftovers)))
+		return "warning", strings.Join(leftovers, "; "), nil
 	})
 
 	runSimpleStep("leave-reset-mode", d.leaveResetMode)
 
 	if len(report.Errors) > 0 {
 		report.Status = "partial"
+	} else if len(report.Warnings) > 0 || len(report.Leftovers) > 0 {
+		report.Status = "clean_with_warnings"
 	}
 	if len(report.Leftovers) > 0 {
-		report.Status = "partial"
 		report.RebootRequired = true
 	}
 	return report
@@ -609,161 +650,26 @@ func (d *daemon) removeStaleRuntimeFiles() ([]string, error) {
 }
 
 func (d *daemon) collectNetworkLeftovers(cfg *config.Config) []string {
+	if d.collectLeftoversOverride != nil {
+		return d.collectLeftoversOverride(cfg)
+	}
 	if cfg == nil {
 		return []string{"config unavailable for cleanup verification"}
 	}
-
 	env := buildScriptEnv(cfg, d.dataDir)
-	leftovers := make([]string, 0)
-	add := func(format string, args ...interface{}) {
-		leftovers = append(leftovers, fmt.Sprintf(format, args...))
-	}
-
-	for _, spec := range []struct {
-		bin   string
-		table string
-	}{
-		{bin: "iptables", table: "raw"},
-		{bin: "iptables", table: "mangle"},
-		{bin: "iptables", table: "nat"},
-		{bin: "iptables", table: "filter"},
-		{bin: "ip6tables", table: "raw"},
-		{bin: "ip6tables", table: "mangle"},
-		{bin: "ip6tables", table: "nat"},
-		{bin: "ip6tables", table: "filter"},
-		{bin: "iptables-legacy", table: "raw"},
-		{bin: "iptables-legacy", table: "mangle"},
-		{bin: "iptables-legacy", table: "nat"},
-		{bin: "iptables-legacy", table: "filter"},
-		{bin: "ip6tables-legacy", table: "raw"},
-		{bin: "ip6tables-legacy", table: "mangle"},
-		{bin: "ip6tables-legacy", table: "nat"},
-		{bin: "ip6tables-legacy", table: "filter"},
-		{bin: "iptables-nft", table: "raw"},
-		{bin: "iptables-nft", table: "mangle"},
-		{bin: "iptables-nft", table: "nat"},
-		{bin: "iptables-nft", table: "filter"},
-		{bin: "ip6tables-nft", table: "raw"},
-		{bin: "ip6tables-nft", table: "mangle"},
-		{bin: "ip6tables-nft", table: "nat"},
-		{bin: "ip6tables-nft", table: "filter"},
-	} {
-		out, err := core.ExecCommand(spec.bin, "-w", "100", "-t", spec.table, "-S")
-		if err != nil {
-			if isMissingCommandError(err) {
-				continue
-			}
-			if isMissingKernelTableOutput(out) {
-				continue
-			}
-			if strings.TrimSpace(out) != "" {
-				add("%s %s check failed: %v: %s", spec.bin, spec.table, err, firstLine(out))
-			} else {
-				add("%s %s check failed: %v", spec.bin, spec.table, err)
-			}
-			continue
-		}
-		if line := firstLineContaining(out, "PRIVSTACK"); line != "" {
-			add("%s %s rule remains: %s", spec.bin, spec.table, line)
-		}
-	}
-
-	mark := strings.ToLower(env["FWMARK"])
-	routeTable := env["ROUTE_TABLE"]
-	routeTableV6 := env["ROUTE_TABLE_V6"]
-	for _, spec := range []struct {
-		name  string
-		args  []string
-		table string
-	}{
-		{name: "ip rule", args: []string{"rule", "show"}, table: routeTable},
-		{name: "ip -6 rule", args: []string{"-6", "rule", "show"}, table: routeTableV6},
-	} {
-		out, err := core.ExecCommand("ip", spec.args...)
-		if err != nil {
-			add("%s check failed: %v", spec.name, err)
-			continue
-		}
-		for _, line := range splitLines(out) {
-			lower := strings.ToLower(line)
-			if strings.Contains(lower, mark) || strings.Contains(lower, "lookup "+spec.table) {
-				add("%s remains: %s", spec.name, strings.TrimSpace(line))
-				break
-			}
-		}
-	}
-
-	for _, spec := range []struct {
-		name string
-		args []string
-	}{
-		{name: "ip route table " + routeTable, args: []string{"route", "show", "table", routeTable}},
-		{name: "ip -6 route table " + routeTableV6, args: []string{"-6", "route", "show", "table", routeTableV6}},
-	} {
-		out, err := core.ExecCommand("ip", spec.args...)
-		if err != nil {
-			if isMissingRouteTableOutput(out) {
-				continue
-			}
-			if strings.TrimSpace(out) == "" {
-				add("%s check failed: %v", spec.name, err)
-			} else {
-				add("%s check failed: %v: %s", spec.name, err, firstLine(out))
-			}
-			continue
-		}
-		if strings.TrimSpace(out) != "" {
-			add("%s still has routes: %s", spec.name, firstLine(out))
-		}
-	}
-
-	if out, _ := core.ExecCommand("pidof", "sing-box"); strings.TrimSpace(out) != "" {
-		add("sing-box process still running: %s", strings.TrimSpace(out))
-	}
-
-	for _, port := range effectiveLocalPorts(cfg) {
-		if isTCPPortListening("127.0.0.1", port, 150*time.Millisecond) {
-			add("localhost TCP port %d still listening", port)
-		}
-	}
-
-	for _, path := range []string{
-		filepath.Join(d.dataDir, "run", "singbox.pid"),
-		filepath.Join(d.dataDir, "run", "active"),
-		filepath.Join(d.dataDir, "run", "net_change.lock"),
-		filepath.Join(d.dataDir, "run", "iptables.rules"),
-		filepath.Join(d.dataDir, "run", "ip6tables.rules"),
-		filepath.Join(d.dataDir, "run", "env.sh"),
-	} {
-		if _, err := os.Stat(path); err == nil {
-			add("stale runtime file remains: %s", path)
-		}
-	}
-
-	return leftovers
+	report := netstack.New(d.dataDir, env, core.ExecScript).
+		WithExecCommand(core.ExecCommand).
+		VerifyCleanup()
+	return report.Leftovers
 }
 
-func isMissingKernelTableOutput(output string) bool {
-	lower := strings.ToLower(output)
-	return strings.Contains(lower, "table does not exist") ||
-		strings.Contains(lower, "can't initialize") ||
-		strings.Contains(lower, "does not exist")
-}
-
-func isMissingCommandError(err error) bool {
+func isIgnorableResetScriptError(err error) bool {
 	if err == nil {
 		return false
 	}
 	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "executable file not found") ||
+	return strings.Contains(lower, "script not found:") ||
 		strings.Contains(lower, "no such file or directory")
-}
-
-func isMissingRouteTableOutput(output string) bool {
-	lower := strings.ToLower(output)
-	return strings.Contains(lower, "fib table does not exist") ||
-		strings.Contains(lower, "no such process") ||
-		strings.Contains(lower, "no such file")
 }
 
 func effectiveLocalPorts(cfg *config.Config) []int {
@@ -1018,14 +924,15 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 		}
 
 		result := runtimev2.NodeProbeResult{
-			ID:        profile.ID,
-			Name:      firstNonEmpty(profile.Name, profile.Tag, profile.Address),
-			Protocol:  profile.Protocol,
-			Server:    profile.Address,
-			Port:      profile.Port,
-			TCPStatus: "not_run",
-			URLStatus: "not_run",
-			Verdict:   "unknown",
+			ID:               profile.ID,
+			Name:             firstNonEmpty(profile.Name, profile.Tag, profile.Address),
+			Protocol:         profile.Protocol,
+			Server:           profile.Address,
+			Port:             profile.Port,
+			TCPStatus:        "not_run",
+			URLStatus:        "not_run",
+			ThroughputStatus: "not_run",
+			Verdict:          "unknown",
 		}
 
 		tcpMS, tcpErr := testTCPConnect(profile.Address, profile.Port, timeout)
@@ -1047,10 +954,25 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 			var urlErr error
 			if apiPort > 0 {
 				urlMS, _, urlErr = testClashDelay(apiPort, profile.Tag, testURL, timeoutMS)
+				result.ThroughputStatus = "latency_only"
 			} else if len(profiles) == 1 {
-				urlMS, _, urlErr = testTransparentURLDelay(cfg, testURL, timeoutMS)
+				metrics, err := testTransparentURLProbe(cfg, testURL, timeoutMS)
+				urlErr = err
+				urlMS = metrics.LatencyMS
+				if metrics.ResponseBytes > 0 {
+					responseBytes := metrics.ResponseBytes
+					result.ResponseBytes = &responseBytes
+				}
+				if metrics.ThroughputBps > 0 {
+					throughputBps := metrics.ThroughputBps
+					result.ThroughputBps = &throughputBps
+					result.ThroughputStatus = "ok"
+				} else {
+					result.ThroughputStatus = "latency_only"
+				}
 			} else {
 				urlErr = fmt.Errorf("api_disabled")
+				result.ThroughputStatus = "unavailable"
 			}
 			if urlErr == nil {
 				result.TunnelDelay = &urlMS
@@ -1059,6 +981,9 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 				result.ErrorClass = "ok"
 			} else {
 				result.URLStatus = "fail"
+				if result.ThroughputStatus == "not_run" {
+					result.ThroughputStatus = "unavailable"
+				}
 				result.Verdict = "unusable"
 				result.ErrorDetail = urlErr.Error()
 				if result.ErrorClass == "" {

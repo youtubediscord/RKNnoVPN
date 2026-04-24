@@ -133,6 +133,8 @@ class AppClassifier @Inject constructor() {
         "com.v2ray.ang" to AppCategory.VPN_PROXY,
         "io.nekohasekai.sfa" to AppCategory.VPN_PROXY,
         "io.nekohasekai.sagernet" to AppCategory.VPN_PROXY,
+        "com.notcvnt.rknhardering" to AppCategory.VPN_PROXY,
+        "com.yourvpndead" to AppCategory.VPN_PROXY,
 
         // System
         "com.android.vending" to AppCategory.SYSTEM,

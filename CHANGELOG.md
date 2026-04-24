@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.7.0
+
+- Reworked root TPROXY runtime recovery with structured reset reports, netstack cleanup verification, and idempotent rescue behavior.
+- Added `privctl doctor` diagnostics with redacted configs/logs, compatibility metadata, release integrity, netstack leftovers, node-test summary, and runtime stage reports.
+- Hardened APK/module/daemon compatibility checks before mutating actions, including repair-safe reset handling.
+- Split readiness, DNS, routing, egress, and node-test verdicts so TCP-only servers are not treated as usable routes.
+- Kept production privacy defaults off for localhost SOCKS/HTTP/API helpers and tightened APK privacy guardrails.
+
 ## v1.6.4
 
 - Split hard runtime readiness from soft DNS and egress diagnostics so cold-start DNS timeouts leave the runtime connected but degraded.

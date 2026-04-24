@@ -138,6 +138,8 @@ object AppTemplates {
             "com.v2ray.ang",
             "io.nekohasekai.sfa",
             "io.nekohasekai.sagernet",
+            "com.notcvnt.rknhardering",
+            "com.yourvpndead",
         ),
     )
 

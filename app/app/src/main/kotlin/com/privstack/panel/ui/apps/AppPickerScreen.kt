@@ -32,14 +32,20 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -262,7 +268,9 @@ fun AppPickerScreen(
                             app = app,
                             enabled = state.supportsPerAppSelection && !app.isAlwaysDirect,
                             routingMode = state.routingMode,
+                            nodeGroups = state.nodeGroups,
                             onToggle = { viewModel.toggleApp(app.packageName) },
+                            onGroupChange = { group -> viewModel.setAppGroup(app.packageName, group) },
                         )
                     }
                 }
@@ -290,8 +298,11 @@ private fun AppRow(
     app: AppInfo,
     enabled: Boolean,
     routingMode: RoutingMode,
+    nodeGroups: List<String>,
     onToggle: () -> Unit,
+    onGroupChange: (String) -> Unit,
 ) {
+    var groupMenuExpanded by remember(app.packageName) { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -331,6 +342,41 @@ private fun AppRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+            if (enabled && nodeGroups.isNotEmpty() && !app.isAlwaysDirect) {
+                Box {
+                    TextButton(
+                        enabled = enabled,
+                        onClick = { groupMenuExpanded = true },
+                    ) {
+                        Text(
+                            text = app.nodeGroup.ifBlank { stringResource(R.string.app_group_route_none) },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = groupMenuExpanded,
+                        onDismissRequest = { groupMenuExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.app_group_route_none)) },
+                            onClick = {
+                                onGroupChange("")
+                                groupMenuExpanded = false
+                            },
+                        )
+                        nodeGroups.forEach { group ->
+                            DropdownMenuItem(
+                                text = { Text(group) },
+                                onClick = {
+                                    onGroupChange(group)
+                                    groupMenuExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
 

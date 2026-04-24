@@ -65,14 +65,18 @@ type AppliedState struct {
 }
 
 type HealthSnapshot struct {
-	CoreReady    bool                           `json:"coreReady"`
-	DNSReady     bool                           `json:"dnsReady"`
-	RoutingReady bool                           `json:"routingReady"`
-	EgressReady  bool                           `json:"egressReady"`
-	LastCode     string                         `json:"lastCode,omitempty"`
-	LastError    string                         `json:"lastError,omitempty"`
-	CheckedAt    time.Time                      `json:"checkedAt,omitempty"`
-	Checks       map[string]HealthCheckSnapshot `json:"checks,omitempty"`
+	CoreReady       bool                           `json:"coreReady"`
+	DNSReady        bool                           `json:"dnsReady"`
+	RoutingReady    bool                           `json:"routingReady"`
+	EgressReady     bool                           `json:"egressReady"`
+	LastCode        string                         `json:"lastCode,omitempty"`
+	LastError       string                         `json:"lastError,omitempty"`
+	LastUserMessage string                         `json:"lastUserMessage,omitempty"`
+	LastDebug       string                         `json:"lastDebug,omitempty"`
+	RollbackApplied bool                           `json:"rollbackApplied,omitempty"`
+	StageReport     interface{}                    `json:"stageReport,omitempty"`
+	CheckedAt       time.Time                      `json:"checkedAt,omitempty"`
+	Checks          map[string]HealthCheckSnapshot `json:"checks,omitempty"`
 }
 
 func (h HealthSnapshot) Healthy() bool {
@@ -100,25 +104,29 @@ type ResetReport struct {
 	Generation     int64       `json:"generation"`
 	Status         string      `json:"status"`
 	Steps          []ResetStep `json:"steps"`
+	Warnings       []string    `json:"warnings,omitempty"`
 	Errors         []string    `json:"errors,omitempty"`
 	Leftovers      []string    `json:"leftovers,omitempty"`
 	RebootRequired bool        `json:"rebootRequired"`
 }
 
 type NodeProbeResult struct {
-	ID           string `json:"id,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Protocol     string `json:"protocol,omitempty"`
-	Server       string `json:"server,omitempty"`
-	Port         int    `json:"port,omitempty"`
-	TCPDirect    *int64 `json:"tcpDirect,omitempty"`
-	TunnelDelay  *int64 `json:"tunnelDelay,omitempty"`
-	DNSBootstrap bool   `json:"dnsBootstrap"`
-	TCPStatus    string `json:"tcpStatus,omitempty"`
-	URLStatus    string `json:"urlStatus,omitempty"`
-	Verdict      string `json:"verdict,omitempty"`
-	ErrorClass   string `json:"errorClass,omitempty"`
-	ErrorDetail  string `json:"errorDetail,omitempty"`
+	ID               string `json:"id,omitempty"`
+	Name             string `json:"name,omitempty"`
+	Protocol         string `json:"protocol,omitempty"`
+	Server           string `json:"server,omitempty"`
+	Port             int    `json:"port,omitempty"`
+	TCPDirect        *int64 `json:"tcpDirect,omitempty"`
+	TunnelDelay      *int64 `json:"tunnelDelay,omitempty"`
+	ResponseBytes    *int64 `json:"responseBytes,omitempty"`
+	ThroughputBps    *int64 `json:"throughputBps,omitempty"`
+	DNSBootstrap     bool   `json:"dnsBootstrap"`
+	TCPStatus        string `json:"tcpStatus,omitempty"`
+	URLStatus        string `json:"urlStatus,omitempty"`
+	ThroughputStatus string `json:"throughputStatus,omitempty"`
+	Verdict          string `json:"verdict,omitempty"`
+	ErrorClass       string `json:"errorClass,omitempty"`
+	ErrorDetail      string `json:"errorDetail,omitempty"`
 }
 
 type DiagnosticsSnapshot struct {

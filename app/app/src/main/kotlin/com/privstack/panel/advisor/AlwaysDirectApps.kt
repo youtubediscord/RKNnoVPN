@@ -61,6 +61,7 @@ object AlwaysDirectApps {
         "com.github.kr328.clash",
         "com.github.metacubex.clash.meta",
         "com.notcvnt.rknhardering",
+        "com.yourvpndead",
     )
 
     private val prefixes = listOf(

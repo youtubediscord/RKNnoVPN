@@ -40,12 +40,12 @@ data class PlacementRecommendation(
 
 /**
  * Recommends which Android profile (Personal vs Work) each installed app
- * should live in for optimal privacy and functionality when a system-wide
- * proxy / TUN is active.
+ * should live in for optimal privacy and functionality when root TPROXY
+ * routing is active.
  *
  * **General strategy:**
  * - Banking, Government, and Telecom apps should run in an isolated Work
- *   Profile where they cannot detect proxy tooling or TUN interfaces.
+ *   Profile where they are less exposed to proxy tooling and routing artifacts.
  * - Browsers, Social/Messaging, and Streaming apps benefit from proxy
  *   coverage and belong in the Personal profile.
  * - VPN/Proxy apps must remain in Personal (they are the proxy tooling).
@@ -105,8 +105,8 @@ class PlacementAdvisor @Inject constructor(
     ): PlacementRecommendation {
         val (recommended, reason) = when (app.category) {
             AppCategory.BANKING -> ProfilePlacement.WORK to
-                "Banking apps may refuse to run when they detect a TUN/VPN interface. " +
-                "Isolate in Work Profile to prevent detection."
+                "Banking apps may refuse to run when they detect VPN or proxy artifacts. " +
+                "Isolate in Work Profile to reduce exposure."
 
             AppCategory.GOVERNMENT -> ProfilePlacement.WORK to
                 "Government apps often perform environment checks. " +
@@ -126,7 +126,7 @@ class PlacementAdvisor @Inject constructor(
                 "Streaming apps may need the proxy to access geo-restricted content."
 
             AppCategory.VPN_PROXY -> ProfilePlacement.PERSONAL to
-                "Proxy/VPN tools must remain in the same profile as the TUN interface."
+                "Proxy/VPN tools should stay with the PrivStack control app and outside the proxied app set."
 
             AppCategory.SYSTEM -> ProfilePlacement.PERSONAL to
                 "System apps are managed by the OS and should not be moved."

@@ -30,7 +30,7 @@
 set -eu
 
 TAG="privstack:dns"
-SCRIPT_VERSION="v1.6.3"
+SCRIPT_VERSION="v1.7.0"
 
 # Sane defaults if the caller omitted something.
 DNS_PORT="${DNS_PORT:-10856}"
@@ -188,10 +188,44 @@ stop() {
     log "DNS interception stopped"
 }
 
+status() {
+    normalize_scope
+    if [ "$DNS_SCOPE" = "off" ]; then
+        log "DNS interception disabled by config"
+        return
+    fi
+
+    local missing=0
+    if ! iptables $IPT_WAIT -t nat -L "$NAT4_CHAIN" -n >/dev/null 2>&1; then
+        log "missing IPv4 DNS nat chain $NAT4_CHAIN"
+        missing=1
+    fi
+    if ! iptables $IPT_WAIT -t nat -C OUTPUT -j "$NAT4_CHAIN" >/dev/null 2>&1; then
+        log "missing IPv4 DNS OUTPUT hook for $NAT4_CHAIN"
+        missing=1
+    fi
+    if has_ipv6_nat; then
+        if ! ip6tables $IPT_WAIT -t nat -L "$NAT6_CHAIN" -n >/dev/null 2>&1; then
+            log "missing IPv6 DNS nat chain $NAT6_CHAIN"
+            missing=1
+        fi
+        if ! ip6tables $IPT_WAIT -t nat -C OUTPUT -j "$NAT6_CHAIN" >/dev/null 2>&1; then
+            log "missing IPv6 DNS OUTPUT hook for $NAT6_CHAIN"
+            missing=1
+        fi
+    fi
+
+    if [ "$missing" -ne 0 ]; then
+        exit 1
+    fi
+    log "DNS interception hooks are present"
+}
+
 # ── main dispatch ───────────────────────────────────────────────────────────
 
 case "${1:-}" in
     start) start ;;
     stop)  stop  ;;
-    *)     echo "Usage: $0 {start|stop}" >&2; exit 1 ;;
+    status) status ;;
+    *)     echo "Usage: $0 {start|stop|status}" >&2; exit 1 ;;
 esac

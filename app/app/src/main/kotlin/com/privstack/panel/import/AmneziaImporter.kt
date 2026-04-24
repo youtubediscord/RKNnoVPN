@@ -170,6 +170,11 @@ object AmneziaImporter {
                 val port = settings["port"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
                 address to port
             }
+            Protocol.WIREGUARD -> {
+                val address = settings["address"]?.jsonPrimitive?.content ?: return null
+                val port = settings["port"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
+                address to port
+            }
             else -> null
         }
     }

@@ -246,7 +246,9 @@ object SubscriptionHandler {
                 t.startsWith("vpn://", true) ||
                 t.startsWith("hysteria2://", true) ||
                 t.startsWith("hy2://", true) ||
-                t.startsWith("tuic://", true)
+                t.startsWith("tuic://", true) ||
+                t.startsWith("wireguard://", true) ||
+                t.startsWith("wg://", true)
         }
     }
 
@@ -299,6 +301,11 @@ object SubscriptionHandler {
                     val uuid = settings["uuid"]?.jsonPrimitive?.content ?: ""
                     val password = settings["password"]?.jsonPrimitive?.content ?: ""
                     "$uuid:$password"
+                }
+                Protocol.WIREGUARD -> {
+                    val privateKey = settings["private_key"]?.jsonPrimitive?.content ?: ""
+                    val peerPublicKey = settings["peer_public_key"]?.jsonPrimitive?.content ?: ""
+                    "$privateKey:$peerPublicKey"
                 }
                 else -> ""
             }

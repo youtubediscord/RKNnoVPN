@@ -2,6 +2,7 @@ package updater
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -592,8 +593,59 @@ func prepareVersionedRelease(staging string, stagedBinDir string, dataDir string
 	if err := os.Rename(tmp, releaseDir); err != nil {
 		return "", fmt.Errorf("publish release dir: %w", err)
 	}
+	if err := writeReleaseManifest(releaseDir, version); err != nil {
+		_ = os.RemoveAll(releaseDir)
+		return "", err
+	}
 	cleanup = false
 	return releaseDir, nil
+}
+
+type releaseManifest struct {
+	Version     string            `json:"version"`
+	InstalledAt string            `json:"installed_at"`
+	Files       map[string]string `json:"files_sha256"`
+}
+
+func writeReleaseManifest(releaseDir string, version string) error {
+	files := make(map[string]string)
+	if err := filepath.Walk(releaseDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) == "install-manifest.json" {
+			return nil
+		}
+		rel, err := filepath.Rel(releaseDir, path)
+		if err != nil {
+			return err
+		}
+		sum, err := sha256File(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(rel)] = sum
+		return nil
+	}); err != nil {
+		return fmt.Errorf("build release manifest: %w", err)
+	}
+	manifest := releaseManifest{
+		Version:     NormalizeVersionTag(version),
+		InstalledAt: time.Now().Format(time.RFC3339),
+		Files:       files,
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal release manifest: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(filepath.Join(releaseDir, "install-manifest.json"), data, 0640); err != nil {
+		return fmt.Errorf("write release manifest: %w", err)
+	}
+	return nil
 }
 
 func nextReleaseDir(releasesRoot string, version string) string {

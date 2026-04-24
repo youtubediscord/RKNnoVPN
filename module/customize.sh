@@ -11,7 +11,7 @@ PRIVSTACK_GID=23333
 MODULE_ID="privstack"
 
 # Subdirectories under /data/adb/privstack/
-SUBDIRS="bin config config/rendered scripts run logs backup profiles"
+SUBDIRS="bin config config/rendered scripts run logs backup profiles releases"
 
 # ============================================================================
 # Helpers
@@ -265,6 +265,139 @@ install_scripts() {
     done
 }
 
+file_sha256() {
+    file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" 2>/dev/null | awk '{print $1}'
+        return $?
+    fi
+    if [ -n "$BUSYBOX" ] && "$BUSYBOX" sha256sum "$file" >/dev/null 2>&1; then
+        "$BUSYBOX" sha256sum "$file" 2>/dev/null | awk '{print $1}'
+        return $?
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox sha256sum "$file" 2>/dev/null | awk '{print $1}'
+        return $?
+    fi
+    return 1
+}
+
+module_version() {
+    if [ -f "${MODPATH}/module.prop" ]; then
+        awk -F= '$1=="version"{print $2; exit}' "${MODPATH}/module.prop" 2>/dev/null
+    fi
+}
+
+safe_release_name() {
+    raw="$1"
+    safe="$(echo "$raw" | sed 's/[^A-Za-z0-9._-]/_/g; s/^[._-]*//; s/[._-]*$//')"
+    [ -n "$safe" ] || safe="unknown"
+    echo "$safe"
+}
+
+copy_if_present() {
+    src="$1"
+    dst="$2"
+    if [ -f "$src" ]; then
+        mkdir -p "$(dirname "$dst")" 2>/dev/null
+        cp -f "$src" "$dst"
+    fi
+}
+
+append_manifest_hash() {
+    rel="$1"
+    file="$2"
+    manifest="$3"
+    [ -f "$file" ] || return 0
+    hash="$(file_sha256 "$file")" || return 1
+    if [ "$MANIFEST_FIRST" -eq 0 ]; then
+        printf ',\n' >> "$manifest"
+    fi
+    MANIFEST_FIRST=0
+    printf '    "%s": "%s"' "$rel" "$hash" >> "$manifest"
+}
+
+write_install_manifest() {
+    release_dir="$1"
+    version="$2"
+    manifest="${release_dir}/install-manifest.json"
+    tmp_manifest="${manifest}.tmp"
+    MANIFEST_FIRST=1
+
+    {
+        printf '{\n'
+        printf '  "version": "%s",\n' "$version"
+        printf '  "installed_at": "%s",\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%SZ')"
+        printf '  "files_sha256": {\n'
+    } > "$tmp_manifest" || return 1
+
+    for rel in \
+        bin/privd \
+        bin/privctl \
+        bin/sing-box \
+        module/module.prop \
+        module/service.sh \
+        module/post-fs-data.sh \
+        module/uninstall.sh \
+        module/customize.sh \
+        module/scripts/dns.sh \
+        module/scripts/iptables.sh \
+        module/scripts/net_handler.sh \
+        module/scripts/rescue_reset.sh \
+        module/scripts/routing.sh \
+        module/defaults/config.json \
+        module/defaults/panel.json; do
+        append_manifest_hash "$rel" "${release_dir}/${rel}" "$tmp_manifest" || return 1
+    done
+
+    {
+        printf '\n'
+        printf '  }\n'
+        printf '}\n'
+    } >> "$tmp_manifest" || return 1
+    mv -f "$tmp_manifest" "$manifest"
+}
+
+install_release_catalog() {
+    version="$(module_version)"
+    [ -n "$version" ] || version="unknown"
+    safe_version="$(safe_release_name "$version")"
+    release_dir="${PRIVSTACK_DIR}/releases/${safe_version}"
+    if [ -e "$release_dir" ]; then
+        suffix="$(date +%s 2>/dev/null || echo $$)"
+        release_dir="${release_dir}-${suffix}"
+    fi
+
+    ui_print "  [*] Recording versioned release: ${version}"
+    mkdir -p "${release_dir}/bin" "${release_dir}/module/scripts" "${release_dir}/module/defaults" || {
+        ui_print "  [!] Failed to create release catalog"
+        return
+    }
+
+    for bin_name in sing-box privd privctl; do
+        copy_if_present "${PRIVSTACK_DIR}/bin/${bin_name}" "${release_dir}/bin/${bin_name}"
+    done
+    for name in module.prop service.sh post-fs-data.sh uninstall.sh customize.sh sepolicy.rule; do
+        copy_if_present "${MODPATH}/${name}" "${release_dir}/module/${name}"
+    done
+    if [ -d "${MODPATH}/scripts" ]; then
+        for script_file in "${MODPATH}/scripts"/*; do
+            [ -f "$script_file" ] && copy_if_present "$script_file" "${release_dir}/module/scripts/$(basename "$script_file")"
+        done
+    fi
+    if [ -d "${MODPATH}/defaults" ]; then
+        for default_file in "${MODPATH}/defaults"/*; do
+            [ -f "$default_file" ] && copy_if_present "$default_file" "${release_dir}/module/defaults/$(basename "$default_file")"
+        done
+    fi
+
+    if write_install_manifest "$release_dir" "$version"; then
+        ln -sfn "$release_dir" "${PRIVSTACK_DIR}/current" 2>/dev/null || ui_print "  [!] Failed to update current release link"
+    else
+        ui_print "  [!] Failed to write release manifest"
+    fi
+}
+
 # ============================================================================
 # Permissions
 # ============================================================================
@@ -416,7 +549,10 @@ install_scripts
 # Step 8: Set permissions and capabilities
 set_permissions_and_caps
 
-# Step 9: Module overlay permissions
+# Step 9: Record versioned release catalog
+install_release_catalog
+
+# Step 10: Module overlay permissions
 set_module_permissions
 
 # Done

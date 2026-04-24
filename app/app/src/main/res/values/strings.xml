@@ -37,11 +37,13 @@
     <string name="health_issue_tproxy_port_down">TPROXY listener is not accepting connections.</string>
     <string name="health_issue_api_port_down">Local control API listener is not accepting connections.</string>
     <string name="health_issue_rules_not_applied">Traffic interception rules are not applied.</string>
+    <string name="health_issue_netstack_verify_failed">Traffic rules were applied, but verification failed.</string>
+    <string name="health_issue_netstack_cleanup_failed">Previous network rules could not be cleaned up.</string>
     <string name="health_issue_routing_not_applied">Policy routing is not applied.</string>
     <string name="health_issue_dns_listener_down">DNS listener 127.0.0.1 is not responding.</string>
     <string name="health_issue_dns_lookup_timeout">DNS lookup through the local listener timed out.</string>
     <string name="health_issue_proxy_dns_unavailable">Proxy DNS is unavailable.</string>
-    <string name="health_issue_outbound_url_failed">Outbound URL probe did not pass through the tunnel.</string>
+    <string name="health_issue_outbound_url_failed">Outbound URL probe did not pass through the selected proxy route.</string>
     <string name="health_issue_readiness_failed">Runtime readiness gates failed.</string>
     <string name="health_issue_operational_degraded">Runtime started, but data-plane checks are degraded.</string>
     <string name="uptime">Uptime</string>
@@ -59,9 +61,15 @@
     <string name="action_scan_qr">Scan QR code</string>
     <string name="nodes_empty">No nodes configured.\nAdd a node via QR code or clipboard.</string>
     <string name="label_active_node">Active node</string>
+    <string name="active_node_mode_auto">Auto selector</string>
+    <string name="active_node_mode_manual">Manual override: %1$s</string>
+    <string name="active_node_mode_missing">Manual node is missing</string>
     <string name="add_node">Add node</string>
+    <string name="node_selector_auto">Auto</string>
+    <string name="node_selector_manual">Manual</string>
     <string name="sort_by_name">Name</string>
     <string name="sort_by_latency">Latency</string>
+    <string name="sort_by_throughput">Speed</string>
     <string name="sort_by_country">Country</string>
     <string name="edit">Edit</string>
     <string name="edit_node_title">Edit node</string>
@@ -139,6 +147,10 @@
     <string name="urltest_url">URL test endpoint</string>
     <string name="always_direct_apps">Always-direct apps</string>
     <string name="always_direct_apps_desc">Package names, one per line. These apps bypass TPROXY and DNS interception before routing.</string>
+    <string name="sharing_mode">Hotspot sharing</string>
+    <string name="sharing_mode_desc">Route tethered client traffic through PrivStack. Leave off unless you explicitly share the proxy to other devices.</string>
+    <string name="sharing_interfaces">Sharing interfaces</string>
+    <string name="sharing_interfaces_desc">Optional interface names, one per line. Empty means auto-detect ap, wlan, rndis, usb, bt-pan and swlan tethering interfaces.</string>
     <string name="settings_module">Module</string>
     <string name="module_version">Version</string>
     <string name="daemon_status">Daemon status</string>
@@ -254,11 +266,13 @@
     <string name="node_test_reason_unknown">error</string>
     <string name="node_test_tcp_ms">TCP %1$d ms</string>
     <string name="node_test_url_ms">URL %1$d ms</string>
+    <string name="node_test_speed">%1$s/s</string>
     <string name="node_latency_error">ERR</string>
 
     <!-- Apps runtime -->
     <string name="app_picker_error_selection_unavailable">Per-app selection is unavailable in the current routing mode</string>
     <string name="app_picker_error_save_selection">Failed to save app selection</string>
+    <string name="app_group_route_none">Default route</string>
     <string name="app_picker_error_load_apps">Failed to load apps: %1$s</string>
 
     <!-- Settings runtime -->
@@ -288,6 +302,7 @@
     <string name="update_error_download_failed">Update download failed</string>
     <string name="reset_summary_all_done">All backend cleanup steps completed</string>
     <string name="reset_summary_partial_prefix">Partial cleanup:</string>
+    <string name="reset_summary_warning_prefix">Cleanup completed with warnings:</string>
     <string name="reset_summary_step">%1$s: %2$s</string>
     <string name="reset_summary_leftovers_prefix">Leftovers:</string>
     <string name="reset_summary_reboot_required">Reboot is required to clear remaining network state.</string>
@@ -343,13 +358,13 @@
     <string name="audit_check_api_port_protected_detail">Production mode keeps the Clash API disabled; any enabled local control ports are root/core protected.</string>
     <string name="audit_check_api_port_protected_remediation">No action required.</string>
     <string name="audit_check_dns_leak_title">DNS queries may leak to system resolver</string>
-    <string name="audit_check_dns_leak_detail">Some queries bypass the tunnel DNS and reach the ISP resolver directly.</string>
-    <string name="audit_check_dns_leak_remediation">Enable fake-DNS or force all DNS through the remote DNS server used by the tunnel.</string>
+    <string name="audit_check_dns_leak_detail">Some queries bypass PrivStack DNS and reach the ISP resolver directly.</string>
+    <string name="audit_check_dns_leak_remediation">Keep DNS interception enabled for proxied apps and route their DNS through the configured remote resolver.</string>
     <string name="audit_check_package_visibility_title">Proxy package visible to other apps</string>
     <string name="audit_check_package_visibility_detail">Apps can query PackageManager and discover the proxy app is installed.</string>
     <string name="audit_check_package_visibility_remediation">Use a randomized package name or enable Android 11+ package visibility filtering.</string>
     <string name="audit_check_iptables_loop_safe_title">iptables rules prevent routing loops</string>
-    <string name="audit_check_iptables_loop_safe_detail">OUTPUT chain marks daemon packets to skip re-routing through the TUN.</string>
+    <string name="audit_check_iptables_loop_safe_detail">OUTPUT chain marks daemon packets to skip re-routing through PrivStack.</string>
     <string name="audit_check_iptables_loop_safe_remediation">No action required.</string>
     <string name="audit_check_proc_net_leak_title">/proc/net exposes proxy connections</string>
     <string name="audit_check_proc_net_leak_detail">tcp/tcp6 files show the SOCKS inbound port, detectable by other apps.</string>
@@ -357,7 +372,7 @@
     <string name="audit_check_ipv6_rules_mirror_title">IPv6 iptables rules mirror IPv4</string>
     <string name="audit_check_ipv6_rules_mirror_detail">ip6tables rules are consistent with iptables, preventing IPv6 bypass.</string>
     <string name="audit_check_ipv6_rules_mirror_remediation">No action required.</string>
-    <string name="audit_check_icmp_handling_title">ICMP routed through tunnel</string>
+    <string name="audit_check_icmp_handling_title">ICMP follows the proxy routing policy</string>
     <string name="audit_check_icmp_handling_detail">Ping traffic is captured and routed correctly.</string>
     <string name="audit_check_icmp_handling_remediation">No action required.</string>
     <string name="audit_check_selinux_status_title">SELinux is enforcing</string>
@@ -399,13 +414,13 @@
     <string name="advisor_profile_personal">Personal</string>
     <string name="advisor_profile_work">Work Profile</string>
     <string name="advisor_error_load_failed">Failed to load installed apps</string>
-    <string name="advisor_reason_banking">Banking apps may refuse to run when they detect a TUN or VPN interface. Isolate them in the Work Profile to prevent detection.</string>
+    <string name="advisor_reason_banking">Banking apps may refuse to run when they detect VPN or proxy artifacts. Isolate them in the Work Profile to reduce exposure.</string>
     <string name="advisor_reason_government">Government apps often check the device environment. Work Profile isolation reduces proxy detection.</string>
     <string name="advisor_reason_telecom">Telecom apps may report network anomalies. Keeping them in the Work Profile avoids interference.</string>
     <string name="advisor_reason_browser">Browsers benefit from proxy coverage for bypassing restrictions.</string>
     <string name="advisor_reason_social">Messaging apps should be proxied for censorship resistance.</string>
     <string name="advisor_reason_streaming">Streaming apps may need the proxy to access geo-restricted content.</string>
-    <string name="advisor_reason_vpn_proxy">Proxy and VPN tools must stay in the same profile as the TUN interface.</string>
+    <string name="advisor_reason_vpn_proxy">Proxy and VPN tools should stay with the PrivStack control app and remain outside the proxied app set.</string>
     <string name="advisor_reason_system">System apps are managed by Android and usually should not be moved.</string>
     <string name="advisor_reason_other">No specific risk detected. Personal profile is the default.</string>
     <string name="advisor_setup_guide_title">Work Profile Setup Guide</string>
@@ -416,7 +431,7 @@
     <string name="advisor_setup_step_2">2. Create a Work Profile when the app prompts you.</string>
     <string name="advisor_setup_step_3">3. Clone banking and government apps into the Work Profile.</string>
     <string name="advisor_setup_step_4">4. Do not install the proxy or VPN app inside the Work Profile.</string>
-    <string name="advisor_setup_step_5">5. Apps inside the Work Profile will use the system direct connection and stay isolated from the TUN interface in the Personal profile.</string>
+    <string name="advisor_setup_step_5">5. Apps inside the Work Profile will use the system direct connection and stay isolated from PrivStack-routed apps in the Personal profile.</string>
     <string name="advisor_setup_step_6">6. Verify by opening a banking app in the Work Profile. It should stop detecting a VPN.</string>
     <string name="advisor_setup_tip">Tip: Shelter is open-source and lightweight. It creates a standard Android Work Profile without requiring device owner or root.</string>
 </resources>

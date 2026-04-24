@@ -333,6 +333,8 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		"DNS_SCOPE":      appRouting.DNSScope,
 		"DNS_MODE":       appRouting.LegacyDNSMode,
 		"PROXY_MODE":     "tproxy",
+		"SHARING_MODE":   r.cfg.SharingModeEnv(),
+		"SHARING_IFACES": r.cfg.SharingInterfacesEnv(),
 	}
 }
 

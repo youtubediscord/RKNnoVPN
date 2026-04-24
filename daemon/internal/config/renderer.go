@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -543,13 +544,36 @@ func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 		if value := profile.Extra["network"]; value != "" {
 			out["network"] = value
 		}
+	case "wireguard":
+		out["type"] = "wireguard"
+		if profile.WGPrivateKey == "" {
+			return nil, fmt.Errorf("renderer: wireguard private key is empty")
+		}
+		if profile.WGPeerPublicKey == "" {
+			return nil, fmt.Errorf("renderer: wireguard peer public key is empty")
+		}
+		if len(profile.WGLocalAddress) == 0 {
+			return nil, fmt.Errorf("renderer: wireguard local address is empty")
+		}
+		out["private_key"] = profile.WGPrivateKey
+		out["peer_public_key"] = profile.WGPeerPublicKey
+		out["local_address"] = profile.WGLocalAddress
+		if profile.WGPresharedKey != "" {
+			out["pre_shared_key"] = profile.WGPresharedKey
+		}
+		if profile.WGMTU > 0 {
+			out["mtu"] = profile.WGMTU
+		}
+		if len(profile.WGReserved) > 0 {
+			out["reserved"] = profile.WGReserved
+		}
 	default:
 		return nil, fmt.Errorf("renderer: unsupported protocol %q", profile.Protocol)
 	}
 
 	// Transport layer (WebSocket, gRPC, HTTP/2). SOCKS is already a complete
 	// outbound and must not inherit VLESS/Trojan transport settings.
-	if profile.Protocol != "socks" {
+	if profile.Protocol != "socks" && profile.Protocol != "wireguard" {
 		tp, err := buildTransport(profile)
 		if err != nil {
 			return nil, err
@@ -698,6 +722,20 @@ func profileFromPanelNode(raw json.RawMessage, index int) (*NodeProfile, error) 
 		copyStringExtra(profile.Extra, settings, "udp_over_stream")
 		copyStringExtra(profile.Extra, settings, "zero_rtt_handshake")
 		copyStringExtra(profile.Extra, settings, "heartbeat")
+	case "wireguard":
+		if profile.Address == "" {
+			profile.Address = stringFromMap(settings, "address")
+		}
+		if profile.Port == 0 {
+			profile.Port = intFromMap(settings, "port")
+		}
+		profile.WGPrivateKey = stringFromMap(settings, "private_key")
+		profile.WGPeerPublicKey = stringFromMap(settings, "peer_public_key")
+		profile.WGPresharedKey = stringFromMap(settings, "pre_shared_key")
+		profile.WGLocalAddress = stringSliceFromMap(settings, "local_address")
+		profile.WGAllowedIPs = stringFromMap(settings, "allowed_ips")
+		profile.WGMTU = intFromMap(settings, "mtu")
+		profile.WGReserved = intSliceFromMap(settings, "reserved")
 	}
 
 	applyStreamSettings(profile, mapFromMap(outbound, "streamSettings"))
@@ -813,6 +851,8 @@ func normalizeProtocol(value string) string {
 		return "socks"
 	case "hy2", "hysteria2":
 		return "hysteria2"
+	case "wg", "wireguard":
+		return "wireguard"
 	default:
 		return strings.ToLower(value)
 	}
@@ -902,6 +942,38 @@ func stringSliceFromMap(source map[string]interface{}, key string) []string {
 	for _, value := range values {
 		if str, ok := value.(string); ok && str != "" {
 			result = append(result, str)
+		}
+	}
+	return result
+}
+
+func intSliceFromMap(source map[string]interface{}, key string) []int {
+	if source == nil {
+		return nil
+	}
+	values, ok := source[key].([]interface{})
+	if !ok {
+		value := intFromMap(source, key)
+		if value != 0 {
+			return []int{value}
+		}
+		return nil
+	}
+	result := make([]int, 0, len(values))
+	for _, value := range values {
+		switch v := value.(type) {
+		case int:
+			result = append(result, v)
+		case float64:
+			result = append(result, int(v))
+		case json.Number:
+			if parsed, err := strconv.Atoi(v.String()); err == nil {
+				result = append(result, parsed)
+			}
+		case string:
+			if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+				result = append(result, parsed)
+			}
 		}
 	}
 	return result
@@ -1159,6 +1231,17 @@ func buildRoute(cfg *Config) map[string]interface{} {
 		})
 	}
 
+	if len(cfg.Routing.AlwaysDirectApps) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"package_name": cfg.Routing.AlwaysDirectApps,
+			"outbound":     "direct",
+		})
+	}
+
+	for _, rule := range buildAppGroupRouteRules(cfg) {
+		rules = append(rules, rule)
+	}
+
 	finalOutbound := "proxy"
 	if cfg.Routing.Mode == "direct" {
 		finalOutbound = "direct"
@@ -1178,6 +1261,57 @@ func buildRoute(cfg *Config) map[string]interface{} {
 	}
 
 	return route
+}
+
+func buildAppGroupRouteRules(cfg *Config) []map[string]interface{} {
+	if cfg == nil || len(cfg.Apps.AppGroups) == 0 {
+		return nil
+	}
+
+	profiles := ProfilesFromPanelNodes(cfg)
+	if len(profiles) == 0 {
+		return nil
+	}
+	plans := buildGroupOutboundPlans(profiles)
+	if len(plans) == 0 {
+		return nil
+	}
+
+	groupOutbounds := make(map[string]string, len(plans))
+	for _, plan := range plans {
+		groupOutbounds[plan.name] = plan.selectorTag()
+	}
+
+	packagesByOutbound := map[string][]string{}
+	for packageName, groupName := range cfg.Apps.AppGroups {
+		packageName = strings.TrimSpace(packageName)
+		groupName = strings.TrimSpace(groupName)
+		if packageName == "" || groupName == "" {
+			continue
+		}
+		outbound := groupOutbounds[groupName]
+		if outbound == "" {
+			continue
+		}
+		packagesByOutbound[outbound] = append(packagesByOutbound[outbound], packageName)
+	}
+
+	outbounds := make([]string, 0, len(packagesByOutbound))
+	for outbound := range packagesByOutbound {
+		outbounds = append(outbounds, outbound)
+	}
+	sort.Strings(outbounds)
+
+	rules := make([]map[string]interface{}, 0, len(outbounds))
+	for _, outbound := range outbounds {
+		packages := packagesByOutbound[outbound]
+		sort.Strings(packages)
+		rules = append(rules, map[string]interface{}{
+			"package_name": packages,
+			"outbound":     outbound,
+		})
+	}
+	return rules
 }
 
 func splitCSV(value string) []string {

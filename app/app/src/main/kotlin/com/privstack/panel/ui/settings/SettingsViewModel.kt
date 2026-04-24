@@ -80,6 +80,8 @@ data class SettingsUiState(
     val customDnsUrl: String = "",
     val urlTestUrl: String = "https://www.gstatic.com/generate_204",
     val alwaysDirectPackagesText: String = "",
+    val sharingEnabled: Boolean = false,
+    val sharingInterfacesText: String = "",
     val logLevel: LogLevel = LogLevel.WARNING,
     // Module
     val moduleVersion: String = BuildConfig.VERSION_NAME,
@@ -227,6 +229,41 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setSharingEnabled(enabled: Boolean) {
+        val previous = _uiState.value.sharingEnabled
+        _uiState.update { it.copy(sharingEnabled = enabled, errorMessage = null) }
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(sharing = config.sharing.copy(enabled = enabled))
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save sharing mode: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(sharingEnabled = previous, errorMessage = err) }
+            }
+        }
+    }
+
+    fun setSharingInterfacesText(value: String) {
+        _uiState.update { it.copy(sharingInterfacesText = value, errorMessage = null) }
+    }
+
+    fun applySharingInterfaces() {
+        val interfaces = parsePackageList(_uiState.value.sharingInterfacesText)
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(sharing = config.sharing.copy(interfaces = interfaces))
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save sharing interfaces: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(errorMessage = err) }
+            }
+        }
+    }
+
     fun setLogLevel(level: LogLevel) {
         _uiState.update { it.copy(logLevel = level, errorMessage = null) }
         // Log level is a local preference affecting which daemon logs we request.
@@ -365,11 +402,6 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun copyDiagnosticReport() {
-        val current = _uiState.value.logsText
-        if (current.isNotBlank()) {
-            _uiState.update { it.copy(copyReportText = current) }
-            return
-        }
         _uiState.update { it.copy(isLoadingLogs = true, errorMessage = null) }
         viewModelScope.launch {
             when (val result = daemonClient.diagnosticBundle(lines = 220)) {
@@ -589,6 +621,8 @@ class SettingsViewModel @Inject constructor(
                 customDnsUrl = if (dnsPreset == DnsPreset.CUSTOM) dnsUrl else it.customDnsUrl,
                 urlTestUrl = config.health.checkUrl,
                 alwaysDirectPackagesText = config.routing.alwaysDirectAppList.joinToString("\n"),
+                sharingEnabled = config.sharing.enabled,
+                sharingInterfacesText = config.sharing.interfaces.joinToString("\n"),
             )
         }
     }
@@ -717,6 +751,8 @@ class SettingsViewModel @Inject constructor(
         val healthIssue = messages.formatHealthIssue(
             status.health.lastCode,
             status.health.lastError,
+            status.health.lastUserMessage,
+            status.health.stageReport,
         )
         return when (status.state) {
             ConnectionState.CONNECTED -> {
@@ -753,13 +789,21 @@ class SettingsViewModel @Inject constructor(
             .distinct()
 
     private fun summarizeResetReport(report: com.privstack.panel.model.ResetReport): String {
-        if (report.errors.isEmpty() && report.leftovers.isEmpty()) {
+        if (report.errors.isEmpty() && report.warnings.isEmpty() && report.leftovers.isEmpty()) {
             return messages.get(com.privstack.panel.R.string.reset_summary_all_done)
         }
         return buildString {
-            append(messages.get(com.privstack.panel.R.string.reset_summary_partial_prefix))
+            append(
+                messages.get(
+                    if (report.errors.isEmpty()) {
+                        com.privstack.panel.R.string.reset_summary_warning_prefix
+                    } else {
+                        com.privstack.panel.R.string.reset_summary_partial_prefix
+                    },
+                ),
+            )
             append('\n')
-            append(report.steps.filter { it.status != "ok" }.joinToString("\n") { step ->
+            val stepLines = report.steps.filter { it.status != "ok" }.map { step ->
                 val stepValue = if (step.detail.isBlank()) {
                     when (step.status.lowercase()) {
                         "error" -> messages.get(com.privstack.panel.R.string.state_error)
@@ -774,7 +818,9 @@ class SettingsViewModel @Inject constructor(
                     step.name,
                     stepValue,
                 )
-            })
+            }
+            val warningLines = report.warnings.filter { it.isNotBlank() }
+            append((stepLines + warningLines).joinToString("\n"))
             if (report.leftovers.isNotEmpty()) {
                 append('\n')
                 append(messages.get(com.privstack.panel.R.string.reset_summary_leftovers_prefix))

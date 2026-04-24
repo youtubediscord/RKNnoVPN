@@ -15,6 +15,8 @@ data class DaemonStatus(
     val activeNodeName: String? = null,
     @SerialName("active_node_protocol")
     val activeNodeProtocol: String? = null,
+    @SerialName("active_node_mode")
+    val activeNodeMode: String? = null,
     @SerialName("egress_ip")
     val egressIp: String? = null,
     @SerialName("country_flag")
@@ -80,6 +82,10 @@ data class HealthResult(
     val phase: BackendPhase = BackendPhase.STOPPED,
     val lastCode: String? = null,
     val lastError: String? = null,
+    val lastUserMessage: String? = null,
+    val lastDebug: String? = null,
+    val rollbackApplied: Boolean = false,
+    val stageReport: RuntimeStageReport? = null,
     val checkedAt: Long = 0L
 )
 

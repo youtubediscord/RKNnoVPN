@@ -130,6 +130,17 @@ fun NodeListScreen(
                 onSortChange = viewModel::setSortMode,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
+            val filteredNodes = state.nodes.filter { it.group == state.selectedGroup }
+            SelectionModeRow(
+                isAuto = state.activeNodeId.isNullOrBlank(),
+                hasNodes = state.nodes.isNotEmpty(),
+                onAutoSelect = viewModel::selectAuto,
+                onManualSelect = {
+                    (filteredNodes.firstOrNull() ?: state.nodes.firstOrNull())
+                        ?.let { viewModel.selectNode(it.id) }
+                },
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
             Row(
                 horizontalArrangement = Arrangement.End,
                 modifier = Modifier
@@ -150,7 +161,6 @@ fun NodeListScreen(
                 }
             }
 
-            val filteredNodes = state.nodes.filter { it.group == state.selectedGroup }
             if (filteredNodes.isEmpty()) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -234,6 +244,42 @@ fun NodeListScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun SelectionModeRow(
+    isAuto: Boolean,
+    hasNodes: Boolean,
+    onAutoSelect: () -> Unit,
+    onManualSelect: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
+        val options = listOf(
+            true to stringResource(R.string.node_selector_auto),
+            false to stringResource(R.string.node_selector_manual),
+        )
+        options.forEachIndexed { index, (autoMode, label) ->
+            SegmentedButton(
+                selected = isAuto == autoMode,
+                enabled = hasNodes,
+                onClick = {
+                    if (autoMode) {
+                        onAutoSelect()
+                    } else {
+                        onManualSelect()
+                    }
+                },
+                shape = SegmentedButtonDefaults.itemShape(
+                    index = index,
+                    count = options.size,
+                ),
+            ) {
+                Text(label)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun SortRow(
     currentSort: NodeSortMode,
     onSortChange: (NodeSortMode) -> Unit,
@@ -243,6 +289,7 @@ private fun SortRow(
         val options = listOf(
             NodeSortMode.NAME to stringResource(R.string.sort_by_name),
             NodeSortMode.LATENCY to stringResource(R.string.sort_by_latency),
+            NodeSortMode.THROUGHPUT to stringResource(R.string.sort_by_throughput),
             NodeSortMode.COUNTRY to stringResource(R.string.sort_by_country),
         )
         options.forEachIndexed { index, (mode, label) ->
@@ -322,6 +369,9 @@ private fun NodeCard(
                 val testSummary = listOfNotNull(
                     node.latencyMs?.takeIf { it >= 0 }?.let { stringResource(R.string.node_test_tcp_ms, it) },
                     node.responseMs?.let { stringResource(R.string.node_test_url_ms, it) },
+                    node.throughputBps?.takeIf { it > 0 }?.let {
+                        stringResource(R.string.node_test_speed, formatBytes(it))
+                    },
                     node.testStatus?.takeIf { it != okStatus && it != tcpOkStatus },
                 ).joinToString(" | ")
                 Text(
@@ -417,53 +467,53 @@ private fun NodeCard(
     }
 }
 
-    @Composable
-    private fun EditNodeDialog(
-        node: Node,
-        onDismiss: () -> Unit,
-        onSave: (String, String) -> Unit,
-    ) {
-        var name by remember(node.id) { mutableStateOf(node.name) }
-        var group by remember(node.id) { mutableStateOf(node.group) }
+@Composable
+private fun EditNodeDialog(
+    node: Node,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var name by remember(node.id) { mutableStateOf(node.name) }
+    var group by remember(node.id) { mutableStateOf(node.group) }
 
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(stringResource(R.string.edit_node_title)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text(stringResource(R.string.node_name_label)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = group,
-                        onValueChange = { group = it },
-                        label = { Text(stringResource(R.string.node_group_label)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { onSave(name, group) },
-                    enabled = name.isNotBlank(),
-                ) {
-                    Text(stringResource(R.string.save))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        )
-    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.edit_node_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.node_name_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = group,
+                    onValueChange = { group = it },
+                    label = { Text(stringResource(R.string.node_group_label)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(name, group) },
+                enabled = name.isNotBlank(),
+            ) {
+                Text(stringResource(R.string.save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
 
-    @Composable
+@Composable
 private fun LatencyChip(ms: Int) {
     val color = when {
         ms < 0 -> MaterialTheme.colorScheme.outline
@@ -516,4 +566,17 @@ private fun countryFlagForNode(name: String): String {
             lower.startsWith("sg-") -> "\uD83C\uDDF8\uD83C\uDDEC"
         else -> "\uD83C\uDF10" // globe
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val units = arrayOf("B", "KB", "MB", "GB", "TB")
+    var value = bytes.toDouble()
+    var idx = 0
+    while (value >= 1024 && idx < units.lastIndex) {
+        value /= 1024
+        idx++
+    }
+    return if (value == value.toLong().toDouble()) "${value.toLong()} ${units[idx]}"
+    else "%.1f ${units[idx]}".format(value)
 }

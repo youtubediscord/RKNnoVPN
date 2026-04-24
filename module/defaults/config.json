@@ -39,7 +39,8 @@
   },
   "apps": {
     "mode": "whitelist",
-    "list": []
+    "list": [],
+    "app_groups": {}
   },
   "dns": {
     "hijack_per_uid": true,
@@ -51,6 +52,10 @@
   },
   "ipv6": {
     "mode": "mirror"
+  },
+  "sharing": {
+    "enabled": false,
+    "interfaces": []
   },
   "health": {
     "enabled": true,

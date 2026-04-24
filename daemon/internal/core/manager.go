@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 )
 
 // State represents the daemon's proxy-core lifecycle phase.
@@ -33,10 +35,14 @@ const (
 // RuntimeError carries a stable startup/runtime code across package
 // boundaries so the control plane can show the failing stage.
 type RuntimeError struct {
-	Layer string
-	Code  string
-	Hard  bool
-	Err   error
+	Layer           string
+	Code            string
+	Hard            bool
+	UserMessage     string
+	Debug           string
+	RollbackApplied bool
+	StageReport     RuntimeStageReport
+	Err             error
 }
 
 func (e *RuntimeError) Error() string {
@@ -63,16 +69,149 @@ func (e *RuntimeError) RuntimeCode() string {
 	return e.Code
 }
 
+func (e *RuntimeError) RuntimeUserMessage() string {
+	if e == nil {
+		return ""
+	}
+	return e.UserMessage
+}
+
+func (e *RuntimeError) RuntimeDebug() string {
+	if e == nil {
+		return ""
+	}
+	return e.Debug
+}
+
+func (e *RuntimeError) RuntimeRollbackApplied() bool {
+	if e == nil {
+		return false
+	}
+	return e.RollbackApplied
+}
+
+func (e *RuntimeError) RuntimeStageReport() interface{} {
+	if e == nil {
+		return nil
+	}
+	return e.StageReport
+}
+
 func runtimeError(layer string, code string, err error) error {
+	return runtimeErrorWithRollback(layer, code, err, false)
+}
+
+func runtimeErrorWithRollback(layer string, code string, err error, rollbackApplied bool) error {
+	return runtimeErrorWithReport(layer, code, err, rollbackApplied, RuntimeStageReport{})
+}
+
+func runtimeErrorWithReport(layer string, code string, err error, rollbackApplied bool, report RuntimeStageReport) error {
 	if err == nil {
 		return nil
 	}
 	return &RuntimeError{
-		Layer: layer,
-		Code:  code,
-		Hard:  true,
-		Err:   err,
+		Layer:           layer,
+		Code:            code,
+		Hard:            true,
+		UserMessage:     runtimeUserMessage(code),
+		Debug:           err.Error(),
+		RollbackApplied: rollbackApplied,
+		StageReport:     report,
+		Err:             err,
 	}
+}
+
+func runtimeUserMessage(code string) string {
+	switch code {
+	case "CONFIG_RENDER_FAILED":
+		return "Generated sing-box config could not be rendered."
+	case "CONFIG_CHECK_FAILED":
+		return "Generated sing-box config did not pass sing-box check."
+	case "CORE_LOG_OPEN_FAILED":
+		return "sing-box log file could not be opened."
+	case "CORE_SPAWN_FAILED":
+		return "sing-box process could not be started."
+	case "CORE_STOP_FAILED":
+		return "previous sing-box process could not be stopped."
+	case "TPROXY_PORT_DOWN":
+		return "sing-box did not open the TPROXY listener."
+	case "DNS_LISTENER_DOWN":
+		return "sing-box did not open the local DNS listener."
+	case "API_PORT_DOWN":
+		return "sing-box did not open the local API listener."
+	case "RULES_NOT_APPLIED":
+		return "PrivStack routing rules could not be applied."
+	case "DNS_APPLY_FAILED":
+		return "PrivStack DNS interception could not be applied."
+	case "NETSTACK_VERIFY_FAILED":
+		return "PrivStack network rules were applied but did not pass verification."
+	case "NETSTACK_CLEANUP_FAILED":
+		return "Previous PrivStack network rules could not be cleaned up."
+	default:
+		return "Runtime stage failed."
+	}
+}
+
+func newRuntimeStageReport(operation string) RuntimeStageReport {
+	return NewRuntimeStageReport(operation)
+}
+
+func NewRuntimeStageReport(operation string) RuntimeStageReport {
+	now := time.Now()
+	return RuntimeStageReport{
+		Operation: operation,
+		Status:    "running",
+		StartedAt: now,
+	}
+}
+
+func (r *RuntimeStageReport) addStage(name string, status string, code string, detail string, rollbackApplied bool) {
+	r.AddStage(name, status, code, detail, rollbackApplied)
+}
+
+func (r *RuntimeStageReport) AddStage(name string, status string, code string, detail string, rollbackApplied bool) {
+	if r == nil {
+		return
+	}
+	if status == "" {
+		status = "ok"
+	}
+	stage := RuntimeStage{
+		Name:            name,
+		Status:          status,
+		Code:            code,
+		Detail:          detail,
+		RollbackApplied: rollbackApplied,
+		At:              time.Now(),
+	}
+	r.Stages = append(r.Stages, stage)
+	if status == "failed" {
+		r.Status = "failed"
+		r.FailedStage = name
+		r.LastCode = code
+		r.RollbackApplied = rollbackApplied
+		r.FinishedAt = stage.At
+	}
+}
+
+func (r *RuntimeStageReport) finishOK() {
+	r.FinishOK()
+}
+
+func (r *RuntimeStageReport) FinishOK() {
+	if r == nil {
+		return
+	}
+	r.Status = "ok"
+	r.FinishedAt = time.Now()
+}
+
+func (r RuntimeStageReport) empty() bool {
+	return r.Empty()
+}
+
+func (r RuntimeStageReport) Empty() bool {
+	return r.Operation == "" && len(r.Stages) == 0
 }
 
 // String returns a human-readable label for the state.
@@ -97,11 +236,42 @@ func (s State) String() string {
 
 // StatusInfo is the snapshot returned by Status().
 type StatusInfo struct {
-	State         string    `json:"state"`
-	PID           int       `json:"pid"`
-	Uptime        string    `json:"uptime"`
-	ActiveProfile string    `json:"active_profile"`
-	StartedAt     time.Time `json:"started_at"`
+	State         string             `json:"state"`
+	PID           int                `json:"pid"`
+	Uptime        string             `json:"uptime"`
+	ActiveProfile string             `json:"active_profile"`
+	StartedAt     time.Time          `json:"started_at"`
+	StartReport   RuntimeStageReport `json:"start_report,omitempty"`
+	RuntimeReport RuntimeStageReport `json:"runtime_report,omitempty"`
+}
+
+type RuntimeStageReport struct {
+	Operation       string         `json:"operation,omitempty"`
+	Status          string         `json:"status,omitempty"`
+	Stages          []RuntimeStage `json:"stages,omitempty"`
+	FailedStage     string         `json:"failedStage,omitempty"`
+	LastCode        string         `json:"lastCode,omitempty"`
+	RollbackApplied bool           `json:"rollbackApplied,omitempty"`
+	StartedAt       time.Time      `json:"startedAt,omitempty"`
+	FinishedAt      time.Time      `json:"finishedAt,omitempty"`
+}
+
+type RuntimeStage struct {
+	Name            string    `json:"name"`
+	Status          string    `json:"status"`
+	Code            string    `json:"code,omitempty"`
+	Detail          string    `json:"detail,omitempty"`
+	RollbackApplied bool      `json:"rollbackApplied,omitempty"`
+	At              time.Time `json:"at,omitempty"`
+}
+
+type listenerWaitSpec struct {
+	Stage   string
+	Layer   string
+	Code    string
+	Label   string
+	Port    int
+	Timeout time.Duration
 }
 
 // CoreManager owns the sing-box child process and the iptables / DNS
@@ -114,8 +284,10 @@ type CoreManager struct {
 	dataDir string
 	logger  *log.Logger
 
-	activeProfile string
-	startedAt     time.Time
+	activeProfile     string
+	startedAt         time.Time
+	lastStartReport   RuntimeStageReport
+	lastRuntimeReport RuntimeStageReport
 
 	mu sync.Mutex
 }
@@ -186,6 +358,18 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	if m.state == StateRunning || m.state == StateStarting {
 		return fmt.Errorf("core: already %s", m.state)
 	}
+	stageReport := newRuntimeStageReport("start")
+	m.lastStartReport = stageReport
+	recordStage := func(name string, status string, code string, detail string, rollbackApplied bool) {
+		stageReport.addStage(name, status, code, detail, rollbackApplied)
+		m.lastStartReport = stageReport
+		m.lastRuntimeReport = stageReport
+	}
+	failStage := func(name string, layer string, code string, err error, rollbackApplied bool) error {
+		recordStage(name, "failed", code, err.Error(), rollbackApplied)
+		return runtimeErrorWithReport(layer, code, err, rollbackApplied, stageReport)
+	}
+
 	m.state = StateStarting
 	m.logger.Printf("starting sing-box for profile %q", profile.Protocol)
 
@@ -193,12 +377,14 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	configPath := filepath.Join(m.dataDir, "config", "rendered", "singbox.json")
 	if err := renderConfig(m.config, profile, configPath); err != nil {
 		m.state = StateStopped
-		return runtimeError("render config", "CONFIG_RENDER_FAILED", err)
+		return failStage("render-config", "render config", "CONFIG_RENDER_FAILED", err, false)
 	}
+	recordStage("render-config", "ok", "", configPath, false)
 	if err := m.checkSingBoxConfig(configPath); err != nil {
 		m.state = StateStopped
-		return runtimeError("config check", "CONFIG_CHECK_FAILED", err)
+		return failStage("config-check", "config check", "CONFIG_CHECK_FAILED", err, false)
 	}
+	recordStage("config-check", "ok", "", configPath, false)
 
 	// 2. Spawn sing-box.
 	binPath := filepath.Join(m.dataDir, "bin", "sing-box")
@@ -206,8 +392,9 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	logFile, logPath, err := m.openSingBoxLog()
 	if err != nil {
 		m.state = StateStopped
-		return runtimeError("open sing-box log", "CORE_LOG_OPEN_FAILED", err)
+		return failStage("open-core-log", "open sing-box log", "CORE_LOG_OPEN_FAILED", err, false)
 	}
+	recordStage("open-core-log", "ok", "", logPath, false)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -219,23 +406,19 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		m.state = StateStopped
-		return runtimeError("spawn sing-box", "CORE_SPAWN_FAILED", err)
+		return failStage("spawn-core", "spawn sing-box", "CORE_SPAWN_FAILED", err, false)
 	}
 	logFile.Close()
 	m.process = cmd.Process
 	m.pid = cmd.Process.Pid
+	recordStage("spawn-core", "ok", "", fmt.Sprintf("pid=%d", m.pid), false)
 
 	// Write PID file.
 	pidPath := filepath.Join(m.dataDir, "run", "singbox.pid")
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
-	iptablesScript := filepath.Join(m.dataDir, "scripts", "iptables.sh")
-	dnsScript := filepath.Join(m.dataDir, "scripts", "dns.sh")
 	rollbackStarted := func(signal syscall.Signal, stopDNS bool, stopRules bool) {
-		if stopDNS {
-			_ = ExecScript(dnsScript, "stop", m.scriptEnv())
-		}
-		if stopRules {
-			_ = ExecScript(iptablesScript, "stop", m.scriptEnv())
+		if stopDNS || stopRules {
+			_ = m.netstack().Cleanup().Err()
 		}
 		if m.process != nil {
 			_ = m.process.Signal(signal)
@@ -256,54 +439,40 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		exitCh <- cmd.Wait()
 	}()
 
-	// 4. Wait for tproxy port.
-	tproxyPort := m.config.Proxy.TProxyPort
-	if tproxyPort == 0 {
-		tproxyPort = 10853
-	}
-	if err := m.waitForPortOrExit(tproxyPort, 30*time.Second, exitCh, logPath); err != nil {
-		m.logger.Printf("port %d did not open in time, killing pid %d", tproxyPort, m.pid)
+	// 4. Wait for runtime listeners.
+	if spec, err := m.waitRuntimeListeners(exitCh, logPath, recordStage); err != nil {
+		m.logger.Printf("%s port %d did not open in time, killing pid %d", spec.Label, spec.Port, m.pid)
 		rollbackStarted(syscall.SIGKILL, false, false)
-		return runtimeError("wait tproxy port", "TPROXY_PORT_DOWN", fmt.Errorf("port %d not ready: %w", tproxyPort, err))
+		return failStage(spec.Stage, spec.Layer, spec.Code, fmt.Errorf("%s port %d not ready: %w", spec.Label, spec.Port, err), true)
 	}
-	m.logger.Printf("port %d is listening", tproxyPort)
 
-	dnsPort := m.config.Proxy.DNSPort
-	if dnsPort == 0 {
-		dnsPort = 10856
-	}
-	if err := m.waitForPortOrExit(dnsPort, 10*time.Second, exitCh, logPath); err != nil {
-		m.logger.Printf("DNS port %d did not open in time, killing pid %d", dnsPort, m.pid)
-		rollbackStarted(syscall.SIGKILL, false, false)
-		return runtimeError("wait dns port", "DNS_LISTENER_DOWN", fmt.Errorf("DNS port %d not ready: %w", dnsPort, err))
-	}
-	m.logger.Printf("DNS port %d is listening", dnsPort)
-
-	apiPort := m.config.Proxy.APIPort
-	if apiPort > 0 {
-		if err := m.waitForPortOrExit(apiPort, 10*time.Second, exitCh, logPath); err != nil {
-			m.logger.Printf("API port %d did not open in time, killing pid %d", apiPort, m.pid)
-			rollbackStarted(syscall.SIGKILL, false, false)
-			return runtimeError("wait API port", "API_PORT_DOWN", fmt.Errorf("API port %d not ready: %w", apiPort, err))
+	// 5-6. Apply PrivStack-owned iptables and DNS interception.
+	netReport := m.netstack().Apply()
+	if err := netReport.Err(); err != nil {
+		code := "RULES_NOT_APPLIED"
+		var netErr *netstack.Error
+		if errors.As(err, &netErr) && netErr.Code != "" {
+			code = netErr.Code
 		}
-		m.logger.Printf("API port %d is listening", apiPort)
-	}
-
-	// 5. Apply iptables rules.
-	if err := ExecScript(iptablesScript, "start", m.scriptEnv()); err != nil {
-		m.logger.Printf("iptables apply failed: %v — rolling back", err)
+		m.logger.Printf("netstack apply failed: %v — rolling back", err)
 		rollbackStarted(syscall.SIGTERM, false, false)
-		return runtimeError("iptables start", "RULES_NOT_APPLIED", err)
+		return failStage("netstack-apply", "netstack apply", code, err, true)
 	}
-	m.logger.Println("iptables rules applied")
-
-	// 6. Apply DNS interception.
-	if err := ExecScript(dnsScript, "start", m.scriptEnv()); err != nil {
-		m.logger.Printf("DNS apply failed: %v — rolling back iptables", err)
-		rollbackStarted(syscall.SIGTERM, false, true)
-		return runtimeError("dns start", "DNS_APPLY_FAILED", err)
+	m.logger.Println("netstack applied")
+	recordStage("netstack-apply", "ok", "", fmt.Sprintf("steps=%d", len(netReport.Steps)), false)
+	netVerifyReport := m.netstack().Verify()
+	if err := netVerifyReport.Err(); err != nil {
+		code := "NETSTACK_VERIFY_FAILED"
+		var netErr *netstack.Error
+		if errors.As(err, &netErr) && netErr.Code != "" {
+			code = netErr.Code
+		}
+		m.logger.Printf("netstack verify failed: %v — rolling back", err)
+		rollbackStarted(syscall.SIGTERM, false, false)
+		return failStage("netstack-verify", "netstack verify", code, err, true)
 	}
-	m.logger.Println("DNS interception applied")
+	m.logger.Println("netstack verified")
+	recordStage("netstack-verify", "ok", "", fmt.Sprintf("steps=%d", len(netVerifyReport.Steps)), false)
 
 	// 7. Mark running.
 	m.activeProfile = profile.Protocol + "://" + profile.Address
@@ -313,6 +482,9 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	_ = os.Remove(filepath.Join(m.dataDir, "run", "reset.lock"))
 	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
 	m.logger.Printf("core is running (pid=%d)", m.pid)
+	recordStage("commit-state", "ok", "", m.activeProfile, false)
+	stageReport.finishOK()
+	m.lastStartReport = stageReport
 	return nil
 }
 
@@ -347,24 +519,11 @@ func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 
 	var firstErr error
 
-	// 1. Remove DNS interception (before iptables so nothing routes to
-	//    a listener that may already be partly torn down).
-	dnsScript := filepath.Join(m.dataDir, "scripts", "dns.sh")
-	if err := ExecScript(dnsScript, "stop", m.scriptEnv()); err != nil {
-		m.logger.Printf("dns stop: %v", err)
-		if firstErr == nil && !ignorableCleanupScriptError(err) {
-			firstErr = err
-		}
-	}
-
-	// 2. Remove iptables BEFORE killing sing-box so that inflight
-	//    connections are not TPROXY'd into a dead socket.
-	iptablesScript := filepath.Join(m.dataDir, "scripts", "iptables.sh")
-	if err := ExecScript(iptablesScript, "stop", m.scriptEnv()); err != nil {
-		m.logger.Printf("iptables stop: %v", err)
-		if firstErr == nil && !ignorableCleanupScriptError(err) {
-			firstErr = err
-		}
+	// 1-2. Remove DNS interception and iptables BEFORE killing sing-box so
+	// inflight connections are not TPROXY'd into a dead socket.
+	if err := m.netstack().Cleanup().Err(); err != nil {
+		m.logger.Printf("netstack cleanup: %v", err)
+		firstErr = err
 	}
 
 	// 3. SIGTERM → wait 5 s → SIGKILL.
@@ -409,22 +568,38 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	stageReport := newRuntimeStageReport("hot-swap")
+	m.lastRuntimeReport = stageReport
+	recordStage := func(name string, status string, code string, detail string, rollbackApplied bool) {
+		stageReport.addStage(name, status, code, detail, rollbackApplied)
+		m.lastRuntimeReport = stageReport
+	}
+	failStage := func(name string, layer string, code string, err error, rollbackApplied bool) error {
+		recordStage(name, "failed", code, err.Error(), rollbackApplied)
+		return runtimeErrorWithReport(layer, code, err, rollbackApplied, stageReport)
+	}
+
 	m.logger.Printf("hot-swap to profile %q", profile.Protocol)
 
 	// 1. Render new config.
 	configPath := filepath.Join(m.dataDir, "config", "rendered", "singbox.json")
 	if err := renderConfig(m.config, profile, configPath); err != nil {
-		return fmt.Errorf("core: hot-swap render: %w", err)
+		return failStage("render-config", "hot-swap render", "CONFIG_RENDER_FAILED", err, false)
 	}
+	recordStage("render-config", "ok", "", configPath, false)
 	if err := m.checkSingBoxConfig(configPath); err != nil {
-		return fmt.Errorf("core: hot-swap config check: %w", err)
+		return failStage("config-check", "hot-swap config check", "CONFIG_CHECK_FAILED", err, false)
 	}
+	recordStage("config-check", "ok", "", configPath, false)
 
 	// 2. Stop sing-box (SIGTERM only, no iptables teardown).
 	if m.process != nil {
 		if err := m.killProcess(); err != nil {
-			return fmt.Errorf("core: hot-swap kill old: %w", err)
+			return failStage("stop-old-core", "hot-swap kill old", "CORE_STOP_FAILED", err, false)
 		}
+		recordStage("stop-old-core", "ok", "", "", false)
+	} else {
+		recordStage("stop-old-core", "already_clean", "", "no tracked process", false)
 	}
 	m.state = StateStarting
 
@@ -434,8 +609,9 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	logFile, logPath, err := m.openSingBoxLog()
 	if err != nil {
 		m.state = StateDegraded
-		return fmt.Errorf("core: hot-swap open sing-box log: %w", err)
+		return failStage("open-core-log", "hot-swap open sing-box log", "CORE_LOG_OPEN_FAILED", err, false)
 	}
+	recordStage("open-core-log", "ok", "", logPath, false)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -447,11 +623,12 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		m.state = StateDegraded
-		return fmt.Errorf("core: hot-swap spawn: %w", err)
+		return failStage("spawn-core", "hot-swap spawn", "CORE_SPAWN_FAILED", err, false)
 	}
 	logFile.Close()
 	m.process = cmd.Process
 	m.pid = cmd.Process.Pid
+	recordStage("spawn-core", "ok", "", fmt.Sprintf("pid=%d", m.pid), false)
 
 	pidPath := filepath.Join(m.dataDir, "run", "singbox.pid")
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
@@ -461,12 +638,8 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 		exitCh <- cmd.Wait()
 	}()
 
-	// 4. Wait for port.
-	tproxyPort := m.config.Proxy.TProxyPort
-	if tproxyPort == 0 {
-		tproxyPort = 10853
-	}
-	if err := m.waitForPortOrExit(tproxyPort, 30*time.Second, exitCh, logPath); err != nil {
+	// 4. Wait for runtime listeners.
+	if spec, err := m.waitRuntimeListeners(exitCh, logPath, recordStage); err != nil {
 		_ = m.process.Signal(syscall.SIGKILL)
 		m.process = nil
 		m.pid = 0
@@ -474,7 +647,7 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 		m.startedAt = time.Time{}
 		_ = os.Remove(pidPath)
 		m.state = StateDegraded
-		return fmt.Errorf("core: hot-swap port wait: %w", err)
+		return failStage(spec.Stage, "hot-swap "+spec.Layer, spec.Code, fmt.Errorf("%s port %d not ready: %w", spec.Label, spec.Port, err), true)
 	}
 
 	// 5. iptables left untouched — they still point at the same tproxy port.
@@ -485,6 +658,9 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	_ = os.Remove(filepath.Join(m.dataDir, "run", "reset.lock"))
 	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
 	m.logger.Printf("hot-swap complete (pid=%d)", m.pid)
+	recordStage("commit-state", "ok", "", m.activeProfile, false)
+	stageReport.finishOK()
+	m.lastRuntimeReport = stageReport
 	return nil
 }
 
@@ -559,6 +735,60 @@ func (m *CoreManager) waitForPortOrExit(port int, timeout time.Duration, exitCh 
 	}
 }
 
+func (m *CoreManager) waitRuntimeListeners(exitCh <-chan error, logPath string, recordStage func(string, string, string, string, bool)) (listenerWaitSpec, error) {
+	for _, spec := range m.runtimeListenerWaits() {
+		if err := m.waitForPortOrExit(spec.Port, spec.Timeout, exitCh, logPath); err != nil {
+			return spec, err
+		}
+		m.logger.Printf("%s port %d is listening", spec.Label, spec.Port)
+		if recordStage != nil {
+			recordStage(spec.Stage, "ok", "", fmt.Sprintf("port=%d", spec.Port), false)
+		}
+	}
+	return listenerWaitSpec{}, nil
+}
+
+func (m *CoreManager) runtimeListenerWaits() []listenerWaitSpec {
+	tproxyPort := defaultPort(m.config.Proxy.TProxyPort, 10853)
+	dnsPort := defaultPort(m.config.Proxy.DNSPort, 10856)
+	specs := []listenerWaitSpec{
+		{
+			Stage:   "wait-tproxy",
+			Layer:   "wait tproxy port",
+			Code:    "TPROXY_PORT_DOWN",
+			Label:   "TPROXY",
+			Port:    tproxyPort,
+			Timeout: 30 * time.Second,
+		},
+		{
+			Stage:   "wait-dns",
+			Layer:   "wait dns port",
+			Code:    "DNS_LISTENER_DOWN",
+			Label:   "DNS",
+			Port:    dnsPort,
+			Timeout: 10 * time.Second,
+		},
+	}
+	if apiPort := m.config.Proxy.APIPort; apiPort > 0 {
+		specs = append(specs, listenerWaitSpec{
+			Stage:   "wait-api",
+			Layer:   "wait API port",
+			Code:    "API_PORT_DOWN",
+			Label:   "API",
+			Port:    apiPort,
+			Timeout: 10 * time.Second,
+		})
+	}
+	return specs
+}
+
+func defaultPort(value int, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
+}
+
 func tailFile(path string, maxBytes int) string {
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) == 0 {
@@ -584,11 +814,25 @@ func (m *CoreManager) Status() *StatusInfo {
 		PID:           m.pid,
 		ActiveProfile: m.activeProfile,
 		StartedAt:     m.startedAt,
+		StartReport:   m.lastStartReport,
+		RuntimeReport: m.lastRuntimeReport,
 	}
 	if !m.startedAt.IsZero() {
 		info.Uptime = time.Since(m.startedAt).Truncate(time.Second).String()
 	}
 	return info
+}
+
+func (m *CoreManager) LastStartReport() RuntimeStageReport {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastStartReport
+}
+
+func (m *CoreManager) LastRuntimeReport() RuntimeStageReport {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastRuntimeReport
 }
 
 // --------------------------------------------------------------------------
@@ -736,6 +980,7 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		"TPROXY_PORT":    strconv.Itoa(tproxyPort),
 		"DNS_PORT":       strconv.Itoa(dnsPort),
 		"API_PORT":       strconv.Itoa(apiPort),
+		"SOCKS_PORT":     strconv.Itoa(panelInbounds.SocksPort),
 		"HTTP_PORT":      strconv.Itoa(panelInbounds.HTTPPort),
 		"FWMARK":         fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":    "2023",
@@ -748,7 +993,13 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		"DNS_SCOPE":      appRouting.DNSScope,
 		"DNS_MODE":       appRouting.LegacyDNSMode,
 		"PROXY_MODE":     "tproxy",
+		"SHARING_MODE":   m.config.SharingModeEnv(),
+		"SHARING_IFACES": m.config.SharingInterfacesEnv(),
 	}
+}
+
+func (m *CoreManager) netstack() netstack.Manager {
+	return netstack.New(m.dataDir, m.scriptEnv(), ExecScript)
 }
 
 // renderConfig uses the config package's RenderSingboxConfig to produce

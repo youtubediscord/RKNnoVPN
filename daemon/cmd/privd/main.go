@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -23,13 +24,14 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/watcher"
 )
 
-var Version = "1.6.4"
+var Version = "1.7.0"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {
@@ -48,12 +50,16 @@ type daemon struct {
 	mu                    sync.Mutex // protects cfg
 	metricsMu             sync.Mutex
 	runtimeOpMu           sync.Mutex
+	reportMu              sync.Mutex
 	runtimeDesiredRunning bool
 	runtimeOpEpoch        uint64
 	traffic               trafficSnapshot
 	latency               latencySnapshot
 	egress                egressSnapshot
 	healthKick            time.Time
+	lastReloadReport      core.RuntimeStageReport
+
+	collectLeftoversOverride func(*config.Config) []string
 }
 
 type trafficSnapshot struct {
@@ -287,20 +293,26 @@ func (d *daemon) startSubsystems() {
 	d.mu.Unlock()
 
 	// Health monitor.
-	if cfg.Health.Enabled && cfg.Health.IntervalSec > 0 {
+	if d.healthMon != nil && cfg != nil && cfg.Health.Enabled && cfg.Health.IntervalSec > 0 {
 		d.healthMon.Start()
 	}
 
 	// Network watcher (best-effort -- missing inotifyd is not fatal).
-	if err := d.netWatcher.Start(); err != nil {
-		log.Printf("network watcher not started: %v", err)
+	if d.netWatcher != nil {
+		if err := d.netWatcher.Start(); err != nil {
+			log.Printf("network watcher not started: %v", err)
+		}
 	}
 }
 
 // stopSubsystems halts health monitoring and network watching.
 func (d *daemon) stopSubsystems() {
-	d.healthMon.Stop()
-	d.netWatcher.Stop()
+	if d.healthMon != nil {
+		d.healthMon.Stop()
+	}
+	if d.netWatcher != nil {
+		d.netWatcher.Stop()
+	}
 }
 
 // shutdown performs a full graceful shutdown of every subsystem.
@@ -309,7 +321,9 @@ func (d *daemon) shutdown() {
 	if err := d.coreMgr.Stop(); err != nil {
 		log.Printf("core stop error: %v", err)
 	}
-	d.ipcServer.Stop()
+	if d.ipcServer != nil {
+		d.ipcServer.Stop()
+	}
 }
 
 // --------------------------------------------------------------------------
@@ -626,6 +640,17 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	}
 
 	panelInbounds := cfg.ResolvePanelInbounds()
+	if panelInbounds.HTTPPort > 0 || panelInbounds.SocksPort > 0 {
+		appendFinding(
+			"LOCAL_HELPER_INBOUND_ENABLED",
+			"Локальный HTTP/SOCKS helper включён",
+			"Даже localhost helper выглядит как обычный proxy listener и расширяет поверхность детекта.",
+			"HIGH",
+			"LEAK",
+			"Оставьте HTTP/SOCKS helper ports равными 0 в production-режиме; для URL-test используйте core API только на время диагностики.",
+			"panel.inbounds",
+		)
+	}
 	if panelInbounds.AllowLAN && (panelInbounds.HTTPPort > 0 || panelInbounds.SocksPort > 0) {
 		appendFinding(
 			"LOCAL_HELPER_EXPOSED_ON_LAN",
@@ -638,8 +663,20 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 		)
 	}
 
+	if port := firstVisibleLocalProxyPort(cfg); port > 0 {
+		appendFinding(
+			"LOCALHOST_PROXY_PORT_VISIBLE",
+			"Локальный proxy/API port слушает на localhost",
+			"Открытый localhost SOCKS/HTTP/API listener может быть найден scanner-приложениями и выглядит как proxy artifact.",
+			"HIGH",
+			"LEAK",
+			"Отключите helper/API inbound или повторно выполните reset, если listener остался после остановки runtime.",
+			fmt.Sprintf("127.0.0.1:%d", port),
+		)
+	}
+
 	if linkOut, err := core.ExecCommand("ip", "link", "show"); err == nil {
-		if line := firstLineContainingAny(linkOut, "tun0", "wg0", "tap0", "ppp0", "ipsec"); line != "" {
+		if line := firstVPNLikeInterfaceLine(splitLines(linkOut)); line != "" {
 			appendFinding(
 				"VPN_LIKE_INTERFACE_PRESENT",
 				"Обнаружен VPN-похожий интерфейс",
@@ -663,6 +700,20 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 				"LEAK",
 				"Очистите global http_proxy и используйте только TPROXY/per-UID interception.",
 				"settings global http_proxy="+value,
+			)
+		}
+	}
+
+	if connectivityOut, err := core.ExecCommand("dumpsys", "connectivity"); err == nil {
+		if line := doctorFirstLoopbackDNSLine(splitLines(connectivityOut)); line != "" {
+			appendFinding(
+				"LOOPBACK_DNS_VISIBLE",
+				"System LinkProperties показывает loopback DNS",
+				"DNS-сервер 127.x или ::1 в LinkProperties виден обычным Android API и выглядит как proxy/VPN artifact.",
+				"HIGH",
+				"DNS",
+				"Не меняйте системный DNS на loopback; используйте только per-UID DNS redirect на уровне iptables.",
+				line,
 			)
 		}
 	}
@@ -705,10 +756,10 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 			appendFinding(
 				"LOCAL_PORT_PROTECTION_MISSING",
 				"Локальные порты PrivStack защищены не полностью",
-				"Обычные приложения могут получить доступ к TPROXY-, DNS- или управляющим портам.",
+				"Обычные приложения могут получить доступ к TPROXY-, DNS-, API-, SOCKS- или HTTP-helper портам.",
 				"HIGH",
 				"LEAK",
-				"Повторно примените правила iptables и проверьте DROP-правила для портов TPROXY, DNS и API.",
+				"Повторно примените правила iptables и проверьте DROP-правила для TPROXY, DNS, API, SOCKS и HTTP-helper портов.",
 				"iptables mangle PRIVSTACK_OUT",
 			)
 		}
@@ -1232,39 +1283,56 @@ func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) erro
 }
 
 func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string) error {
+	report := core.NewRuntimeStageReport(context)
+	d.setLastReloadReport(report)
+	recordStage := func(name string, status string, code string, detail string, rollbackApplied bool) {
+		report.AddStage(name, status, code, detail, rollbackApplied)
+		d.setLastReloadReport(report)
+	}
+	failStage := func(name string, code string, err error, rollbackApplied bool) error {
+		recordStage(name, "failed", code, err.Error(), rollbackApplied)
+		return err
+	}
+
 	d.stopSubsystems()
+	recordStage("stop-subsystems", "ok", "", "", false)
 	profile := cfg.ResolveProfile()
 	if err := d.coreMgr.HotSwap(profile); err != nil {
-		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		resetReport := d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		recordStage("reset-after-hot-swap-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
+		err = failStage("hot-swap", runtimeErrorCode(err, "CORE_SPAWN_FAILED"), err, resetReport.Status != "ok")
 		return fmt.Errorf("%s hot-swap failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
 	}
-	if err := d.reapplyRuntimeRules(cfg); err != nil {
-		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+	recordStage("hot-swap", "ok", "", d.coreMgr.LastRuntimeReport().Status, false)
+	netReport, err := d.reapplyRuntimeRulesReport(cfg)
+	if err != nil {
+		resetReport := d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		recordStage("reset-after-netstack-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
+		err = failStage("netstack-reapply", runtimeErrorCode(err, "RULES_NOT_APPLIED"), err, resetReport.Status != "ok")
 		return fmt.Errorf("%s rules failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
 	}
+	recordStage("netstack-reapply", "ok", "", fmt.Sprintf("steps=%d", len(netReport.Steps)), false)
 	d.rescueMgr.Reset()
+	recordStage("rescue-reset", "ok", "", "", false)
 	d.startSubsystems()
+	recordStage("start-subsystems", "ok", "", "", false)
 	snapshot := d.runtimeV2.RefreshHealth()
 	if !snapshot.Healthy() {
-		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
-		return fmt.Errorf("%s readiness gates failed; %s, runtime stopped for safety: %s", context, savedLabel, snapshot.LastError)
+		resetReport := d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		recordStage("reset-after-health-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
+		err := fmt.Errorf("%s", firstNonEmpty(snapshot.LastError, "readiness gates failed"))
+		err = failStage("health-refresh", firstNonEmpty(snapshot.LastCode, "READINESS_GATE_FAILED"), err, resetReport.Status != "ok")
+		return fmt.Errorf("%s readiness gates failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
 	}
+	recordStage("health-refresh", "ok", "", firstNonEmpty(snapshot.LastCode, "healthy"), false)
+	report.FinishOK()
+	d.setLastReloadReport(report)
 	return nil
 }
 
 func (d *daemon) resetNetworkState(cfg *config.Config) []string {
-	var errors []string
-	env := buildScriptEnv(cfg, d.dataDir)
-
-	dnsScript := filepath.Join(d.dataDir, "scripts", "dns.sh")
-	if err := core.ExecScript(dnsScript, "stop", env); err != nil {
-		errors = append(errors, "dns stop: "+err.Error())
-	}
-
-	iptablesScript := filepath.Join(d.dataDir, "scripts", "iptables.sh")
-	if err := core.ExecScript(iptablesScript, "stop", env); err != nil {
-		errors = append(errors, "iptables stop: "+err.Error())
-	}
+	report := netstack.New(d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript).Cleanup()
+	errors := append([]string(nil), report.Errors...)
 
 	_, _ = core.ExecCommand("killall", "-TERM", "sing-box")
 	_, _ = core.ExecCommand("killall", "-KILL", "sing-box")
@@ -1276,21 +1344,51 @@ func (d *daemon) resetNetworkState(cfg *config.Config) []string {
 }
 
 func (d *daemon) reapplyRuntimeRules(cfg *config.Config) error {
-	env := buildScriptEnv(cfg, d.dataDir)
-	iptablesScript := filepath.Join(d.dataDir, "scripts", "iptables.sh")
-	dnsScript := filepath.Join(d.dataDir, "scripts", "dns.sh")
+	_, err := d.reapplyRuntimeRulesReport(cfg)
+	return err
+}
 
-	_ = core.ExecScript(dnsScript, "stop", env)
-	_ = core.ExecScript(iptablesScript, "stop", env)
+func (d *daemon) reapplyRuntimeRulesReport(cfg *config.Config) (netstack.Report, error) {
+	manager := netstack.New(d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript)
+	report := manager.Apply()
+	if err := report.Err(); err != nil {
+		return report, err
+	}
+	report = manager.Verify()
+	if err := report.Err(); err != nil {
+		return report, err
+	}
+	return report, nil
+}
 
-	if err := core.ExecScript(iptablesScript, "start", env); err != nil {
-		return fmt.Errorf("iptables start: %w", err)
+func (d *daemon) setLastReloadReport(report core.RuntimeStageReport) {
+	d.reportMu.Lock()
+	defer d.reportMu.Unlock()
+	d.lastReloadReport = report
+}
+
+func (d *daemon) LastReloadReport() core.RuntimeStageReport {
+	d.reportMu.Lock()
+	defer d.reportMu.Unlock()
+	return d.lastReloadReport
+}
+
+type runtimeCodeError interface {
+	RuntimeCode() string
+}
+
+func runtimeErrorCode(err error, fallback string) string {
+	var coded runtimeCodeError
+	if errors.As(err, &coded) {
+		if code := strings.TrimSpace(coded.RuntimeCode()); code != "" {
+			return code
+		}
 	}
-	if err := core.ExecScript(dnsScript, "start", env); err != nil {
-		_ = core.ExecScript(iptablesScript, "stop", env)
-		return fmt.Errorf("dns start: %w", err)
+	var netErr *netstack.Error
+	if errors.As(err, &netErr) && strings.TrimSpace(netErr.Code) != "" {
+		return netErr.Code
 	}
-	return nil
+	return fallback
 }
 
 func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
@@ -1324,6 +1422,7 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"TPROXY_PORT":    strconv.Itoa(tproxyPort),
 		"DNS_PORT":       strconv.Itoa(dnsPort),
 		"API_PORT":       strconv.Itoa(apiPort),
+		"SOCKS_PORT":     strconv.Itoa(panelInbounds.SocksPort),
 		"HTTP_PORT":      strconv.Itoa(panelInbounds.HTTPPort),
 		"FWMARK":         fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":    "2023",
@@ -1336,7 +1435,28 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"DNS_SCOPE":      appRouting.DNSScope,
 		"DNS_MODE":       appRouting.LegacyDNSMode,
 		"PROXY_MODE":     "tproxy",
+		"SHARING_MODE":   cfg.SharingModeEnv(),
+		"SHARING_IFACES": cfg.SharingInterfacesEnv(),
 	}
+}
+
+func firstVisibleLocalProxyPort(cfg *config.Config) int {
+	ports := []int{10808, 10809, 9090}
+	if cfg != nil {
+		panelInbounds := cfg.ResolvePanelInbounds()
+		ports = append(ports, cfg.Proxy.APIPort, panelInbounds.SocksPort, panelInbounds.HTTPPort)
+	}
+	seen := map[int]bool{}
+	for _, port := range ports {
+		if port <= 0 || seen[port] {
+			continue
+		}
+		seen[port] = true
+		if isTCPPortListening("127.0.0.1", port, 150*time.Millisecond) {
+			return port
+		}
+	}
+	return 0
 }
 
 func pathHasGroupOrWorldBits(path string) bool {
@@ -1349,7 +1469,7 @@ func pathHasGroupOrWorldBits(path string) bool {
 
 func localPortProtectionPresent(cfg *config.Config) bool {
 	panelInbounds := cfg.ResolvePanelInbounds()
-	ports := []int{cfg.Proxy.TProxyPort, cfg.Proxy.DNSPort, cfg.Proxy.APIPort, panelInbounds.HTTPPort}
+	ports := []int{cfg.Proxy.TProxyPort, cfg.Proxy.DNSPort, cfg.Proxy.APIPort, panelInbounds.SocksPort, panelInbounds.HTTPPort}
 	if ports[0] == 0 {
 		ports[0] = 10853
 	}
@@ -1535,10 +1655,24 @@ func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCE
 		var urlErr error
 		if apiPort > 0 {
 			urlMS, statusCode, urlErr = testClashDelay(apiPort, profile.Tag, testURL, p.TimeoutMS)
+			result["throughput_status"] = "latency_only"
 		} else if len(profiles) == 1 {
-			urlMS, statusCode, urlErr = testTransparentURLDelay(cfg, testURL, p.TimeoutMS)
+			var metrics urlProbeMetrics
+			metrics, urlErr = testTransparentURLProbe(cfg, testURL, p.TimeoutMS)
+			urlMS = metrics.LatencyMS
+			statusCode = metrics.StatusCode
+			if metrics.ResponseBytes > 0 {
+				result["response_bytes"] = metrics.ResponseBytes
+			}
+			if metrics.ThroughputBps > 0 {
+				result["throughput_bps"] = metrics.ThroughputBps
+				result["throughput_status"] = "ok"
+			} else {
+				result["throughput_status"] = "latency_only"
+			}
 		} else {
 			urlErr = fmt.Errorf("api_disabled")
+			result["throughput_status"] = "unavailable"
 		}
 		if urlErr != nil {
 			result["url_status"] = "fail"
@@ -1611,18 +1745,31 @@ func testClashDelay(apiPort int, outboundTag string, testURL string, timeoutMS i
 }
 
 func testTransparentURLDelay(cfg *config.Config, testURL string, timeoutMS int) (int64, int, error) {
+	metrics, err := testTransparentURLProbe(cfg, testURL, timeoutMS)
+	return metrics.LatencyMS, metrics.StatusCode, err
+}
+
+type urlProbeMetrics struct {
+	LatencyMS     int64
+	StatusCode    int
+	ResponseBytes int64
+	ThroughputBps int64
+}
+
+func testTransparentURLProbe(cfg *config.Config, testURL string, timeoutMS int) (urlProbeMetrics, error) {
+	var metrics urlProbeMetrics
 	if cfg == nil {
-		return 0, 0, fmt.Errorf("config is nil")
+		return metrics, fmt.Errorf("config is nil")
 	}
 	if timeoutMS <= 0 {
 		timeoutMS = 5000
 	}
 	parsed, err := neturl.Parse(strings.TrimSpace(testURL))
 	if err != nil {
-		return 0, 0, err
+		return metrics, err
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return 0, 0, fmt.Errorf("unsupported URL scheme %q", parsed.Scheme)
+		return metrics, fmt.Errorf("unsupported URL scheme %q", parsed.Scheme)
 	}
 
 	timeout := time.Duration(timeoutMS) * time.Millisecond
@@ -1667,21 +1814,28 @@ func testTransparentURLDelay(cfg *config.Config, testURL string, timeoutMS int) 
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return 0, 0, err
+		return metrics, err
 	}
 	req.Header.Set("User-Agent", "PrivStack/health")
 
 	start := time.Now()
 	resp, err := (&http.Client{Timeout: timeout + time.Second, Transport: transport}).Do(req)
 	if err != nil {
-		return 0, 0, err
+		return metrics, err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return 0, resp.StatusCode, fmt.Errorf("transparent URL probe HTTP %d", resp.StatusCode)
+	bytesRead, _ := io.Copy(io.Discard, io.LimitReader(resp.Body, 4*1024*1024))
+	elapsed := time.Since(start)
+	metrics.LatencyMS = elapsed.Milliseconds()
+	metrics.StatusCode = resp.StatusCode
+	metrics.ResponseBytes = bytesRead
+	if bytesRead > 0 && elapsed > 0 {
+		metrics.ThroughputBps = int64(float64(bytesRead) / elapsed.Seconds())
 	}
-	return time.Since(start).Milliseconds(), resp.StatusCode, nil
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return metrics, fmt.Errorf("transparent URL probe HTTP %d", resp.StatusCode)
+	}
+	return metrics, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -1950,6 +2104,7 @@ func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCEr
 		"core":                     Version,
 		"privctl":                  Version,
 		"module":                   readModuleVersion(),
+		"current_release":          doctorReleaseIntegrityReport(d.dataDir),
 		"sing_box":                 d.singBoxVersion(singBoxPath, 20),
 		"control_protocol":         controlProtocolVersion,
 		"control_protocol_version": controlProtocolVersion,
@@ -2128,7 +2283,7 @@ func (d *daemon) restoreCurrentRuntimeAfterFailedUpdate() {
 }
 
 func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *health.HealthResult) map[string]interface{} {
-	activeNodeID, activeNodeName, activeNodeProtocol := d.activePanelNode()
+	activeNodeID, activeNodeName, activeNodeProtocol, activeNodeMode := d.activePanelNode()
 	if status == nil {
 		status = &core.StatusInfo{}
 	}
@@ -2162,6 +2317,7 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 		"active_node_id":       activeNodeID,
 		"active_node_name":     activeNodeName,
 		"active_node_protocol": activeNodeProtocol,
+		"active_node_mode":     activeNodeMode,
 		"egress_ip":            egressIP,
 		"country_flag":         nil,
 		"uptime":               uptimeSeconds(status.StartedAt),
@@ -2179,7 +2335,7 @@ func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *healt
 	}
 }
 
-func (d *daemon) activePanelNode() (string, string, string) {
+func (d *daemon) activePanelNode() (string, string, string, string) {
 	d.mu.Lock()
 	panel := d.cfg.Panel
 	d.mu.Unlock()
@@ -2196,18 +2352,24 @@ func (d *daemon) activePanelNode() (string, string, string) {
 			continue
 		}
 		if node.ID == activeID {
-			return node.ID, node.Name, node.Protocol
+			return node.ID, node.Name, node.Protocol, "manual"
 		}
 	}
 
 	if len(panel.Nodes) > 0 {
+		if activeID == "" && len(panel.Nodes) > 1 {
+			return "", "Auto", "selector", "auto_selector"
+		}
 		var first nodeMeta
 		if err := json.Unmarshal(panel.Nodes[0], &first); err == nil {
-			return first.ID, first.Name, first.Protocol
+			return first.ID, first.Name, first.Protocol, "single_node"
 		}
 	}
 
-	return activeID, "", ""
+	if activeID != "" {
+		return activeID, "", "", "manual_missing"
+	}
+	return "", "", "", "none"
 }
 
 func (d *daemon) buildTrafficPayload(state core.State, apiPort int) map[string]interface{} {

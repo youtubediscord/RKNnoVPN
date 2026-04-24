@@ -15,6 +15,7 @@ import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.model.ResetReport
 import com.privstack.panel.model.InboundsConfig
 import com.privstack.panel.model.Protocol
+import com.privstack.panel.model.SharingConfig
 import com.privstack.panel.model.TunConfig
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -77,10 +78,8 @@ class DaemonClient @Inject constructor(
             "backend.reset",
             "backend.applyDesiredState",
             "diagnostics.health",
-            "diagnostics.testNodes",
             "config-set-many",
             "panel-get",
-            "panel-set",
             "config-import",
             "network-reset",
             "version",
@@ -133,10 +132,10 @@ class DaemonClient @Inject constructor(
 
     /** Stop the proxy connection (keeps daemon alive). */
     suspend fun stop(): DaemonClientResult<Unit> {
-        requireCompatible("backend.stop", "backend.status")?.let { return it }
         return when (val result = backendStop()) {
             is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
-            is DaemonClientResult.DaemonError -> result.asFailure()
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) legacyStop() else result.asFailure()
             else -> result.asFailure()
         }
     }
@@ -196,6 +195,7 @@ class DaemonClient @Inject constructor(
         val appsResult = fetchSection("apps")
         val dnsResult = fetchSection("dns")
         val healthResult = fetchSection("health")
+        val sharingResult = fetchSection("sharing")
         val runtimeResult = fetchSection("runtime_v2")
 
         val node = nodeResult.dataOrReturnFailure() ?: return nodeResult.asFailure()
@@ -223,6 +223,16 @@ class DaemonClient @Inject constructor(
                 }
             else -> return runtimeResult.asFailure()
         }
+        val sharing = when (sharingResult) {
+            is DaemonClientResult.Ok -> sharingResult.data
+            is DaemonClientResult.DaemonError ->
+                if (sharingResult.message.contains("unknown config key: sharing", ignoreCase = true)) {
+                    json.encodeToJsonElement(DaemonSharingSection.serializer(), DaemonSharingSection())
+                } else {
+                    return sharingResult
+                }
+            else -> return sharingResult.asFailure()
+        }
 
         val panelResult = when (val result = panelGet()) {
             is DaemonClientResult.DaemonError ->
@@ -240,6 +250,7 @@ class DaemonClient @Inject constructor(
         val appsSection = json.decodeFromJsonElement(DaemonAppsSection.serializer(), apps)
         val dnsSection = json.decodeFromJsonElement(DaemonDnsSection.serializer(), dns)
         val healthSection = json.decodeFromJsonElement(DaemonHealthSection.serializer(), health)
+        val sharingSection = json.decodeFromJsonElement(DaemonSharingSection.serializer(), sharing)
         val runtimeSection = json.decodeFromJsonElement(DaemonRuntimeV2Section.serializer(), runtime)
 
         val storedNodes = panel.nodes
@@ -253,6 +264,7 @@ class DaemonClient @Inject constructor(
 
         val activeNodeId = when {
             panel.activeNodeId.isNotBlank() -> panel.activeNodeId
+            storedNodes.isNotEmpty() -> null
             effectiveNodes.isNotEmpty() -> effectiveNodes.first().id
             else -> null
         }
@@ -262,6 +274,7 @@ class DaemonClient @Inject constructor(
             put("routing_raw", routing)
             put("dns_raw", dns)
             put("health_raw", health)
+            put("sharing_raw", sharing)
         }
 
         return DaemonClientResult.Ok(
@@ -274,6 +287,7 @@ class DaemonClient @Inject constructor(
                 routing = routingSection.toPanelRouting(appsSection),
                 dns = dnsSection.toPanelDns(),
                 health = healthSection.toPanelHealth(),
+                sharing = sharingSection.toPanelSharing(),
                 tun = panel.tun ?: TunConfig(),
                 inbounds = panel.inbounds ?: InboundsConfig(),
                 extra = extra,
@@ -295,6 +309,7 @@ class DaemonClient @Inject constructor(
         val daemonApps = config.routing.toDaemonAppsSection()
         val daemonDns = config.dns.toDaemonDnsSection(extra?.obj("dns_raw"))
         val daemonHealth = config.health.toDaemonHealthSection(extra?.obj("health_raw"))
+        val daemonSharing = config.sharing.toDaemonSharingSection(extra?.obj("sharing_raw"))
         val daemonRuntime = config.runtime.toDaemonRuntimeSection()
         val values = buildConfigSetValues(
             config = config,
@@ -304,6 +319,7 @@ class DaemonClient @Inject constructor(
             daemonApps = daemonApps,
             daemonDns = daemonDns,
             daemonHealth = daemonHealth,
+            daemonSharing = daemonSharing,
             daemonRuntime = daemonRuntime,
             includePanel = false,
         )
@@ -323,7 +339,6 @@ class DaemonClient @Inject constructor(
         config: ProfileConfig,
         reload: Boolean = true,
     ): DaemonClientResult<Unit> {
-        requireCompatible("panel-set")?.let { return it }
         return when (val result = callVoid(
             "panel-set",
             buildJsonObject {
@@ -338,7 +353,8 @@ class DaemonClient @Inject constructor(
             },
             timeoutMs = 60_000L,
         )) {
-            is DaemonClientResult.DaemonError -> result
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) legacyPanelSet(config, reload) else result
             else -> result
         }
     }
@@ -351,6 +367,7 @@ class DaemonClient @Inject constructor(
         daemonApps: DaemonAppsSection,
         daemonDns: DaemonDnsSection,
         daemonHealth: DaemonHealthSection,
+        daemonSharing: DaemonSharingSection,
         daemonRuntime: DaemonRuntimeV2Section,
         includePanel: Boolean,
     ): JsonObject = buildJsonObject {
@@ -369,6 +386,7 @@ class DaemonClient @Inject constructor(
         put("apps", json.encodeToJsonElement(DaemonAppsSection.serializer(), daemonApps))
         put("dns", json.encodeToJsonElement(DaemonDnsSection.serializer(), daemonDns))
         put("health", json.encodeToJsonElement(DaemonHealthSection.serializer(), daemonHealth))
+        put("sharing", json.encodeToJsonElement(DaemonSharingSection.serializer(), daemonSharing))
         put("runtime_v2", json.encodeToJsonElement(DaemonRuntimeV2Section.serializer(), daemonRuntime))
     }
 
@@ -409,6 +427,7 @@ class DaemonClient @Inject constructor(
                     daemonApps = config.routing.toDaemonAppsSection(),
                     daemonDns = config.dns.toDaemonDnsSection(extra?.obj("dns_raw")),
                     daemonHealth = config.health.toDaemonHealthSection(extra?.obj("health_raw")),
+                    daemonSharing = config.sharing.toDaemonSharingSection(extra?.obj("sharing_raw")),
                     daemonRuntime = config.runtime.toDaemonRuntimeSection(),
                     includePanel = true,
                 )
@@ -438,10 +457,19 @@ class DaemonClient @Inject constructor(
     suspend fun configImport(links: String): DaemonClientResult<List<Node>> {
         requireCompatible("config-import")?.let { return it.asFailure() }
         val params = buildJsonObject { put("links", links) }
-        return call("config-import", params) {
+        return when (val result = call("config-import", params) {
             json.decodeFromJsonElement(ListSerializer(Node.serializer()), it)
+        }) {
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) legacyConfigImport(params) else result
+            else -> result
         }
     }
+
+    private suspend fun legacyConfigImport(params: JsonObject): DaemonClientResult<List<Node>> =
+        call("config.import", params) {
+            json.decodeFromJsonElement(ListSerializer(Node.serializer()), it)
+        }
 
     /** Fetch a subscription URL via the daemon's network access. */
     suspend fun subscriptionFetch(url: String): DaemonClientResult<SubscriptionFetchInfo> {
@@ -464,13 +492,27 @@ class DaemonClient @Inject constructor(
         url: String = "",
         timeoutMs: Int = 5_000,
     ): DaemonClientResult<NodeTestInfo> {
-        requireCompatible("diagnostics.testNodes")?.let { return it.asFailure() }
         when (val result = diagnosticsTestNodes(nodeIds, url, timeoutMs)) {
             is DaemonClientResult.Ok -> {
                 return DaemonClientResult.Ok(
                     NodeTestInfo(
                         url = url,
                         results = result.data.map { probe ->
+                            val tcpStatus = probe.tcpStatus.ifBlank {
+                                if (probe.tcpDirect != null) "ok" else "fail"
+                            }
+                            val urlStatus = probe.urlStatus.ifBlank {
+                                if (probe.tunnelDelay != null) "ok" else "not_run"
+                            }
+                            val verdict = probe.verdict.ifBlank {
+                                when {
+                                    tcpStatus == "ok" && urlStatus != "ok" -> "unusable"
+                                    urlStatus == "ok" && probe.tunnelDelay != null -> "usable"
+                                    else -> "unknown"
+                                }
+                            }.let { raw ->
+                                if (tcpStatus == "ok" && urlStatus != "ok") "unusable" else raw
+                            }
                             NodeTestResult(
                                 id = probe.id,
                                 name = probe.name,
@@ -480,15 +522,10 @@ class DaemonClient @Inject constructor(
                                 protocol = probe.protocol,
                                 tcpMs = probe.tcpDirect?.toInt(),
                                 urlMs = probe.tunnelDelay?.toInt(),
-                                tcpStatus = probe.tcpStatus.ifBlank {
-                                    if (probe.tcpDirect != null) "ok" else "fail"
-                                },
-                                urlStatus = probe.urlStatus.ifBlank {
-                                    if (probe.tunnelDelay != null) "ok" else "not_run"
-                                },
-                                verdict = probe.verdict.ifBlank {
-                                    if (probe.tunnelDelay != null) "usable" else "unknown"
-                                },
+                                throughputBps = probe.throughputBps,
+                                tcpStatus = tcpStatus,
+                                urlStatus = urlStatus,
+                                verdict = verdict,
                                 status = null,
                                 tcpError = if (probe.errorClass == "tcp_direct_failed") probe.errorClass else null,
                                 urlError = when (probe.errorClass) {
@@ -511,12 +548,36 @@ class DaemonClient @Inject constructor(
                     )
                 )
             }
-            is DaemonClientResult.DaemonError -> return result.asFailure()
+            is DaemonClientResult.DaemonError ->
+                if (isMethodNotFound(result)) return legacyNodeTest(nodeIds, url, timeoutMs) else return result.asFailure()
             is DaemonClientResult.RootDenied -> return result.asFailure()
             is DaemonClientResult.Timeout -> return result.asFailure()
             is DaemonClientResult.DaemonNotFound -> return result.asFailure()
             is DaemonClientResult.ParseError -> return result.asFailure()
             is DaemonClientResult.Failure -> return result.asFailure()
+        }
+    }
+
+    private suspend fun legacyNodeTest(
+        nodeIds: List<String>,
+        url: String,
+        timeoutMs: Int,
+    ): DaemonClientResult<NodeTestInfo> {
+        val params = buildJsonObject {
+            putJsonArray("node_ids") {
+                nodeIds.forEach { add(it) }
+            }
+            if (url.isNotBlank()) {
+                put("url", url)
+            }
+            put("timeout_ms", timeoutMs)
+        }
+        return call("node-test", params, timeoutMs = timeoutMs.toLong() + 5_000L) { element ->
+            val response = json.decodeFromJsonElement(LegacyNodeTestResponse.serializer(), element)
+            NodeTestInfo(
+                url = response.url.ifBlank { url },
+                results = response.results.map { it.toNodeTestResult() },
+            )
         }
     }
 
@@ -547,6 +608,9 @@ class DaemonClient @Inject constructor(
         call("network-reset", timeoutMs = 60_000L) {
             json.decodeFromJsonElement(ResetReport.serializer(), it)
         }
+
+    private suspend fun legacyStop(): DaemonClientResult<Unit> =
+        callVoid("stop", timeoutMs = 30_000L)
 
     suspend fun backendApplyDesiredState(desiredState: DesiredStateV2): DaemonClientResult<BackendStatusV2> =
         call(
@@ -723,6 +787,9 @@ class DaemonClient @Inject constructor(
                 moduleVersion = obj["module"]?.jsonObject?.get("version")?.jsonPrimitive?.content ?: "unknown",
                 moduleVersionCode = obj["module"]?.jsonObject?.get("versionCode")?.jsonPrimitive?.content ?: "",
                 modulePath = obj["module"]?.jsonObject?.get("path")?.jsonPrimitive?.content ?: "",
+                currentReleaseVersion = obj["current_release"]?.jsonObject?.get("version")?.jsonPrimitive?.content ?: "",
+                currentReleaseOK = obj["current_release"]?.jsonObject?.get("ok")?.jsonPrimitive?.booleanOrNull,
+                currentReleaseError = obj["current_release"]?.jsonObject?.get("error")?.jsonPrimitive?.contentOrNull ?: "",
                 singBoxAvailable = obj["sing_box"]?.jsonObject?.get("error")?.jsonPrimitive?.contentOrNull.isNullOrBlank(),
                 singBoxError = obj["sing_box"]?.jsonObject?.get("error")?.jsonPrimitive?.contentOrNull ?: "",
                 controlProtocolVersion = obj["control_protocol_version"]?.jsonPrimitive?.intOrNull
@@ -916,11 +983,11 @@ class DaemonClient @Inject constructor(
                     put("address", node.address)
                     put("port", node.port)
                     put("password", node.password.ifBlank { node.uuid })
-	                    if (node.serverPorts.isNotEmpty()) {
-	                        putJsonArray("server_ports") {
-	                            node.serverPorts.forEach { add(it) }
-	                        }
-	                    }
+                    if (node.serverPorts.isNotEmpty()) {
+                        putJsonArray("server_ports") {
+                            node.serverPorts.forEach { add(it) }
+                        }
+                    }
                     if (node.obfsType.isNotBlank() || node.obfsPassword.isNotBlank()) {
                         putJsonObject("obfs") {
                             put("type", node.obfsType.ifBlank { "salamander" })
@@ -934,6 +1001,24 @@ class DaemonClient @Inject constructor(
                     put("port", node.port)
                     put("uuid", node.uuid)
                     put("password", node.password)
+                }
+
+                "wireguard" -> putJsonObject("settings") {
+                    put("address", node.address)
+                    put("port", node.port)
+                    put("private_key", node.wgPrivateKey)
+                    put("peer_public_key", node.wgPeerPublicKey)
+                    if (node.wgPresharedKey.isNotBlank()) put("pre_shared_key", node.wgPresharedKey)
+                    putJsonArray("local_address") {
+                        node.wgLocalAddress.forEach { add(it) }
+                    }
+                    if (node.wgAllowedIps.isNotBlank()) put("allowed_ips", node.wgAllowedIps)
+                    if (node.wgMtu > 0) put("mtu", node.wgMtu)
+                    if (node.wgReserved.isNotEmpty()) {
+                        putJsonArray("reserved") {
+                            node.wgReserved.forEach { add(it) }
+                        }
+                    }
                 }
             }
 
@@ -1016,6 +1101,9 @@ data class VersionInfo(
     val moduleVersion: String = "unknown",
     val moduleVersionCode: String = "",
     val modulePath: String = "",
+    val currentReleaseVersion: String = "",
+    val currentReleaseOK: Boolean? = null,
+    val currentReleaseError: String = "",
     val singBoxAvailable: Boolean = true,
     val singBoxError: String = "",
     val controlProtocolVersion: Int = 0,
@@ -1026,7 +1114,25 @@ data class VersionInfo(
 ) {
     fun missingRequiredMethods(required: Collection<String>): List<String> {
         if (supportedMethods.isEmpty()) return required.toList()
-        return required.filterNot { it in supportedMethods }
+        val missing = mutableListOf<String>()
+        val emittedAlternativeGroups = mutableSetOf<Set<String>>()
+        for (method in required) {
+            if (method in supportedMethods) {
+                continue
+            }
+            val alternativeGroup = REQUIRED_METHOD_ALTERNATIVES.firstOrNull { method in it }
+            if (alternativeGroup != null) {
+                if (alternativeGroup.any { it in supportedMethods }) {
+                    continue
+                }
+                if (emittedAlternativeGroups.add(alternativeGroup)) {
+                    missing += alternativeGroup.joinToString(" or ")
+                }
+                continue
+            }
+            missing += method
+        }
+        return missing
     }
 
     fun missingCapabilities(requiredMethods: Collection<String>): List<String> {
@@ -1047,6 +1153,14 @@ data class VersionInfo(
         if (module != null && module != apk) {
             return "APK и модуль несовместимы: APK $apkVersion, module $moduleVersion. Установите matching release."
         }
+        val currentRelease = stableReleaseVersion(currentReleaseVersion)
+        if (currentRelease != null && currentRelease != apk) {
+            return "APK и current release несовместимы: APK $apkVersion, current $currentReleaseVersion. Установите matching release."
+        }
+        if (currentReleaseOK == false) {
+            val detail = currentReleaseError.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
+            return "APK и модуль несовместимы: current release повреждён$detail."
+        }
         return null
     }
 }
@@ -1058,6 +1172,10 @@ private fun stableReleaseVersion(raw: String): String? {
 }
 
 private val REPAIR_METHODS = setOf("backend.stop", "backend.reset", "network-reset", "network.reset")
+private val REQUIRED_METHOD_ALTERNATIVES = listOf(
+    setOf("backend.reset", "network-reset", "network.reset"),
+    setOf("config-import", "config.import"),
+)
 private val SING_BOX_METHODS = setOf("backend.start", "backend.restart")
 private val SCHEMA_V4_METHODS = setOf(
     "backend.applyDesiredState",
@@ -1076,6 +1194,7 @@ private fun capabilityForMethod(method: String): String? = when (method) {
     "config-set-many", "panel-get", "panel-set" -> "panel.nodes"
     "diagnostics.health" -> "diagnostics.health.v2"
     "diagnostics.testNodes" -> "diagnostics.testNodes.v2"
+    "node-test", "node.test" -> "node-test.tcp-direct"
     "self-check", "self.check" -> "privacy.self-check.v1"
     "logs", "doctor" -> "runtime.logs"
     else -> null
@@ -1149,6 +1268,7 @@ data class NodeTestResult(
     val protocol: String,
     val tcpMs: Int?,
     val urlMs: Int?,
+    val throughputBps: Long? = null,
     val tcpStatus: String = "",
     val urlStatus: String = "",
     val verdict: String = "",
@@ -1199,6 +1319,10 @@ private fun BackendStatusV2.toDaemonStatus(
             phase = appliedState.phase,
             lastCode = effectiveHealth.lastCode.ifBlank { null },
             lastError = effectiveHealth.lastError.ifBlank { null },
+            lastUserMessage = effectiveHealth.lastUserMessage.ifBlank { null },
+            lastDebug = effectiveHealth.lastDebug.ifBlank { null },
+            rollbackApplied = effectiveHealth.rollbackApplied,
+            stageReport = effectiveHealth.stageReport,
             checkedAt = effectiveHealth.checkedAt?.let(::epochSeconds) ?: 0L,
         ),
     )
@@ -1265,6 +1389,20 @@ private data class DaemonNodeSection(
     val realityPublicKey: String = "",
     @SerialName("reality_short_id")
     val realityShortID: String = "",
+    @SerialName("wg_private_key")
+    val wgPrivateKey: String = "",
+    @SerialName("wg_peer_public_key")
+    val wgPeerPublicKey: String = "",
+    @SerialName("wg_preshared_key")
+    val wgPresharedKey: String = "",
+    @SerialName("wg_local_address")
+    val wgLocalAddress: List<String> = emptyList(),
+    @SerialName("wg_allowed_ips")
+    val wgAllowedIps: String = "",
+    @SerialName("wg_mtu")
+    val wgMtu: Int = 0,
+    @SerialName("wg_reserved")
+    val wgReserved: List<Int> = emptyList(),
 )
 
 @Serializable
@@ -1425,7 +1563,7 @@ private data class DaemonRoutingSection(
             else -> if (customDirect.isNotEmpty() || customProxy.isNotEmpty() || customBlock.isNotEmpty()) {
                 com.privstack.panel.model.RoutingMode.RULES
             } else {
-                com.privstack.panel.model.RoutingMode.PROXY_ALL
+                com.privstack.panel.model.RoutingMode.PER_APP
             }
         }
 
@@ -1433,6 +1571,7 @@ private data class DaemonRoutingSection(
             mode = panelMode,
             appProxyList = if (apps.mode == "whitelist") apps.packages else emptyList(),
             appBypassList = if (apps.mode == "blacklist") apps.packages else emptyList(),
+            appGroupRoutes = apps.appGroups,
             directDomains = customDirect.filter { !it.contains("/") },
             proxyDomains = customProxy.filter { !it.contains("/") },
             blockDomains = customBlock.filter { !it.contains("/") },
@@ -1449,6 +1588,8 @@ private data class DaemonAppsSection(
     val mode: String = "whitelist",
     @SerialName("list")
     val packages: List<String> = emptyList(),
+    @SerialName("app_groups")
+    val appGroups: Map<String, String> = emptyMap(),
 )
 
 @Serializable
@@ -1456,7 +1597,7 @@ private data class DaemonDnsSection(
     @SerialName("proxy_dns")
     val proxyDns: String = "https://1.1.1.1/dns-query",
     @SerialName("direct_dns")
-    val directDns: String = "https://77.88.8.8/dns-query",
+    val directDns: String = "https://dns.google/dns-query",
     @SerialName("block_quic_dns")
     val blockQuicDns: Boolean = false,
     @SerialName("fake_ip")
@@ -1509,6 +1650,18 @@ private data class DaemonHealthSection(
 }
 
 @Serializable
+private data class DaemonSharingSection(
+    val enabled: Boolean = false,
+    val interfaces: List<String> = emptyList(),
+) {
+    fun toPanelSharing(): SharingConfig =
+        SharingConfig(
+            enabled = enabled,
+            interfaces = interfaces,
+        )
+}
+
+@Serializable
 private data class DaemonRuntimeV2Section(
     @SerialName("backend_kind")
     val backendKind: String = "ROOT_TPROXY",
@@ -1519,6 +1672,59 @@ private data class DaemonRuntimeV2Section(
         com.privstack.panel.model.RuntimeConfig(
             backendKind = parseBackendKind(backendKind),
             fallbackPolicy = parseFallbackPolicy(fallbackPolicy),
+    )
+}
+
+@Serializable
+private data class LegacyNodeTestResponse(
+    val url: String = "",
+    val results: List<LegacyNodeTestResult> = emptyList(),
+)
+
+@Serializable
+private data class LegacyNodeTestResult(
+    val id: String = "",
+    val name: String = "",
+    val tag: String = "",
+    val server: String = "",
+    val port: Int = 0,
+    val protocol: String = "",
+    @SerialName("tcp_ms")
+    val tcpMs: Long? = null,
+    @SerialName("url_ms")
+    val urlMs: Long? = null,
+    @SerialName("throughput_bps")
+    val throughputBps: Long? = null,
+    @SerialName("tcp_status")
+    val tcpStatus: String = "",
+    @SerialName("url_status")
+    val urlStatus: String = "",
+    val verdict: String = "",
+    val status: Int? = null,
+    @SerialName("tcp_error")
+    val tcpError: String? = null,
+    @SerialName("url_error")
+    val urlError: String? = null,
+    @SerialName("url_error_class")
+    val urlErrorClass: String? = null,
+) {
+    fun toNodeTestResult(): NodeTestResult =
+        NodeTestResult(
+            id = id,
+            name = name,
+            tag = tag,
+            server = server,
+            port = port,
+            protocol = protocol,
+            tcpMs = tcpMs?.toInt(),
+            urlMs = urlMs?.toInt(),
+            throughputBps = throughputBps,
+            tcpStatus = tcpStatus,
+            urlStatus = urlStatus,
+            verdict = verdict,
+            status = status,
+            tcpError = tcpError,
+            urlError = urlErrorClass ?: urlError,
         )
 }
 
@@ -1579,13 +1785,21 @@ private fun com.privstack.panel.model.RoutingConfig.toDaemonAppsSection(): Daemo
         com.privstack.panel.model.RoutingMode.PER_APP -> DaemonAppsSection(
             mode = "whitelist",
             packages = appProxyList,
+            appGroups = appGroupRoutes,
         )
         com.privstack.panel.model.RoutingMode.PER_APP_BYPASS -> DaemonAppsSection(
             mode = "blacklist",
             packages = appBypassList,
+            appGroups = appGroupRoutes,
         )
-        com.privstack.panel.model.RoutingMode.DIRECT -> DaemonAppsSection(mode = "off")
-        else -> DaemonAppsSection(mode = "all")
+        com.privstack.panel.model.RoutingMode.DIRECT -> DaemonAppsSection(
+            mode = "off",
+            appGroups = appGroupRoutes,
+        )
+        else -> DaemonAppsSection(
+            mode = "all",
+            appGroups = appGroupRoutes,
+        )
     }
 
 private fun com.privstack.panel.model.DnsConfig.toDaemonDnsSection(base: JsonObject?): DaemonDnsSection {
@@ -1616,6 +1830,17 @@ private fun HealthConfig.toDaemonHealthSection(base: JsonObject?): DaemonHealthS
         put("dns_is_hard_readiness", dnsIsHardReadiness)
     }
     return bridgeJson.decodeFromJsonElement(DaemonHealthSection.serializer(), merged)
+}
+
+private fun SharingConfig.toDaemonSharingSection(base: JsonObject?): DaemonSharingSection {
+    val merged = buildJsonObject {
+        base?.forEach { (key, value) -> put(key, value) }
+        put("enabled", enabled)
+        putJsonArray("interfaces") {
+            interfaces.map(String::trim).filter(String::isNotBlank).distinct().forEach { add(it) }
+        }
+    }
+    return bridgeJson.decodeFromJsonElement(DaemonSharingSection.serializer(), merged)
 }
 
 private fun com.privstack.panel.model.RuntimeConfig.toDaemonRuntimeSection(): DaemonRuntimeV2Section =
@@ -1701,6 +1926,24 @@ private fun Node.toDaemonNodeSection(): DaemonNodeSection {
                 protocol = "tuic",
                 uuid = settings?.get("uuid")?.jsonPrimitive?.content.orEmpty(),
                 password = settings?.get("password")?.jsonPrimitive?.content.orEmpty(),
+            )
+        }
+        Protocol.WIREGUARD -> {
+            DaemonNodeSection(
+                address = server,
+                port = port,
+                protocol = "wireguard",
+                wgPrivateKey = settings?.get("private_key")?.jsonPrimitive?.content.orEmpty(),
+                wgPeerPublicKey = settings?.get("peer_public_key")?.jsonPrimitive?.content.orEmpty(),
+                wgPresharedKey = settings?.get("pre_shared_key")?.jsonPrimitive?.content.orEmpty(),
+                wgLocalAddress = settings?.get("local_address")?.jsonArray
+                    ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+                    .orEmpty(),
+                wgAllowedIps = settings?.get("allowed_ips")?.jsonPrimitive?.content.orEmpty(),
+                wgMtu = settings?.get("mtu")?.jsonPrimitive?.intOrNull ?: 0,
+                wgReserved = settings?.get("reserved")?.jsonArray
+                    ?.mapNotNull { it.jsonPrimitive.intOrNull }
+                    .orEmpty(),
             )
         }
         else -> DaemonNodeSection(

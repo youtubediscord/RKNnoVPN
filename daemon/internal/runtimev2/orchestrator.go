@@ -476,6 +476,8 @@ func phaseFromHealth(health HealthSnapshot, fallback Phase) Phase {
 		"API_PORT_DOWN":
 		return PhaseCoreListening
 	case "RULES_NOT_APPLIED",
+		"NETSTACK_CLEANUP_FAILED",
+		"NETSTACK_VERIFY_FAILED",
 		"ROUTING_CHECK_FAILED",
 		"ROUTING_V4_MISSING",
 		"ROUTING_V6_MISSING",
@@ -512,6 +514,22 @@ type runtimeCodedError interface {
 	RuntimeCode() string
 }
 
+type runtimeUserMessageError interface {
+	RuntimeUserMessage() string
+}
+
+type runtimeDebugError interface {
+	RuntimeDebug() string
+}
+
+type runtimeRollbackError interface {
+	RuntimeRollbackApplied() bool
+}
+
+type runtimeStageReportError interface {
+	RuntimeStageReport() interface{}
+}
+
 func healthFromError(err error) HealthSnapshot {
 	health := HealthSnapshot{
 		LastError: err.Error(),
@@ -520,6 +538,22 @@ func healthFromError(err error) HealthSnapshot {
 	var coded runtimeCodedError
 	if errors.As(err, &coded) {
 		health.LastCode = coded.RuntimeCode()
+	}
+	var userMessage runtimeUserMessageError
+	if errors.As(err, &userMessage) {
+		health.LastUserMessage = userMessage.RuntimeUserMessage()
+	}
+	var debug runtimeDebugError
+	if errors.As(err, &debug) {
+		health.LastDebug = debug.RuntimeDebug()
+	}
+	var rollback runtimeRollbackError
+	if errors.As(err, &rollback) {
+		health.RollbackApplied = rollback.RuntimeRollbackApplied()
+	}
+	var stageReport runtimeStageReportError
+	if errors.As(err, &stageReport) {
+		health.StageReport = stageReport.RuntimeStageReport()
 	}
 	return health
 }
