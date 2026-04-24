@@ -69,6 +69,8 @@ Acceptance:
 - TCP до node есть, core запущен, routing готов -> UI не показывает большую
   красную `Ошибка` только из-за DNS/URL probe;
 - `node-test` сохраняет TCP-direct диагностику даже если tunnel/url недоступен;
+- `self-check` возвращает краткий health/privacy/compatibility summary без
+  полного diagnostic bundle;
 - `backend.reset` и `network-reset` не блокируются из-за version mismatch или
   отсутствующего `sing-box`;
 - кривой module update zip отбрасывается до остановки рабочего runtime.

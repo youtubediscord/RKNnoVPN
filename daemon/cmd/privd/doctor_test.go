@@ -46,7 +46,7 @@ func TestDoctorRedactsSensitiveJSON(t *testing.T) {
 
 func TestSupportedRPCMethodsAdvertiseCompatibilityAliases(t *testing.T) {
 	methods := supportedRPCMethods()
-	for _, method := range []string{"doctor", "config.import", "network.reset", "node.test"} {
+	for _, method := range []string{"doctor", "config.import", "network.reset", "node.test", "self-check"} {
 		if !slices.Contains(methods, method) {
 			t.Fatalf("supported methods missing %s: %#v", method, methods)
 		}
@@ -55,7 +55,7 @@ func TestSupportedRPCMethodsAdvertiseCompatibilityAliases(t *testing.T) {
 
 func TestSupportedCapabilitiesAdvertiseSchemaAndDiagnostics(t *testing.T) {
 	caps := supportedCapabilities()
-	for _, capability := range []string{"config.schema.v4", "diagnostics.bundle.v2", "node-test.tcp-direct", "runtime.logs"} {
+	for _, capability := range []string{"config.schema.v4", "diagnostics.bundle.v2", "node-test.tcp-direct", "privacy.self-check.v1", "runtime.logs"} {
 		if !slices.Contains(caps, capability) {
 			t.Fatalf("supported capabilities missing %s: %#v", capability, caps)
 		}

@@ -160,6 +160,40 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	return report, nil
 }
 
+func (d *daemon) handleSelfCheck(params *json.RawMessage) (interface{}, *ipc.RPCError) {
+	summary, err := d.buildSelfCheckSummary(80)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+	}
+	return summary, nil
+}
+
+func (d *daemon) buildSelfCheckSummary(lines int) (doctorSummary, error) {
+	d.mu.Lock()
+	cfg := d.cfg
+	dataDir := d.dataDir
+	d.mu.Unlock()
+	if cfg == nil {
+		return doctorSummary{Status: "failed", Issues: []string{"config unavailable"}, IssueCount: 1}, nil
+	}
+	if lines <= 0 {
+		lines = 80
+	}
+	renderedConfigPath := filepath.Join(dataDir, "config", "rendered", "singbox.json")
+	singBoxPath := filepath.Join(dataDir, "bin", "sing-box")
+	healthResult := d.healthMon.RunOnce()
+	healthSnapshot := d.buildRuntimeV2HealthSnapshot(healthResult, true)
+	return buildDoctorSummary(
+		healthSnapshot,
+		d.collectNetworkLeftovers(cfg),
+		d.testNodeProbesV2(cfg.Health.URL, 2500, nil),
+		doctorPortStatuses(cfg),
+		d.privacyDiagnostics(cfg, lines),
+		readModuleVersion(),
+		d.singBoxCheck(singBoxPath, renderedConfigPath, lines),
+	), nil
+}
+
 func buildDoctorSummary(
 	healthSnapshot runtimev2.HealthSnapshot,
 	leftovers []string,
@@ -297,6 +331,7 @@ func supportedCapabilities() []string {
 		"node-test.url",
 		"panel.nodes",
 		"privacy.audit.v2",
+		"privacy.self-check.v1",
 		"runtime.logs",
 	}
 }
@@ -329,6 +364,8 @@ func supportedRPCMethods() []string {
 		"node.test",
 		"panel-get",
 		"panel-set",
+		"self-check",
+		"self.check",
 		"reload",
 		"start",
 		"status",

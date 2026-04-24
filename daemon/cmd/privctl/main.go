@@ -33,6 +33,8 @@ var commands = map[string]string{
 	"health":                    "Get health check status",
 	"audit":                     "Run privacy/security audit",
 	"doctor":                    "Collect redacted diagnostics for support",
+	"self-check":                "Return concise health/privacy/compatibility summary",
+	"self.check":                "Alias for self-check",
 	"app.list":                  "List installed apps known to the daemon",
 	"app.resolveUid":            "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
 	"panel-get":                 "Get APK-facing panel state",

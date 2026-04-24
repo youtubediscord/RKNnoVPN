@@ -1076,6 +1076,7 @@ private fun capabilityForMethod(method: String): String? = when (method) {
     "config-set-many", "panel-get", "panel-set" -> "panel.nodes"
     "diagnostics.health" -> "diagnostics.health.v2"
     "diagnostics.testNodes" -> "diagnostics.testNodes.v2"
+    "self-check", "self.check" -> "privacy.self-check.v1"
     "logs", "doctor" -> "runtime.logs"
     else -> null
 }

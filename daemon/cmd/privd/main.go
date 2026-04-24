@@ -412,6 +412,8 @@ func (d *daemon) registerHandlers() {
 	d.ipcServer.Register("node-test", d.handleNodeTest)
 	d.ipcServer.Register("node.test", d.handleNodeTest)
 	d.ipcServer.Register("doctor", d.handleDoctor)
+	d.ipcServer.Register("self-check", d.handleSelfCheck)
+	d.ipcServer.Register("self.check", d.handleSelfCheck)
 	d.ipcServer.Register("logs", d.handleLogs)
 	d.ipcServer.Register("version", d.handleVersion)
 	d.ipcServer.Register("update-check", d.handleUpdateCheck)
