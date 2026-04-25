@@ -22,7 +22,7 @@ set -eu
 # ============================================================================
 
 TAG="PrivStack:iptables"
-SCRIPT_VERSION="v1.7.5"
+SCRIPT_VERSION="v1.7.6"
 
 # Chain name prefix — all PrivStack chains start with this
 CHAIN_PREFIX="PRIVSTACK"

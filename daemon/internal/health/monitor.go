@@ -4,10 +4,8 @@
 package health
 
 import (
-	"context"
 	"fmt"
 	"log"
-	"net"
 	neturl "net/url"
 	"os"
 	"strconv"
@@ -412,68 +410,17 @@ func (h *HealthMonitor) checkDNSListener() CheckResult {
 	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS listener 127.0.0.1:%d открыт", port)}
 }
 
-// checkDNS attempts a trivial DNS lookup via the system resolver.
-// This is best-effort: a failure here alone does not necessarily mean the
-// proxy is broken (the upstream DNS might be temporarily unreachable).
+// checkDNS intentionally does not send a standalone query to the local DNS
+// port. The sing-box DNS inbound is a transparent redirect listener: direct
+// probes to 127.0.0.1:<dnsPort> have no original destination and loop back to
+// the listener itself. DNS readiness is therefore represented by listener and
+// iptables hook checks; data-plane health is covered by the outbound URL probe.
 func (h *HealthMonitor) checkDNS() CheckResult {
 	port := h.dnsPort
 	if port <= 0 {
 		port = 10856
 	}
-
-	timeout := h.dnsTimeout
-	if timeout <= 0 {
-		timeout = 3 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	resolver := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			dialer := &net.Dialer{Timeout: timeout}
-			return dialer.DialContext(ctx, "udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-		},
-	}
-
-	hosts := h.dnsHosts
-	if len(hosts) == 0 {
-		hosts = []string{"dns.google"}
-	}
-	var failures []string
-	lastCode := "DNS_LOOKUP_FAILED"
-	for _, host := range hosts {
-		addrs, err := resolver.LookupHost(ctx, host)
-		if err != nil {
-			lastCode = classifyDNSError(err)
-			failures = append(failures, fmt.Sprintf("%s: %v", host, err))
-			continue
-		}
-		if len(addrs) == 0 {
-			lastCode = "DNS_EMPTY_RESPONSE"
-			failures = append(failures, host+": empty response")
-			continue
-		}
-		return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS для %s через 127.0.0.1:%d работает", host, port)}
-	}
-	return CheckResult{Pass: false, Detail: fmt.Sprintf("DNS probe через 127.0.0.1:%d не прошёл: %s", port, strings.Join(failures, "; ")), Code: lastCode}
-}
-
-func classifyDNSError(err error) string {
-	if err == nil {
-		return ""
-	}
-	detail := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(detail, "i/o timeout"),
-		strings.Contains(detail, "deadline exceeded"),
-		strings.Contains(detail, "timeout"):
-		return "DNS_LOOKUP_TIMEOUT"
-	case strings.Contains(detail, "connection refused"):
-		return "DNS_LISTENER_DOWN"
-	default:
-		return "DNS_LOOKUP_FAILED"
-	}
+	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS redirect listener 127.0.0.1:%d проверяется без standalone lookup", port)}
 }
 
 // --------------------------------------------------------------------------

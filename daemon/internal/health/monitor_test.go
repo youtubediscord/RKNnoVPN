@@ -3,6 +3,7 @@ package health
 import (
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,6 +120,33 @@ func TestRunOnceCanPromoteDNSProbeToHardReadiness(t *testing.T) {
 	result := monitor.RunOnce()
 	if result.Overall {
 		t.Fatalf("DNS failure must fail hard readiness when explicitly configured: %#v", result)
+	}
+}
+
+func TestCheckDNSSkipsStandaloneRedirectProbe(t *testing.T) {
+	cfg := config.DefaultConfig()
+	manager := core.NewCoreManager(cfg, t.TempDir(), log.New(os.Stderr, "", 0))
+	monitor := NewHealthMonitor(
+		manager,
+		time.Second,
+		1,
+		cfg.Proxy.TProxyPort,
+		cfg.Proxy.DNSPort,
+		cfg.Proxy.Mark,
+		cfg.Health.URL,
+		time.Second,
+		log.New(os.Stderr, "", 0),
+	)
+
+	result := monitor.checkDNS()
+	if !result.Pass {
+		t.Fatalf("transparent redirect DNS probe should be skipped as healthy diagnostic: %#v", result)
+	}
+	if result.Code != "" {
+		t.Fatalf("skipped DNS probe should not emit a failure code: %#v", result)
+	}
+	if !strings.Contains(result.Detail, "standalone lookup") {
+		t.Fatalf("detail should explain why the lookup was skipped: %#v", result)
 	}
 }
 
