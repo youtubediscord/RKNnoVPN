@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +13,13 @@ import (
 )
 
 const networkStackUID = "1073"
+
+var (
+	packageListPath          = "/data/system/packages.list"
+	dataUserPath             = "/data/user"
+	packageUIDCommandTimeout = 2 * time.Second
+	runPackageUIDCommand     = defaultPackageUIDCommand
+)
 
 var SelfTestProtectedPackages = []string{
 	"com.notcvnt.rknhardering",
@@ -121,6 +129,36 @@ var builtInAlwaysDirectKeywords = []string{
 	"tun2socks",
 }
 
+// PackageUIDSourceStatus describes whether one Android package UID source can
+// currently provide package -> UID mappings.
+type PackageUIDSourceStatus struct {
+	Source    string `json:"source"`
+	Available bool   `json:"available"`
+	Entries   int    `json:"entries,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// PackageUIDResolution is the structured form behind the legacy
+// space-separated UID resolver contract.
+type PackageUIDResolution struct {
+	Source             string                   `json:"source,omitempty"`
+	UIDs               []string                 `json:"uids,omitempty"`
+	UIDString          string                   `json:"uidString,omitempty"`
+	RequestedPackages  []string                 `json:"requestedPackages,omitempty"`
+	UnresolvedPackages []string                 `json:"unresolvedPackages,omitempty"`
+	Errors             []string                 `json:"errors,omitempty"`
+	Sources            []PackageUIDSourceStatus `json:"sources,omitempty"`
+}
+
+// PackageRoutingResolution reports both selected per-app routing packages and
+// the hard-direct bypass package set from one shared source probe.
+type PackageRoutingResolution struct {
+	Selected     PackageUIDResolution     `json:"selected"`
+	AlwaysDirect PackageUIDResolution     `json:"alwaysDirect"`
+	Sources      []PackageUIDSourceStatus `json:"sources"`
+	Errors       []string                 `json:"errors,omitempty"`
+}
+
 // ExecScript runs a shell script with a single positional argument (typically
 // "start" or "stop") and optional environment variables injected from env.
 //
@@ -217,46 +255,56 @@ func ExecCommand(name string, args ...string) (string, error) {
 // For multi-user devices, UIDs for additional profiles are computed as
 // user_id * 100000 + app_id (where app_id = uid % 100000).
 func ResolvePackageUIDs(packages []string) string {
-	if len(packages) == 0 {
-		return ""
-	}
-
-	// Build a lookup set for O(1) matching.
-	wanted := make(map[string]bool, len(packages))
-	for _, pkg := range packages {
-		pkg = strings.TrimSpace(pkg)
-		if pkg != "" {
-			wanted[pkg] = true
-		}
-	}
-	if len(wanted) == 0 {
-		return ""
-	}
-
-	return resolvePackageUIDsMatching(func(pkgName string) bool {
-		return wanted[pkgName]
-	})
+	return ResolvePackageUIDsDetailed(packages).UIDString
 }
 
 // ResolveAlwaysDirectUIDs resolves user-configured and built-in packages that
 // must bypass PrivStack before TPROXY/DNS interception.
 func ResolveAlwaysDirectUIDs(packages []string) string {
-	userPackages := make(map[string]bool, len(packages))
-	for _, pkg := range packages {
-		pkg = strings.TrimSpace(pkg)
-		if pkg != "" {
-			userPackages[pkg] = true
-		}
-	}
-
-	return resolvePackageUIDsMatching(func(pkgName string) bool {
-		return userPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
-	})
+	return ResolveAlwaysDirectUIDsDetailed(packages).UIDString
 }
 
 // BuildBypassUIDs returns the complete UID bypass list used by iptables/DNS.
 func BuildBypassUIDs(alwaysDirectPackages []string) string {
 	return joinUniqueFields(networkStackUID, ResolveAlwaysDirectUIDs(alwaysDirectPackages))
+}
+
+// ResolvePackageUIDsDetailed resolves explicitly selected packages and keeps
+// diagnostics about source selection and unresolved package names.
+func ResolvePackageUIDsDetailed(packages []string) PackageUIDResolution {
+	wanted := packageSet(packages)
+	return resolvePackageUIDsFromSources(wanted.values(), func(pkgName string) bool {
+		return wanted[pkgName]
+	}, false)
+}
+
+// ResolveAlwaysDirectUIDsDetailed resolves user-configured and built-in
+// packages that must bypass PrivStack, with structured diagnostics.
+func ResolveAlwaysDirectUIDsDetailed(packages []string) PackageUIDResolution {
+	userPackages := packageSet(packages)
+	return resolvePackageUIDsFromSources(userPackages.values(), func(pkgName string) bool {
+		return userPackages[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
+	}, false)
+}
+
+// BuildPackageRoutingResolution resolves both app-routing package sets from a
+// shared source probe for doctor diagnostics.
+func BuildPackageRoutingResolution(packages []string, alwaysDirectPackages []string) PackageRoutingResolution {
+	catalogs := loadPackageUIDCatalogs(true)
+	selectedWanted := packageSet(packages)
+	alwaysWanted := packageSet(alwaysDirectPackages)
+	selected := resolvePackageUIDsFromCatalogs(catalogs, selectedWanted.values(), func(pkgName string) bool {
+		return selectedWanted[pkgName]
+	})
+	alwaysDirect := resolvePackageUIDsFromCatalogs(catalogs, alwaysWanted.values(), func(pkgName string) bool {
+		return alwaysWanted[pkgName] || IsBuiltInAlwaysDirectPackage(pkgName)
+	})
+	return PackageRoutingResolution{
+		Selected:     selected,
+		AlwaysDirect: alwaysDirect,
+		Sources:      sourceStatuses(catalogs),
+		Errors:       sourceErrors(catalogs),
+	}
 }
 
 // AppRoutingEnv is the explicit UID/scope contract passed to the shell
@@ -324,31 +372,262 @@ func IsBuiltInAlwaysDirectPackage(pkgName string) bool {
 	return false
 }
 
-func resolvePackageUIDsMatching(match func(string) bool) string {
-	data, err := os.ReadFile("/data/system/packages.list")
-	if err != nil {
-		return ""
-	}
+type normalizedPackageSet map[string]bool
 
-	// Discover active user IDs from /data/user/ directories.
-	// User 0 is always present; additional profiles appear as /data/user/<id>.
-	userIDs := []int{0}
-	entries, err := os.ReadDir("/data/user")
-	if err == nil {
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
+type packageUIDCatalogResult struct {
+	source  string
+	uids    map[string]int
+	status  PackageUIDSourceStatus
+	errText string
+}
+
+func packageSet(packages []string) normalizedPackageSet {
+	result := normalizedPackageSet{}
+	for _, pkg := range packages {
+		pkg = strings.TrimSpace(pkg)
+		if pkg != "" {
+			result[pkg] = true
+		}
+	}
+	return result
+}
+
+func (s normalizedPackageSet) values() []string {
+	values := make([]string, 0, len(s))
+	for value := range s {
+		values = append(values, value)
+	}
+	sort.Strings(values)
+	return values
+}
+
+func resolvePackageUIDsFromSources(requested []string, match func(string) bool, probeAll bool) PackageUIDResolution {
+	catalogs := make([]packageUIDCatalogResult, 0, 3)
+	var best PackageUIDResolution
+	bestResolvedRequested := -1
+	bestUnresolved := len(requested) + 1
+
+	for _, loader := range packageUIDCatalogLoaders() {
+		catalog, err := loader.load()
+		result := newPackageUIDCatalogResult(loader.source, catalog, err)
+		catalogs = append(catalogs, result)
+		if len(result.uids) > 0 {
+			candidate := resolvePackageUIDsFromCatalog(result.source, result.uids, requested, match)
+			resolvedRequested := len(requested) - len(candidate.UnresolvedPackages)
+			if len(requested) == 0 {
+				resolvedRequested = len(candidate.UIDs)
 			}
-			if uid, parseErr := strconv.Atoi(e.Name()); parseErr == nil && uid > 0 {
-				userIDs = append(userIDs, uid)
+			if best.Source == "" ||
+				len(candidate.UnresolvedPackages) < bestUnresolved ||
+				(len(candidate.UnresolvedPackages) == bestUnresolved && resolvedRequested > bestResolvedRequested) {
+				best = candidate
+				bestResolvedRequested = resolvedRequested
+				bestUnresolved = len(candidate.UnresolvedPackages)
+			}
+			if !probeAll && (len(requested) == 0 || len(candidate.UnresolvedPackages) == 0) {
+				break
 			}
 		}
 	}
 
-	var uids []string
-	seen := make(map[int]bool)
+	if best.Source == "" {
+		best.RequestedPackages = append([]string(nil), requested...)
+		best.UnresolvedPackages = append([]string(nil), requested...)
+	}
+	best.Sources = sourceStatuses(catalogs)
+	best.Errors = sourceErrors(catalogs)
+	return best
+}
 
-	for _, line := range strings.Split(string(data), "\n") {
+func resolvePackageUIDsFromCatalogs(catalogs []packageUIDCatalogResult, requested []string, match func(string) bool) PackageUIDResolution {
+	var best PackageUIDResolution
+	bestResolvedRequested := -1
+	bestUnresolved := len(requested) + 1
+	statuses := sourceStatuses(catalogs)
+	errors := sourceErrors(catalogs)
+
+	for _, catalog := range catalogs {
+		if len(catalog.uids) == 0 {
+			continue
+		}
+		result := resolvePackageUIDsFromCatalog(catalog.source, catalog.uids, requested, match)
+		resolvedRequested := len(requested) - len(result.UnresolvedPackages)
+		if len(requested) == 0 {
+			resolvedRequested = len(result.UIDs)
+		}
+		if best.Source == "" ||
+			len(result.UnresolvedPackages) < bestUnresolved ||
+			(len(result.UnresolvedPackages) == bestUnresolved && resolvedRequested > bestResolvedRequested) {
+			best = result
+			bestResolvedRequested = resolvedRequested
+			bestUnresolved = len(result.UnresolvedPackages)
+		}
+		if len(requested) == 0 || len(result.UnresolvedPackages) == 0 {
+			break
+		}
+	}
+
+	if best.Source == "" {
+		best.RequestedPackages = append([]string(nil), requested...)
+		best.UnresolvedPackages = append([]string(nil), requested...)
+	}
+	best.Sources = statuses
+	best.Errors = errors
+	return best
+}
+
+func resolvePackageUIDsFromCatalog(source string, catalog map[string]int, requested []string, match func(string) bool) PackageUIDResolution {
+	userIDs := discoverAndroidUserIDs()
+	seenUIDs := map[int]bool{}
+	resolvedPackages := map[string]bool{}
+	uidInts := make([]int, 0)
+
+	pkgNames := make([]string, 0, len(catalog))
+	for pkgName := range catalog {
+		pkgNames = append(pkgNames, pkgName)
+	}
+	sort.Strings(pkgNames)
+	for _, pkgName := range pkgNames {
+		if !match(pkgName) {
+			continue
+		}
+		appID := catalog[pkgName] % 100000
+		for _, userID := range userIDs {
+			fullUID := userID*100000 + appID
+			if !seenUIDs[fullUID] {
+				seenUIDs[fullUID] = true
+				uidInts = append(uidInts, fullUID)
+			}
+		}
+		resolvedPackages[pkgName] = true
+	}
+	sort.Ints(uidInts)
+
+	uids := make([]string, 0, len(uidInts))
+	for _, uid := range uidInts {
+		uids = append(uids, strconv.Itoa(uid))
+	}
+
+	unresolved := make([]string, 0)
+	for _, pkgName := range requested {
+		if !resolvedPackages[pkgName] {
+			unresolved = append(unresolved, pkgName)
+		}
+	}
+	return PackageUIDResolution{
+		Source:             source,
+		UIDs:               uids,
+		UIDString:          strings.Join(uids, " "),
+		RequestedPackages:  append([]string(nil), requested...),
+		UnresolvedPackages: unresolved,
+	}
+}
+
+func loadPackageUIDCatalogs(probeAll bool) []packageUIDCatalogResult {
+	loaders := packageUIDCatalogLoaders()
+	results := make([]packageUIDCatalogResult, 0, len(loaders))
+	for _, loader := range loaders {
+		catalog, err := loader.load()
+		result := newPackageUIDCatalogResult(loader.source, catalog, err)
+		results = append(results, result)
+		if !probeAll && result.status.Available {
+			break
+		}
+	}
+	return results
+}
+
+func packageUIDCatalogLoaders() []struct {
+	source string
+	load   func() (map[string]int, error)
+} {
+	return []struct {
+		source string
+		load   func() (map[string]int, error)
+	}{
+		{"packages.list", loadPackagesListCatalog},
+		{"cmd_package", loadCmdPackageCatalog},
+		{"cmd_package_shell", loadCmdPackageShellCatalog},
+	}
+}
+
+func newPackageUIDCatalogResult(source string, catalog map[string]int, err error) packageUIDCatalogResult {
+	result := packageUIDCatalogResult{
+		source: source,
+		uids:   catalog,
+		status: PackageUIDSourceStatus{Source: source, Entries: len(catalog)},
+	}
+	if err != nil {
+		result.errText = err.Error()
+		result.status.Error = err.Error()
+	} else {
+		result.status.Available = true
+	}
+	return result
+}
+
+func sourceStatuses(catalogs []packageUIDCatalogResult) []PackageUIDSourceStatus {
+	statuses := make([]PackageUIDSourceStatus, 0, len(catalogs))
+	for _, catalog := range catalogs {
+		statuses = append(statuses, catalog.status)
+	}
+	return statuses
+}
+
+func sourceErrors(catalogs []packageUIDCatalogResult) []string {
+	errors := make([]string, 0)
+	for _, catalog := range catalogs {
+		if catalog.errText != "" {
+			errors = append(errors, catalog.source+": "+catalog.errText)
+		}
+	}
+	return errors
+}
+
+func loadPackagesListCatalog() (map[string]int, error) {
+	data, err := os.ReadFile(packageListPath)
+	if err != nil {
+		return nil, err
+	}
+	return parsePackagesListUIDs(string(data))
+}
+
+func loadCmdPackageCatalog() (map[string]int, error) {
+	out, err := runPackageUIDCommand(false)
+	if err != nil {
+		return nil, err
+	}
+	return parseCmdPackageUIDs(out)
+}
+
+func loadCmdPackageShellCatalog() (map[string]int, error) {
+	out, err := runPackageUIDCommand(true)
+	if err != nil {
+		return nil, err
+	}
+	return parseCmdPackageUIDs(out)
+}
+
+func defaultPackageUIDCommand(asShell bool) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), packageUIDCommandTimeout)
+	defer cancel()
+	name := "cmd"
+	args := []string{"package", "list", "packages", "-U"}
+	if asShell {
+		name = "su"
+		args = []string{"-lp", "2000", "-c", "cmd package list packages -U"}
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return strings.TrimSpace(string(out)), ctx.Err()
+	}
+	return strings.TrimSpace(string(out)), err
+}
+
+func parsePackagesListUIDs(data string) (map[string]int, error) {
+	uids := map[string]int{}
+	for _, line := range strings.Split(data, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || line[0] == '#' {
 			continue
@@ -357,36 +636,71 @@ func resolvePackageUIDsMatching(match func(string) bool) string {
 		if len(fields) < 2 {
 			continue
 		}
-		pkgName := fields[0]
-		if !match(pkgName) {
+		uid, err := strconv.Atoi(fields[1])
+		if err != nil {
 			continue
 		}
-		appUID, parseErr := strconv.Atoi(fields[1])
-		if parseErr != nil {
-			continue
-		}
-		appID := appUID % 100000
+		uids[fields[0]] = uid
+	}
+	if len(uids) == 0 {
+		return nil, fmt.Errorf("no package UID entries found")
+	}
+	return uids, nil
+}
 
-		// Emit UIDs for all active user profiles.
-		for _, userID := range userIDs {
-			fullUID := userID*100000 + appID
-			if !seen[fullUID] {
-				seen[fullUID] = true
-				uids = append(uids, strconv.Itoa(fullUID))
+func parseCmdPackageUIDs(data string) (map[string]int, error) {
+	uids := map[string]int{}
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		var pkgName string
+		var uid int
+		uidSet := false
+		for _, field := range fields {
+			key, value, ok := strings.Cut(field, ":")
+			if !ok {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "package":
+				pkgName = strings.TrimSpace(value)
+			case "uid", "userid":
+				parsed, err := strconv.Atoi(strings.TrimSpace(value))
+				if err == nil {
+					uid = parsed
+					uidSet = true
+				}
 			}
 		}
-	}
-
-	sort.Slice(uids, func(i, j int) bool {
-		left, leftErr := strconv.Atoi(uids[i])
-		right, rightErr := strconv.Atoi(uids[j])
-		if leftErr != nil || rightErr != nil {
-			return uids[i] < uids[j]
+		if pkgName != "" && uidSet {
+			uids[pkgName] = uid
 		}
-		return left < right
-	})
+	}
+	if len(uids) == 0 {
+		return nil, fmt.Errorf("no package UID entries found")
+	}
+	return uids, nil
+}
 
-	return strings.Join(uids, " ")
+func discoverAndroidUserIDs() []int {
+	userIDs := []int{0}
+	entries, err := os.ReadDir(dataUserPath)
+	if err != nil {
+		return userIDs
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if uid, parseErr := strconv.Atoi(e.Name()); parseErr == nil && uid > 0 {
+			userIDs = append(userIDs, uid)
+		}
+	}
+	sort.Ints(userIDs)
+	return userIDs
 }
 
 func joinUniqueFields(values ...string) string {

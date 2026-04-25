@@ -55,22 +55,42 @@ type doctorPortStatus struct {
 	Role         string `json:"role,omitempty"`
 	Port         int    `json:"port"`
 	TCPListening bool   `json:"tcpListening"`
+	Conflict     bool   `json:"conflict,omitempty"`
+}
+
+type doctorPortConflict struct {
+	Port  int      `json:"port"`
+	Roles []string `json:"roles"`
+}
+
+type doctorPackageResolution struct {
+	Mode                         string                        `json:"mode,omitempty"`
+	RequestedPackages            []string                      `json:"requestedPackages,omitempty"`
+	SelectedSource               string                        `json:"selectedSource,omitempty"`
+	ResolvedUIDCount             int                           `json:"resolvedUidCount"`
+	UnresolvedPackages           []string                      `json:"unresolvedPackages,omitempty"`
+	AlwaysDirectSource           string                        `json:"alwaysDirectSource,omitempty"`
+	AlwaysDirectResolvedUIDCount int                           `json:"alwaysDirectResolvedUidCount"`
+	Sources                      []core.PackageUIDSourceStatus `json:"sources,omitempty"`
+	Errors                       []string                      `json:"errors,omitempty"`
+	Warnings                     []string                      `json:"warnings,omitempty"`
 }
 
 type doctorSummary struct {
-	Status              string                `json:"status"`
-	HealthCode          string                `json:"healthCode,omitempty"`
-	HealthDetail        string                `json:"healthDetail,omitempty"`
-	OperationalHealthy  bool                  `json:"operationalHealthy"`
-	RebootRequired      bool                  `json:"rebootRequired"`
-	IssueCount          int                   `json:"issueCount"`
-	Issues              []string              `json:"issues,omitempty"`
-	CompatibilityIssues []string              `json:"compatibilityIssues,omitempty"`
-	PrivacyIssues       []string              `json:"privacyIssues,omitempty"`
-	Compatibility       doctorCompatSummary   `json:"compatibility"`
-	Runtime             doctorRuntimeSummary  `json:"runtime"`
-	Routing             doctorRoutingSummary  `json:"routing"`
-	NodeTests           doctorNodeTestSummary `json:"nodeTests"`
+	Status              string                  `json:"status"`
+	HealthCode          string                  `json:"healthCode,omitempty"`
+	HealthDetail        string                  `json:"healthDetail,omitempty"`
+	OperationalHealthy  bool                    `json:"operationalHealthy"`
+	RebootRequired      bool                    `json:"rebootRequired"`
+	IssueCount          int                     `json:"issueCount"`
+	Issues              []string                `json:"issues,omitempty"`
+	CompatibilityIssues []string                `json:"compatibilityIssues,omitempty"`
+	PrivacyIssues       []string                `json:"privacyIssues,omitempty"`
+	Compatibility       doctorCompatSummary     `json:"compatibility"`
+	Runtime             doctorRuntimeSummary    `json:"runtime"`
+	Routing             doctorRoutingSummary    `json:"routing"`
+	NodeTests           doctorNodeTestSummary   `json:"nodeTests"`
+	PackageResolution   doctorPackageResolution `json:"packageResolution"`
 }
 
 type doctorCompatSummary struct {
@@ -165,6 +185,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	}
 	moduleVersion := readModuleVersion()
 	ports := doctorPortStatuses(cfg)
+	portConflicts := doctorLocalPortConflicts(cfg)
 	netstackReport := d.doctorNetstackReport(cfg)
 	netstackRuntimeReport := d.doctorNetstackRuntimeReport(cfg)
 	leftovers := netstackReport.Leftovers
@@ -176,6 +197,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	singBoxCheck := d.singBoxCheck(singBoxPath, renderedConfigPath, lines)
 	releaseIntegrity := doctorReleaseIntegrityReport(dataDir)
 	routingSummary := doctorRoutingSummaryFromConfig(cfg)
+	packageResolution := doctorPackageResolutionFromConfig(cfg)
 	versions := map[string]interface{}{
 		"daemon":                   Version,
 		"core":                     Version,
@@ -191,7 +213,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 
 	report := map[string]interface{}{
 		"generated_at": time.Now().Format(time.RFC3339),
-		"summary":      buildDoctorSummary(healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, routingSummary),
+		"summary":      buildDoctorSummary(healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, routingSummary, packageResolution),
 		"versions":     versions,
 		"device":       d.doctorDevice(lines),
 		"paths": map[string]doctorFileStatus{
@@ -216,7 +238,9 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 		"core_runtime_report": d.coreMgr.LastRuntimeReport(),
 		"reload_report":       d.LastReloadReport(),
 		"ports":               ports,
+		"port_conflicts":      portConflicts,
 		"routing":             routingSummary,
+		"package_resolution":  packageResolution,
 		"netstack":            netstackReport,
 		"netstack_runtime":    netstackRuntimeReport,
 		"leftovers":           leftovers,
@@ -276,6 +300,7 @@ func (d *daemon) buildSelfCheckSummary(lines int) (doctorSummary, error) {
 		d.singBoxCheck(singBoxPath, renderedConfigPath, lines),
 		doctorReleaseIntegrityReport(dataDir),
 		doctorRoutingSummaryFromConfig(cfg),
+		doctorPackageResolutionFromConfig(cfg),
 	), nil
 }
 
@@ -347,6 +372,7 @@ func buildDoctorSummary(
 	singBoxCheck doctorCommandResult,
 	releaseIntegrity doctorReleaseIntegrity,
 	routingSummary doctorRoutingSummary,
+	packageResolution doctorPackageResolution,
 ) doctorSummary {
 	summary := doctorSummary{
 		Status:             "ok",
@@ -363,9 +389,10 @@ func buildDoctorSummary(
 			CurrentReleaseOK:       releaseIntegrity.OK,
 			SingBoxCheckOK:         singBoxCheck.Error == "",
 		},
-		Runtime:   summarizeDoctorRuntime(healthSnapshot),
-		Routing:   routingSummary,
-		NodeTests: summarizeDoctorNodeTests(nodeResults),
+		Runtime:           summarizeDoctorRuntime(healthSnapshot),
+		Routing:           routingSummary,
+		NodeTests:         summarizeDoctorNodeTests(nodeResults),
+		PackageResolution: packageResolution,
 	}
 	addIssue := func(issue string) {
 		if strings.TrimSpace(issue) == "" {
@@ -422,9 +449,15 @@ func buildDoctorSummary(
 				addPrivacy("production localhost helper/API port is listening")
 			}
 		}
+		if port.Conflict {
+			addIssue(fmt.Sprintf("local port %d has conflicting roles: %s", port.Port, port.Role))
+		}
 	}
 	for _, issue := range doctorPrivacyIssues(privacy) {
 		addPrivacy(issue)
+	}
+	for _, warning := range packageResolution.Warnings {
+		addIssue(warning)
 	}
 	if summary.NodeTests.TCPOnly > 0 {
 		addIssue("one or more nodes have TCP reachability but failed URL/data-plane checks")
@@ -559,6 +592,31 @@ func doctorRoutingSummaryFromConfig(cfg *config.Config) doctorRoutingSummary {
 		summary.ActiveNodeProtocol = "selector"
 	}
 	return summary
+}
+
+func doctorPackageResolutionFromConfig(cfg *config.Config) doctorPackageResolution {
+	if cfg == nil {
+		return doctorPackageResolution{Mode: "config_unavailable"}
+	}
+	appMode := core.MapAppMode(cfg.Apps.Mode)
+	resolution := core.BuildPackageRoutingResolution(cfg.Apps.Packages, cfg.Routing.AlwaysDirectApps)
+	report := doctorPackageResolution{
+		Mode:                         appMode,
+		RequestedPackages:            append([]string(nil), resolution.Selected.RequestedPackages...),
+		SelectedSource:               resolution.Selected.Source,
+		ResolvedUIDCount:             len(resolution.Selected.UIDs),
+		UnresolvedPackages:           append([]string(nil), resolution.Selected.UnresolvedPackages...),
+		AlwaysDirectSource:           resolution.AlwaysDirect.Source,
+		AlwaysDirectResolvedUIDCount: len(resolution.AlwaysDirect.UIDs),
+		Sources:                      append([]core.PackageUIDSourceStatus(nil), resolution.Sources...),
+		Errors:                       append([]string(nil), resolution.Errors...),
+	}
+	if (appMode == "whitelist" || appMode == "blacklist") &&
+		len(report.RequestedPackages) > 0 &&
+		report.ResolvedUIDCount == 0 {
+		report.Warnings = append(report.Warnings, "per-app routing is enabled but selected packages resolved to zero UIDs")
+	}
+	return report
 }
 
 func doctorPrivacyIssues(privacy map[string]interface{}) []string {
@@ -899,13 +957,35 @@ func doctorPortStatuses(cfg *config.Config) []doctorPortStatus {
 	roles := doctorLocalPortRoles(cfg)
 	result := make([]doctorPortStatus, 0, len(ports))
 	for _, port := range ports {
+		role := strings.Join(roles[port], ",")
 		result = append(result, doctorPortStatus{
-			Role:         strings.Join(roles[port], ","),
+			Role:         role,
 			Port:         port,
 			TCPListening: isTCPPortListening("127.0.0.1", port, 150*time.Millisecond),
+			Conflict:     len(roles[port]) > 1,
 		})
 	}
 	return result
+}
+
+func doctorLocalPortConflicts(cfg *config.Config) []doctorPortConflict {
+	roles := doctorLocalPortRoles(cfg)
+	conflicts := make([]doctorPortConflict, 0)
+	ports := make([]int, 0, len(roles))
+	for port := range roles {
+		ports = append(ports, port)
+	}
+	sort.Ints(ports)
+	for _, port := range ports {
+		if len(roles[port]) <= 1 {
+			continue
+		}
+		conflicts = append(conflicts, doctorPortConflict{
+			Port:  port,
+			Roles: append([]string(nil), roles[port]...),
+		})
+	}
+	return conflicts
 }
 
 func doctorLocalPortRoles(cfg *config.Config) map[int][]string {

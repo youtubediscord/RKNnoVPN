@@ -16,7 +16,7 @@ ANDROID_NDK_TOOLCHAIN := $(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/$(ANDROID_
 ANDROID_CC_ARM64 := $(ANDROID_NDK_TOOLCHAIN)/aarch64-linux-android$(ANDROID_API)-clang
 ANDROID_CC_ARMV7 := $(ANDROID_NDK_TOOLCHAIN)/armv7a-linux-androideabi$(ANDROID_API)-clang
 
-.PHONY: all daemon daemon-arm64 daemon-armv7 singbox singbox-src singbox-arm64 singbox-armv7 apk module clean
+.PHONY: all daemon daemon-arm64 daemon-armv7 singbox singbox-src singbox-arm64 singbox-armv7 apk module clean lab-collect lab-smoke lab-smoke-reset
 
 all: daemon singbox module apk
 	@echo "Build complete. Artifacts in $(OUT_DIR)/"
@@ -121,6 +121,16 @@ daemon-host:
 # === Go tests ===
 test:
 	cd daemon && go test ./...
+
+# === Rooted device lab ===
+lab-collect:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/collect.sh
+
+lab-smoke:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/smoke.sh
+
+lab-smoke-reset:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/smoke.sh --allow-reset
 
 # === Clean ===
 clean:

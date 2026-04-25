@@ -105,6 +105,7 @@ func TestDoctorSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
 		doctorCommandResult{},
 		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
 		doctorRoutingSummary{},
+		doctorPackageResolution{},
 	)
 
 	if summary.Status != "partial_reset" {
@@ -137,6 +138,7 @@ func TestDoctorSummaryFlagsPrivacyFailures(t *testing.T) {
 		doctorCommandResult{},
 		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
 		doctorRoutingSummary{},
+		doctorPackageResolution{},
 	)
 
 	if summary.Status != "degraded" {
@@ -217,6 +219,7 @@ func TestDoctorSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
 			Mismatches:   []string{"bin/privd"},
 		},
 		doctorRoutingSummary{},
+		doctorPackageResolution{},
 	)
 
 	if summary.Status != "degraded" {
@@ -243,6 +246,7 @@ func TestDoctorSummaryFlagsRuntimeNetstackFailure(t *testing.T) {
 		doctorCommandResult{},
 		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
 		doctorRoutingSummary{},
+		doctorPackageResolution{},
 	)
 
 	if summary.Status != "failed" {
@@ -294,6 +298,60 @@ func TestDoctorPortStatusesIncludeRoles(t *testing.T) {
 		if !slices.Contains(roles[port], role) {
 			t.Fatalf("expected %s role for port %d, got %#v", role, port, roles)
 		}
+	}
+}
+
+func TestDoctorPortConflictsDetectDuplicateConfiguredPorts(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Proxy.TProxyPort = 10853
+	cfg.Proxy.DNSPort = 10853
+	cfg.Proxy.APIPort = 19090
+	cfg.Panel.Inbounds = json.RawMessage(`{"socksPort":19091,"httpPort":19090}`)
+
+	conflicts := doctorLocalPortConflicts(cfg)
+	if len(conflicts) != 2 {
+		t.Fatalf("expected two duplicate local port conflicts, got %#v", conflicts)
+	}
+	if conflicts[0].Port != 10853 || strings.Join(conflicts[0].Roles, ",") != "dns,tproxy" {
+		t.Fatalf("unexpected tproxy/dns conflict: %#v", conflicts)
+	}
+	if conflicts[1].Port != 19090 || strings.Join(conflicts[1].Roles, ",") != "clash_api,http_helper" {
+		t.Fatalf("unexpected api/http conflict: %#v", conflicts)
+	}
+
+	statuses := doctorPortStatuses(cfg)
+	found := false
+	for _, status := range statuses {
+		if status.Port == 10853 {
+			found = status.Conflict && status.Role == "dns,tproxy"
+		}
+	}
+	if !found {
+		t.Fatalf("expected port status to expose conflict, got %#v", statuses)
+	}
+}
+
+func TestDoctorSummaryFlagsPackageResolutionAndPortWarnings(t *testing.T) {
+	summary := buildDoctorSummary(
+		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
+		nil,
+		netstack.Report{},
+		nil,
+		[]doctorPortStatus{{Role: "dns,tproxy", Port: 10853, Conflict: true}},
+		map[string]interface{}{"checks": map[string]interface{}{}},
+		map[string]string{"version": "v1.6.4"},
+		doctorCommandResult{},
+		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
+		doctorRoutingSummary{},
+		doctorPackageResolution{Warnings: []string{"per-app routing is enabled but selected packages resolved to zero UIDs"}},
+	)
+
+	if summary.Status != "degraded" {
+		t.Fatalf("diagnostic warnings should degrade summary, got %#v", summary)
+	}
+	issues := strings.Join(summary.Issues, "\n")
+	if !strings.Contains(issues, "conflicting roles") || !strings.Contains(issues, "zero UIDs") {
+		t.Fatalf("expected port and package resolution issues, got %#v", summary.Issues)
 	}
 }
 
