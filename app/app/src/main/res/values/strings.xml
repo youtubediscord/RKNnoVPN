@@ -164,6 +164,9 @@
     <string name="loading_logs">Loading…</string>
     <string name="share_logs_telegram">Send to Telegram</string>
     <string name="copy_diagnostic_report">Copy report</string>
+    <string name="copy_report_copied">Report copied</string>
+    <string name="logs_share_no_app">No app found to send logs</string>
+    <string name="link_open_no_app">No app found to open the link</string>
     <string name="logs_share_subject">RKNnoVPN runtime logs</string>
     <string name="logs_share_chooser">Send logs</string>
     <string name="settings_theme">Theme</string>

@@ -30,7 +30,7 @@
 set -eu
 
 TAG="privstack:dns"
-SCRIPT_VERSION="v1.7.1"
+SCRIPT_VERSION="v1.7.3"
 
 # Sane defaults if the caller omitted something.
 DNS_PORT="${DNS_PORT:-10856}"
@@ -43,7 +43,7 @@ PROXY_UIDS="${PROXY_UIDS:-}"
 DIRECT_UIDS="${DIRECT_UIDS:-}"
 BYPASS_UIDS="${BYPASS_UIDS:-}"
 PRIVSTACK_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}"
-IPT_WAIT="-w 100"
+IPT_WAIT="${IPT_WAIT:--w 100}"
 
 # Chain names — keep in sync with the rest of PrivStack.
 NAT4_CHAIN="PRIVSTACK_DNS_NAT"

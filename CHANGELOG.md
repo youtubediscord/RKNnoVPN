@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.7.3
+
+- Fixed APK compatibility gating so a damaged `current` release catalog is shown as a repair warning instead of blocking start/restart when APK, daemon, and module versions match.
+- Fixed Settings log sharing and diagnostic copy actions by using explicit one-shot UI events, Android clipboard APIs, and visible feedback.
+- Rejected localhost TPROXY destinations inside the rendered sing-box route to avoid self-looping listener probes.
+- Made module updates boot-safe by default: fresh configs no longer autostart, upgrades set the manual start guard until the app starts the proxy, boot cleanup only runs when stale runtime markers exist, and PrivStack workers no longer get stronger OOM priority than SystemUI.
+- Hardened release catalog updates so a stale non-symlink `current` directory is moved aside and replaced with a valid release symlink in both module install and in-app update flows.
+
 ## v1.7.1
 
 - Reworked root TPROXY runtime recovery with structured reset reports, netstack cleanup verification, and idempotent rescue behavior.

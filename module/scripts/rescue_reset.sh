@@ -33,7 +33,13 @@ PRIVSTACK_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}"
 FWMARK="${FWMARK:-0x2023}"
 ROUTE_TABLE="${ROUTE_TABLE:-2023}"
 ROUTE_TABLE_V6="${ROUTE_TABLE_V6:-2024}"
-IPT_WAIT="-w 20"
+if [ -z "$IPT_WAIT" ]; then
+    if [ "$MODE" = "boot-clean" ]; then
+        IPT_WAIT="-w 3"
+    else
+        IPT_WAIT="-w 10"
+    fi
+fi
 
 RUN_DIR="$PRIVSTACK_DIR/run"
 CONFIG_DIR="$PRIVSTACK_DIR/config"
@@ -96,10 +102,10 @@ kill_matching_processes KILL
 
 log "[3/8] stopping bundled runtime pieces"
 if [ -x "$PRIVSTACK_DIR/scripts/dns.sh" ]; then
-    "$PRIVSTACK_DIR/scripts/dns.sh" stop >/dev/null 2>&1 || true
+    IPT_WAIT="$IPT_WAIT" "$PRIVSTACK_DIR/scripts/dns.sh" stop >/dev/null 2>&1 || true
 fi
 if [ -x "$PRIVSTACK_DIR/scripts/iptables.sh" ]; then
-    "$PRIVSTACK_DIR/scripts/iptables.sh" stop >/dev/null 2>&1 || true
+    IPT_WAIT="$IPT_WAIT" "$PRIVSTACK_DIR/scripts/iptables.sh" stop >/dev/null 2>&1 || true
 fi
 
 cleanup_ipt() {

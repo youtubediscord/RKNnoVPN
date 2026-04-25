@@ -22,7 +22,7 @@ set -eu
 # ============================================================================
 
 TAG="PrivStack:iptables"
-SCRIPT_VERSION="v1.7.1"
+SCRIPT_VERSION="v1.7.3"
 
 # Chain name prefix — all PrivStack chains start with this
 CHAIN_PREFIX="PRIVSTACK"
@@ -39,9 +39,10 @@ CHAIN_DIVERT="${CHAIN_PREFIX}_DIVERT" # DIVERT optimization for established
 SNAPSHOT_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}/run"
 
 # iptables lock wait timeout in seconds (MIUI compatibility)
-# MIUI's firewall service holds the xtables lock frequently;
-# -w 100 means "wait up to 100 seconds for the lock"
-IPT_WAIT="-w 100"
+# MIUI's firewall service holds the xtables lock frequently. Normal runtime
+# operations wait longer, while rescue_reset.sh can pass a shorter boot-safe
+# value through the environment.
+IPT_WAIT="${IPT_WAIT:--w 100}"
 
 # Reserved IPv4 ranges — traffic to these never goes through the proxy.
 # Covers RFC1918 private, loopback, link-local, documentation, multicast, etc.

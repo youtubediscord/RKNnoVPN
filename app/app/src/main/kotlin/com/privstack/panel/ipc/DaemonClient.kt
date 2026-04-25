@@ -1173,11 +1173,13 @@ data class VersionInfo(
         if (currentRelease != null && currentRelease != apk) {
             return "APK и current release несовместимы: APK $apkVersion, current $currentReleaseVersion. Установите matching release."
         }
-        if (currentReleaseOK == false) {
-            val detail = currentReleaseError.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
-            return "APK и модуль несовместимы: current release повреждён$detail."
-        }
         return null
+    }
+
+    fun currentReleaseWarning(): String? {
+        if (currentReleaseOK != false) return null
+        val detail = currentReleaseError.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty()
+        return "Каталог текущего релиза повреждён$detail. Запуск не заблокирован; используйте сброс root-части или переустановку модуля, если runtime ведёт себя нестабильно."
     }
 }
 

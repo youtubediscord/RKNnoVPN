@@ -291,7 +291,7 @@ func DefaultConfig() *Config {
 			MaxAttempts: 3,
 			CooldownSec: 60,
 		},
-		Autostart: true,
+		Autostart: false,
 	}
 }
 

@@ -22,6 +22,7 @@ LOG_FILE="${PRIVSTACK_DIR}/logs/service.log"
 TAG="privstack:service"
 BOOT_TIMEOUT=120
 SETTLE_DELAY=5
+OOM_SCORE_ADJ="${PRIVSTACK_OOM_SCORE_ADJ:-300}"
 
 # ============================================================================
 # Logging
@@ -121,12 +122,33 @@ sleep "$SETTLE_DELAY"
 # 3. Boot rescue cleanup
 # ============================================================================
 
+has_boot_cleanup_markers() {
+    for marker in \
+        "$PRIVSTACK_DIR/run/active" \
+        "$PRIVSTACK_DIR/run/reset.lock" \
+        "$PRIVSTACK_DIR/run/privd.pid" \
+        "$PRIVSTACK_DIR/run/singbox.pid" \
+        "$PRIVSTACK_DIR/run/daemon.sock" \
+        "$PRIVSTACK_DIR/run/env.sh" \
+        "$PRIVSTACK_DIR/run/iptables.rules" \
+        "$PRIVSTACK_DIR/run/ip6tables.rules" \
+        "$PRIVSTACK_DIR/run/iptables_backup.rules" \
+        "$PRIVSTACK_DIR/run/ip6tables_backup.rules"; do
+        [ -e "$marker" ] && return 0
+    done
+    return 1
+}
+
 if [ -x "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" ]; then
-    log_info "Running boot rescue cleanup"
-    if "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
-        log_info "Boot rescue cleanup completed"
+    if has_boot_cleanup_markers; then
+        log_info "Running boot rescue cleanup"
+        if "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
+            log_info "Boot rescue cleanup completed"
+        else
+            log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
+        fi
     else
-        log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
+        log_info "Skipping boot rescue cleanup: no stale runtime markers"
     fi
 else
     log_warn "Boot rescue cleanup script not found"
@@ -272,27 +294,27 @@ launch_daemon
 LAUNCH_RESULT=$?
 
 # ============================================================================
-# 8. Set OOM score — protect daemon from being killed under memory pressure
+# 8. Set OOM score — keep Android UI preferred over PrivStack workers
 # ============================================================================
 
 if [ "$LAUNCH_RESULT" -eq 0 ]; then
     DAEMON_PID="$(cat "$PRIVD_PID_FILE" 2>/dev/null)"
     if [ -n "$DAEMON_PID" ] && [ -d "/proc/${DAEMON_PID}" ]; then
         # oom_score_adj range: -1000 to 1000
-        # -500 provides strong OOM protection without full immunity
-        echo -500 > "/proc/${DAEMON_PID}/oom_score_adj" 2>/dev/null
+        # Positive values make PrivStack easier to reclaim than SystemUI.
+        echo "$OOM_SCORE_ADJ" > "/proc/${DAEMON_PID}/oom_score_adj" 2>/dev/null
         if [ $? -eq 0 ]; then
-            log_info "Set oom_score_adj=-500 for PID ${DAEMON_PID}"
+            log_info "Set oom_score_adj=${OOM_SCORE_ADJ} for PID ${DAEMON_PID}"
         else
             log_warn "Failed to set oom_score_adj for PID ${DAEMON_PID}"
         fi
 
-        # Also protect sing-box child if it exists
+        # Apply the same non-critical priority to sing-box if it exists.
         sleep 3
         SINGBOX_PID="$(pidof sing-box 2>/dev/null | awk '{print $1}')"
         if [ -n "$SINGBOX_PID" ] && [ -d "/proc/${SINGBOX_PID}" ]; then
-            echo -500 > "/proc/${SINGBOX_PID}/oom_score_adj" 2>/dev/null
-            log_info "Set oom_score_adj=-500 for sing-box PID ${SINGBOX_PID}"
+            echo "$OOM_SCORE_ADJ" > "/proc/${SINGBOX_PID}/oom_score_adj" 2>/dev/null
+            log_info "Set oom_score_adj=${OOM_SCORE_ADJ} for sing-box PID ${SINGBOX_PID}"
         fi
     fi
 fi

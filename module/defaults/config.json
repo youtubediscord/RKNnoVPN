@@ -79,5 +79,5 @@
     "max_attempts": 3,
     "cooldown_sec": 60
   },
-  "autostart": true
+  "autostart": false
 }

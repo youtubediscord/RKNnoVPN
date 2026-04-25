@@ -77,6 +77,10 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 	if rules[1].(map[string]any)["action"] != "hijack-dns" {
 		t.Fatalf("DNS route rule should use hijack-dns action: %#v", rules[1])
 	}
+	localRule := rules[2].(map[string]any)
+	if localRule["action"] != "reject" {
+		t.Fatalf("local TPROXY route should reject instead of looping: %#v", localRule)
+	}
 }
 
 func TestRenderOmitsClashAPIByDefault(t *testing.T) {

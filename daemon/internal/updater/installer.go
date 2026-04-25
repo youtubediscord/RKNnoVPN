@@ -214,6 +214,10 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	if err := stopCurrentProxy(dataDir); err != nil {
 		logger.Printf("warning: post-copy cleanup: %v", err)
 	}
+	if err := markManualStartRequired(dataDir); err != nil {
+		rollbackBinaries()
+		return fmt.Errorf("mark manual start required: %w", err)
+	}
 
 	if err := updateCurrentReleaseSymlink(dataDir, releaseDir); err != nil {
 		rollbackBinaries()
@@ -700,9 +704,43 @@ func updateCurrentReleaseSymlink(dataDir string, releaseDir string) error {
 	if err := os.Symlink(releaseDir, tmpPath); err != nil {
 		return fmt.Errorf("create current symlink: %w", err)
 	}
-	if err := os.Rename(tmpPath, filepath.Join(dataDir, "current")); err != nil {
+	currentPath := filepath.Join(dataDir, "current")
+	if info, statErr := os.Lstat(currentPath); statErr == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+		backupDir := filepath.Join(dataDir, "releases")
+		if err := os.MkdirAll(backupDir, 0o700); err != nil {
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("create current release backup dir: %w", err)
+		}
+		backupPath := filepath.Join(backupDir, fmt.Sprintf("current.pre-%d", time.Now().UnixNano()))
+		if err := os.Rename(currentPath, backupPath); err != nil {
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("move non-symlink current release aside: %w", err)
+		}
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("stat current release path: %w", statErr)
+	}
+	if err := os.Rename(tmpPath, currentPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename current symlink: %w", err)
+	}
+	return nil
+}
+
+func markManualStartRequired(dataDir string) error {
+	configDir := filepath.Join(dataDir, "config")
+	runDir := filepath.Join(dataDir, "run")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		return fmt.Errorf("mkdir config: %w", err)
+	}
+	if err := os.MkdirAll(runDir, 0o750); err != nil {
+		return fmt.Errorf("mkdir run: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "manual"), []byte("module update\n"), 0o600); err != nil {
+		return fmt.Errorf("write manual flag: %w", err)
+	}
+	if err := os.Remove(filepath.Join(runDir, "active")); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove active marker: %w", err)
 	}
 	return nil
 }

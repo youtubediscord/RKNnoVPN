@@ -1152,6 +1152,11 @@ func buildRoute(cfg *Config) map[string]interface{} {
 			"protocol": []string{"dns"},
 			"action":   "hijack-dns",
 		},
+		{
+			"inbound": []string{"tproxy-in"},
+			"ip_cidr": []string{"127.0.0.0/8", "::1/128"},
+			"action":  "reject",
+		},
 	}
 
 	// Bypass private/LAN ranges.

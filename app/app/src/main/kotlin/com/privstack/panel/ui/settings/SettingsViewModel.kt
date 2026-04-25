@@ -97,7 +97,9 @@ data class SettingsUiState(
     val logsText: String = "",
     val isLoadingLogs: Boolean = false,
     val shareLogsText: String? = null,
+    val shareLogsEventId: Long = 0L,
     val copyReportText: String? = null,
+    val copyReportEventId: Long = 0L,
 )
 
 @HiltViewModel
@@ -372,7 +374,7 @@ class SettingsViewModel @Inject constructor(
     fun shareRuntimeLogs() {
         val current = _uiState.value.logsText
         if (current.isNotBlank()) {
-            _uiState.update { it.copy(shareLogsText = current) }
+            _uiState.update { it.copy(shareLogsText = current, shareLogsEventId = it.shareLogsEventId + 1) }
             return
         }
         _uiState.update { it.copy(isLoadingLogs = true, errorMessage = null) }
@@ -383,6 +385,7 @@ class SettingsViewModel @Inject constructor(
                         it.copy(
                             logsText = result.data,
                             shareLogsText = result.data,
+                            shareLogsEventId = it.shareLogsEventId + 1,
                             isLoadingLogs = false,
                         )
                     }
@@ -410,6 +413,7 @@ class SettingsViewModel @Inject constructor(
                         it.copy(
                             logsText = result.data,
                             copyReportText = result.data,
+                            copyReportEventId = it.copyReportEventId + 1,
                             isLoadingLogs = false,
                         )
                     }
@@ -639,6 +643,8 @@ class SettingsViewModel @Inject constructor(
                     val compatibilityWarning = when {
                         info.releaseMismatch(BuildConfig.VERSION_NAME) != null ->
                             info.releaseMismatch(BuildConfig.VERSION_NAME)
+                        info.currentReleaseWarning() != null ->
+                            info.currentReleaseWarning()
                         info.controlProtocolVersion in 1 until DaemonClient.MIN_CONTROL_PROTOCOL_VERSION ->
                             messages.get(
                                 com.privstack.panel.R.string.daemon_status_incompatible_protocol,

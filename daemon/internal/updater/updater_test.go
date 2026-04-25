@@ -196,6 +196,42 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 	}
 }
 
+func TestUpdateCurrentReleaseSymlinkReplacesDirectory(t *testing.T) {
+	dataDir := t.TempDir()
+	releaseDir := filepath.Join(dataDir, "releases", "v1.7.3")
+	if err := os.MkdirAll(releaseDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	currentDir := filepath.Join(dataDir, "current")
+	if err := os.MkdirAll(currentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(currentDir, "stale"), []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := updateCurrentReleaseSymlink(dataDir, releaseDir); err != nil {
+		t.Fatal(err)
+	}
+	target, err := os.Readlink(currentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != releaseDir {
+		t.Fatalf("current symlink = %q, want %q", target, releaseDir)
+	}
+	matches, err := filepath.Glob(filepath.Join(dataDir, "releases", "current.pre-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected one current directory backup, got %v", matches)
+	}
+	if _, err := os.Stat(filepath.Join(matches[0], "stale")); err != nil {
+		t.Fatalf("stale current directory was not moved aside: %v", err)
+	}
+}
+
 func writeTestFile(t *testing.T, path string, perm os.FileMode, contents ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

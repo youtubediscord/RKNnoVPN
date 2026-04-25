@@ -164,6 +164,9 @@
     <string name="loading_logs">Загрузка…</string>
     <string name="share_logs_telegram">Отправить в Telegram</string>
     <string name="copy_diagnostic_report">Скопировать отчёт</string>
+    <string name="copy_report_copied">Отчёт скопирован</string>
+    <string name="logs_share_no_app">Не найдено приложение для отправки логов</string>
+    <string name="link_open_no_app">Не найдено приложение для открытия ссылки</string>
     <string name="logs_share_subject">Логи RKNnoVPN runtime</string>
     <string name="logs_share_chooser">Отправить логи</string>
     <string name="settings_theme">Тема</string>

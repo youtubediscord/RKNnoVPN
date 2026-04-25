@@ -229,6 +229,13 @@ install_default_config() {
     fi
 }
 
+mark_manual_start_required() {
+    mkdir -p "${PRIVSTACK_DIR}/config" "${PRIVSTACK_DIR}/run" 2>/dev/null
+    touch "${PRIVSTACK_DIR}/config/manual" 2>/dev/null
+    rm -f "${PRIVSTACK_DIR}/run/active" 2>/dev/null
+    ui_print "  [*] Boot autostart disabled until the app starts the proxy"
+}
+
 install_binaries() {
     SRC_BIN="${MODPATH}/binaries/${ARCH_DIR:-arm64}"
 
@@ -358,6 +365,34 @@ write_install_manifest() {
     mv -f "$tmp_manifest" "$manifest"
 }
 
+update_current_release_link() {
+    release_dir="$1"
+    current="${PRIVSTACK_DIR}/current"
+    backup_dir="${PRIVSTACK_DIR}/releases"
+
+    if [ -e "$current" ] && [ ! -L "$current" ]; then
+        mkdir -p "$backup_dir" 2>/dev/null
+        suffix="$(date +%s 2>/dev/null || echo $$)-$$"
+        backup="${backup_dir}/current.pre-${suffix}"
+        n=0
+        while [ -e "$backup" ] || [ -L "$backup" ]; do
+            n=$((n + 1))
+            backup="${backup_dir}/current.pre-${suffix}-${n}"
+        done
+        mv "$current" "$backup" 2>/dev/null || {
+            ui_print "  [!] Failed to move non-symlink current release aside"
+            return 1
+        }
+    fi
+
+    rm -f "$current" 2>/dev/null
+    ln -s "$release_dir" "$current" 2>/dev/null || {
+        ui_print "  [!] Failed to update current release link"
+        return 1
+    }
+    return 0
+}
+
 install_release_catalog() {
     version="$(module_version)"
     [ -n "$version" ] || version="unknown"
@@ -392,7 +427,7 @@ install_release_catalog() {
     fi
 
     if write_install_manifest "$release_dir" "$version"; then
-        ln -sfn "$release_dir" "${PRIVSTACK_DIR}/current" 2>/dev/null || ui_print "  [!] Failed to update current release link"
+        update_current_release_link "$release_dir"
     else
         ui_print "  [!] Failed to write release manifest"
     fi
@@ -539,6 +574,7 @@ preserve_existing_config
 
 # Step 5: Install default config (or skip if preserved)
 install_default_config
+mark_manual_start_required
 
 # Step 6: Install binaries
 install_binaries

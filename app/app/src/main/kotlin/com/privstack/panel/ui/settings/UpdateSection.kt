@@ -1,7 +1,10 @@
 package com.privstack.panel.ui.settings
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -195,7 +198,14 @@ fun UpdateSection(
                                             Intent.ACTION_VIEW,
                                             Uri.parse(GITHUB_RELEASES_URL),
                                         )
-                                        context.startActivity(intent)
+                                        if (context !is Activity) {
+                                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        try {
+                                            context.startActivity(intent)
+                                        } catch (_: ActivityNotFoundException) {
+                                            Toast.makeText(context, R.string.link_open_no_app, Toast.LENGTH_LONG).show()
+                                        }
                                     },
                                 ) {
                                     Icon(

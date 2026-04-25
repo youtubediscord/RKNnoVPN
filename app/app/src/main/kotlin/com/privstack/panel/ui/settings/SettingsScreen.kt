@@ -1,7 +1,12 @@
 package com.privstack.panel.ui.settings
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -54,10 +59,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -74,25 +77,36 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
 
-    state.shareLogsText?.let { logs ->
-        LaunchedEffect(logs) {
+    LaunchedEffect(state.shareLogsEventId) {
+        val logs = state.shareLogsText
+        if (state.shareLogsEventId > 0 && logs != null) {
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.logs_share_subject))
                 putExtra(Intent.EXTRA_TEXT, logs)
             }
-            context.startActivity(
-                Intent.createChooser(intent, context.getString(R.string.logs_share_chooser))
-            )
+            val chooser = Intent.createChooser(intent, context.getString(R.string.logs_share_chooser))
+            if (context !is Activity) {
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                context.startActivity(chooser)
+            } catch (_: ActivityNotFoundException) {
+                Toast.makeText(context, R.string.logs_share_no_app, Toast.LENGTH_LONG).show()
+            }
             viewModel.clearSharedLogs()
         }
     }
 
-    state.copyReportText?.let { report ->
-        LaunchedEffect(report) {
-            clipboard.setText(AnnotatedString(report))
+    LaunchedEffect(state.copyReportEventId) {
+        val report = state.copyReportText
+        if (state.copyReportEventId > 0 && report != null) {
+            val clipboard = context.getSystemService(ClipboardManager::class.java)
+            clipboard?.setPrimaryClip(
+                ClipData.newPlainText(context.getString(R.string.copy_diagnostic_report), report)
+            )
+            Toast.makeText(context, R.string.copy_report_copied, Toast.LENGTH_SHORT).show()
             viewModel.clearCopiedReport()
         }
     }
@@ -447,7 +461,14 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.clickable {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(state.githubUrl))
-                    context.startActivity(intent)
+                    if (context !is Activity) {
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    try {
+                        context.startActivity(intent)
+                    } catch (_: ActivityNotFoundException) {
+                        Toast.makeText(context, R.string.link_open_no_app, Toast.LENGTH_LONG).show()
+                    }
                 },
                 colors = transparentListItemColors(),
             )
