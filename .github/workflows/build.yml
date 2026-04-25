@@ -15,6 +15,8 @@ env:
   SINGBOX_GO_VERSION: "1.24.x"
   SINGBOX_VERSION: "latest"
   SINGBOX_TAGS: "with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0"
+  ANDROID_API: "23"
+  ANDROID_NDK_VERSION: "27.2.12479018"
 
 jobs:
   # ============================================================
@@ -115,7 +117,7 @@ jobs:
           retention-days: 1
 
   # ============================================================
-  # Job 2: Build static sing-box binaries for Android module runtime
+  # Job 2: Build Android sing-box binaries for Android module runtime
   # ============================================================
   build-singbox:
     name: Build sing-box (${{ matrix.arch }})
@@ -131,9 +133,13 @@ jobs:
           - arch: arm64
             goarch: arm64
             goarm: ""
+            cc: aarch64-linux-android23-clang
+            linker: /system/bin/linker64
           - arch: armv7
             goarch: arm
             goarm: "7"
+            cc: armv7a-linux-androideabi23-clang
+            linker: /system/bin/linker
     steps:
       - name: Checkout sing-box
         uses: actions/checkout@v4
@@ -148,20 +154,38 @@ jobs:
           go-version: ${{ env.SINGBOX_GO_VERSION }}
           cache-dependency-path: sing-box-src/go.sum
 
-      - name: Build static sing-box
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(command -v sdkmanager || true)"
+          fi
+          if [[ -z "$SDKMANAGER" ]]; then
+            echo "sdkmanager not found" >&2
+            exit 127
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null
+          "$SDKMANAGER" --install "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build Android sing-box
         run: |
           mkdir -p "out/${{ matrix.arch }}"
           cd sing-box-src
           LDFLAGS="$(cat release/LDFLAGS)"
-          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
+          export CC="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.cc }}"
+          CGO_ENABLED=1 GOOS=android GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
             -trimpath \
             -tags "${SINGBOX_TAGS}" \
             -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${SINGBOX_RESOLVED_VERSION}' ${LDFLAGS} -s -w -buildid=" \
             -o "../out/${{ matrix.arch }}/sing-box" ./cmd/sing-box
           cd ..
           chmod 755 "out/${{ matrix.arch }}/sing-box"
-          if readelf -l "out/${{ matrix.arch }}/sing-box" | grep -q "Requesting program interpreter"; then
-            echo "ERROR: sing-box is dynamically linked and will not run from Magisk on Android"
+          if ! readelf -l "out/${{ matrix.arch }}/sing-box" | grep -q "Requesting program interpreter: ${{ matrix.linker }}"; then
+            echo "ERROR: sing-box is not an Android PIE binary for ${{ matrix.arch }}"
             readelf -l "out/${{ matrix.arch }}/sing-box"
             exit 1
           fi

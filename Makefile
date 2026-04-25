@@ -9,6 +9,12 @@ MODULE_DIR := module
 SINGBOX_SRC_DIR := /tmp/sing-box-$(SINGBOX_RESOLVED_VERSION)
 SINGBOX_TAGS := with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0
 SINGBOX_LDFLAGS := -X 'github.com/sagernet/sing-box/constant.Version=$(SINGBOX_RESOLVED_VERSION)' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0 -s -w -buildid=
+ANDROID_API ?= 23
+ANDROID_NDK_HOME ?= $(ANDROID_NDK_ROOT)
+ANDROID_NDK_HOST ?= linux-x86_64
+ANDROID_NDK_TOOLCHAIN := $(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/$(ANDROID_NDK_HOST)/bin
+ANDROID_CC_ARM64 := $(ANDROID_NDK_TOOLCHAIN)/aarch64-linux-android$(ANDROID_API)-clang
+ANDROID_CC_ARMV7 := $(ANDROID_NDK_TOOLCHAIN)/armv7a-linux-androideabi$(ANDROID_API)-clang
 
 .PHONY: all daemon daemon-arm64 daemon-armv7 singbox singbox-src singbox-arm64 singbox-armv7 apk module clean
 
@@ -40,7 +46,7 @@ daemon-armv7:
 		-ldflags="-s -w -X main.Version=$(VERSION)" \
 		-o ../$(OUT_DIR)/armv7/privctl ./cmd/privctl
 
-# === Build static sing-box ===
+# === Build Android sing-box ===
 singbox: singbox-arm64 singbox-armv7
 	@echo "  -> $(OUT_DIR)/arm64/sing-box"
 	@echo "  -> $(OUT_DIR)/armv7/sing-box"
@@ -57,27 +63,33 @@ singbox-src:
 	fi
 
 singbox-arm64: singbox-src
-	@echo "=== Building static sing-box v$(SINGBOX_RESOLVED_VERSION) (arm64) ==="
+	@echo "=== Building Android sing-box v$(SINGBOX_RESOLVED_VERSION) (arm64) ==="
+	@if [ -z "$(ANDROID_NDK_HOME)" ] || [ ! -x "$(ANDROID_CC_ARM64)" ]; then \
+		echo "Android NDK clang not found. Set ANDROID_NDK_HOME or ANDROID_NDK_ROOT"; exit 1; \
+	fi
 	@mkdir -p $(OUT_DIR)/arm64
-	cd $(SINGBOX_SRC_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
+	cd $(SINGBOX_SRC_DIR) && CC="$(ANDROID_CC_ARM64)" CGO_ENABLED=1 GOOS=android GOARCH=arm64 go build \
 		-trimpath -tags "$(SINGBOX_TAGS)" \
 		-ldflags "$(SINGBOX_LDFLAGS)" \
 		-o $(abspath $(OUT_DIR))/arm64/sing-box ./cmd/sing-box
 	chmod 755 $(OUT_DIR)/arm64/sing-box
-	@if readelf -l $(OUT_DIR)/arm64/sing-box | grep -q "Requesting program interpreter"; then \
-		echo "sing-box arm64 is dynamically linked; refusing to package it"; exit 1; \
+	@if ! readelf -l $(OUT_DIR)/arm64/sing-box | grep -q "Requesting program interpreter: /system/bin/linker64"; then \
+		echo "sing-box arm64 is not an Android PIE binary"; readelf -l $(OUT_DIR)/arm64/sing-box; exit 1; \
 	fi
 
 singbox-armv7: singbox-src
-	@echo "=== Building static sing-box v$(SINGBOX_RESOLVED_VERSION) (armv7 / armeabi-v7a) ==="
+	@echo "=== Building Android sing-box v$(SINGBOX_RESOLVED_VERSION) (armv7 / armeabi-v7a) ==="
+	@if [ -z "$(ANDROID_NDK_HOME)" ] || [ ! -x "$(ANDROID_CC_ARMV7)" ]; then \
+		echo "Android NDK clang not found. Set ANDROID_NDK_HOME or ANDROID_NDK_ROOT"; exit 1; \
+	fi
 	@mkdir -p $(OUT_DIR)/armv7
-	cd $(SINGBOX_SRC_DIR) && CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build \
+	cd $(SINGBOX_SRC_DIR) && CC="$(ANDROID_CC_ARMV7)" CGO_ENABLED=1 GOOS=android GOARCH=arm GOARM=7 go build \
 		-trimpath -tags "$(SINGBOX_TAGS)" \
 		-ldflags "$(SINGBOX_LDFLAGS)" \
 		-o $(abspath $(OUT_DIR))/armv7/sing-box ./cmd/sing-box
 	chmod 755 $(OUT_DIR)/armv7/sing-box
-	@if readelf -l $(OUT_DIR)/armv7/sing-box | grep -q "Requesting program interpreter"; then \
-		echo "sing-box armv7 is dynamically linked; refusing to package it"; exit 1; \
+	@if ! readelf -l $(OUT_DIR)/armv7/sing-box | grep -q "Requesting program interpreter: /system/bin/linker"; then \
+		echo "sing-box armv7 is not an Android PIE binary"; readelf -l $(OUT_DIR)/armv7/sing-box; exit 1; \
 	fi
 
 # === Magisk Module ZIP ===
