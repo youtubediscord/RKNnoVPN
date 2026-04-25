@@ -72,11 +72,27 @@ data class DnsConfig(
     val remoteDns: String = "https://1.1.1.1/dns-query",
     /** Direct DNS server for domains resolved without proxy. */
     val directDns: String = "https://dns.google/dns-query",
+    /** IP literal used to bootstrap encrypted DNS hostnames. */
+    val bootstrapIp: String = "1.1.1.1",
+    /** DNS/IP preference for answer selection and AAAA handling. */
+    val ipv6Mode: DnsIpv6Mode = DnsIpv6Mode.MIRROR,
     /** Whether to block QUIC to force HTTP/2 fallback. */
     val blockQuic: Boolean = false,
     /** Fake-DNS / DNS-hijack enabled. */
     val fakeDns: Boolean = false
 )
+
+@Serializable
+enum class DnsIpv6Mode {
+    /** Keep IPv6 behavior aligned with the root runtime. */
+    MIRROR,
+    /** Ask sing-box DNS to prefer IPv4 answers when both families exist. */
+    PREFER_IPV4,
+    /** Ask sing-box DNS to prefer IPv6 answers when both families exist. */
+    PREFER_IPV6,
+    /** Suppress IPv6 answers for proxied DNS clients. */
+    IPV4_ONLY,
+}
 
 @Serializable
 data class HealthConfig(

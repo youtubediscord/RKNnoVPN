@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.privstack.panel.R
+import com.privstack.panel.model.DnsIpv6Mode
 import com.privstack.panel.model.FallbackPolicy
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -151,25 +152,23 @@ fun SettingsScreen(
             icon = { Icon(Icons.Filled.Dns, contentDescription = null) },
         )
 
-        DnsPresetSelector(
+        DnsSettingsCard(
             currentPreset = state.dnsPreset,
+            remoteDnsUrl = state.remoteDnsUrl,
+            directDnsUrl = state.directDnsUrl,
+            bootstrapDnsIp = state.bootstrapDnsIp,
+            ipv6Mode = state.dnsIpv6Mode,
+            blockQuic = state.blockQuicDns,
+            fakeDns = state.fakeDns,
             onPresetChange = viewModel::setDnsPreset,
+            onRemoteDnsChange = viewModel::setRemoteDnsUrl,
+            onDirectDnsChange = viewModel::setDirectDnsUrl,
+            onBootstrapChange = viewModel::setBootstrapDnsIp,
+            onIpv6ModeChange = viewModel::setDnsIpv6Mode,
+            onBlockQuicChange = viewModel::setBlockQuicDns,
+            onFakeDnsChange = viewModel::setFakeDns,
+            onApply = viewModel::applyDnsSettings,
         )
-
-        if (state.dnsPreset == DnsPreset.CUSTOM) {
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = state.customDnsUrl,
-                onValueChange = viewModel::setCustomDnsUrl,
-                label = { Text(stringResource(R.string.dns_custom_hint)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            TextButton(onClick = viewModel::applyCustomDns) {
-                Text(stringResource(R.string.apply))
-            }
-        }
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -543,33 +542,168 @@ private fun RoutingModeSelector(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DnsPresetSelector(
+private fun DnsSettingsCard(
+    currentPreset: DnsPreset,
+    remoteDnsUrl: String,
+    directDnsUrl: String,
+    bootstrapDnsIp: String,
+    ipv6Mode: DnsIpv6Mode,
+    blockQuic: Boolean,
+    fakeDns: Boolean,
+    onPresetChange: (DnsPreset) -> Unit,
+    onRemoteDnsChange: (String) -> Unit,
+    onDirectDnsChange: (String) -> Unit,
+    onBootstrapChange: (String) -> Unit,
+    onIpv6ModeChange: (DnsIpv6Mode) -> Unit,
+    onBlockQuicChange: (Boolean) -> Unit,
+    onFakeDnsChange: (Boolean) -> Unit,
+    onApply: () -> Unit,
+) {
+    SettingsCard {
+        DnsPresetPicker(
+            currentPreset = currentPreset,
+            onPresetChange = onPresetChange,
+        )
+
+        OutlinedTextField(
+            value = remoteDnsUrl,
+            onValueChange = onRemoteDnsChange,
+            label = { Text(stringResource(R.string.dns_remote_url)) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedTextField(
+            value = directDnsUrl,
+            onValueChange = onDirectDnsChange,
+            label = { Text(stringResource(R.string.dns_direct_url)) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedTextField(
+            value = bootstrapDnsIp,
+            onValueChange = onBootstrapChange,
+            label = { Text(stringResource(R.string.dns_bootstrap_ip)) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+        )
+
+        DnsIpv6ModePicker(
+            currentMode = ipv6Mode,
+            onModeChange = onIpv6ModeChange,
+        )
+
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.dns_block_quic)) },
+            supportingContent = { Text(stringResource(R.string.dns_block_quic_desc)) },
+            trailingContent = {
+                Switch(
+                    checked = blockQuic,
+                    onCheckedChange = onBlockQuicChange,
+                )
+            },
+            colors = transparentListItemColors(),
+        )
+
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.dns_fake_dns)) },
+            supportingContent = { Text(stringResource(R.string.dns_fake_dns_desc)) },
+            trailingContent = {
+                Switch(
+                    checked = fakeDns,
+                    onCheckedChange = onFakeDnsChange,
+                )
+            },
+            colors = transparentListItemColors(),
+        )
+
+        TextButton(
+            onClick = onApply,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        ) {
+            Text(stringResource(R.string.apply))
+        }
+    }
+}
+
+@Composable
+private fun DnsPresetPicker(
     currentPreset: DnsPreset,
     onPresetChange: (DnsPreset) -> Unit,
 ) {
-    val presets = listOf(
-        DnsPreset.CLOUDFLARE to stringResource(R.string.dns_cloudflare),
-        DnsPreset.GOOGLE to stringResource(R.string.dns_google),
-        DnsPreset.ADGUARD to stringResource(R.string.dns_adguard),
-        DnsPreset.CUSTOM to stringResource(R.string.dns_custom),
-    )
+    var expanded by remember { mutableStateOf(false) }
+    val currentLabel = dnsPresetLabel(currentPreset)
 
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        presets.forEachIndexed { index, (preset, label) ->
-            SegmentedButton(
-                selected = currentPreset == preset,
-                onClick = { onPresetChange(preset) },
-                shape = SegmentedButtonDefaults.itemShape(
-                    index = index,
-                    count = presets.size,
-                ),
-            ) {
-                Text(label, style = MaterialTheme.typography.labelSmall)
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.dns_provider)) },
+        supportingContent = { Text(currentLabel) },
+        trailingContent = {
+            TextButton(onClick = { expanded = true }) {
+                Text(currentLabel)
             }
-        }
-    }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                DnsPreset.entries.forEach { preset ->
+                    DropdownMenuItem(
+                        text = { Text(dnsPresetLabel(preset)) },
+                        onClick = {
+                            onPresetChange(preset)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        },
+        colors = transparentListItemColors(),
+    )
+}
+
+@Composable
+private fun DnsIpv6ModePicker(
+    currentMode: DnsIpv6Mode,
+    onModeChange: (DnsIpv6Mode) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val currentLabel = dnsIpv6ModeLabel(currentMode)
+
+    ListItem(
+        headlineContent = { Text(stringResource(R.string.dns_ipv6_mode)) },
+        supportingContent = { Text(currentLabel) },
+        trailingContent = {
+            TextButton(onClick = { expanded = true }) {
+                Text(currentLabel)
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                DnsIpv6Mode.entries.forEach { mode ->
+                    DropdownMenuItem(
+                        text = { Text(dnsIpv6ModeLabel(mode)) },
+                        onClick = {
+                            onModeChange(mode)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        },
+        colors = transparentListItemColors(),
+    )
 }
 
 @Composable
@@ -690,4 +824,21 @@ private fun logLevelLabel(level: LogLevel): String = when (level) {
     LogLevel.WARNING -> stringResource(R.string.log_level_warning)
     LogLevel.ERROR -> stringResource(R.string.log_level_error)
     LogLevel.NONE -> stringResource(R.string.log_level_none)
+}
+
+@Composable
+private fun dnsPresetLabel(preset: DnsPreset): String = when (preset) {
+    DnsPreset.CLOUDFLARE -> stringResource(R.string.dns_cloudflare)
+    DnsPreset.GOOGLE -> stringResource(R.string.dns_google)
+    DnsPreset.MULLVAD -> stringResource(R.string.dns_mullvad)
+    DnsPreset.ADGUARD -> stringResource(R.string.dns_adguard)
+    DnsPreset.CUSTOM -> stringResource(R.string.dns_custom)
+}
+
+@Composable
+private fun dnsIpv6ModeLabel(mode: DnsIpv6Mode): String = when (mode) {
+    DnsIpv6Mode.MIRROR -> stringResource(R.string.dns_ipv6_mirror)
+    DnsIpv6Mode.PREFER_IPV4 -> stringResource(R.string.dns_ipv6_prefer_ipv4)
+    DnsIpv6Mode.PREFER_IPV6 -> stringResource(R.string.dns_ipv6_prefer_ipv6)
+    DnsIpv6Mode.IPV4_ONLY -> stringResource(R.string.dns_ipv6_ipv4_only)
 }

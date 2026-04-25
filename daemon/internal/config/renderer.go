@@ -129,7 +129,29 @@ func buildDNS(cfg *Config) map[string]interface{} {
 		})
 	}
 
+	applyDNSIPv6Mode(dns, cfg.IPv6.Mode)
 	return dns
+}
+
+func applyDNSIPv6Mode(dns map[string]interface{}, mode string) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "prefer_ipv4":
+		dns["strategy"] = "prefer_ipv4"
+	case "prefer_ipv6":
+		dns["strategy"] = "prefer_ipv6"
+	case "ipv6_only":
+		dns["strategy"] = "ipv6_only"
+	case "disable", "disabled", "off", "ipv4_only":
+		dns["strategy"] = "ipv4_only"
+		rules, _ := dns["rules"].([]map[string]interface{})
+		dns["rules"] = append([]map[string]interface{}{
+			{
+				"query_type": []string{"AAAA"},
+				"action":     "predefined",
+				"rcode":      "NOERROR",
+			},
+		}, rules...)
+	}
 }
 
 func buildDNSServer(tag, address, detour string) map[string]interface{} {
@@ -210,12 +232,10 @@ func buildInbounds(cfg *Config) []map[string]interface{} {
 			"listen_port": cfg.Proxy.TProxyPort,
 		},
 		{
-			"type":             "direct",
-			"tag":              "dns-in",
-			"listen":           "::",
-			"listen_port":      cfg.Proxy.DNSPort,
-			"override_address": "1.1.1.1",
-			"override_port":    53,
+			"type":        "redirect",
+			"tag":         "dns-in",
+			"listen":      "::",
+			"listen_port": cfg.Proxy.DNSPort,
 		},
 	}
 	if panelInbounds.HTTPPort > 0 {
@@ -1145,7 +1165,7 @@ func buildTransport(profile *NodeProfile) (map[string]interface{}, error) {
 func buildRoute(cfg *Config) map[string]interface{} {
 	rules := []map[string]interface{}{
 		{
-			"inbound": []string{"tproxy-in"},
+			"inbound": []string{"tproxy-in", "dns-in"},
 			"action":  "sniff",
 		},
 		{
@@ -1256,7 +1276,6 @@ func buildRoute(cfg *Config) map[string]interface{} {
 		"rules":                   rules,
 		"final":                   finalOutbound,
 		"default_domain_resolver": "direct-dns",
-		"default_mark":            255,
 	}
 
 	// Build rule sets for geo databases.

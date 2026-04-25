@@ -8,6 +8,7 @@ import com.privstack.panel.model.BackendHealthSnapshot
 import com.privstack.panel.model.BackendStatusV2
 import com.privstack.panel.model.DaemonStatus
 import com.privstack.panel.model.DesiredStateV2
+import com.privstack.panel.model.DnsIpv6Mode
 import com.privstack.panel.model.HealthConfig
 import com.privstack.panel.model.Node
 import com.privstack.panel.model.NodeProbeResultV2
@@ -194,6 +195,7 @@ class DaemonClient @Inject constructor(
         val routingResult = fetchSection("routing")
         val appsResult = fetchSection("apps")
         val dnsResult = fetchSection("dns")
+        val ipv6Result = fetchSection("ipv6")
         val healthResult = fetchSection("health")
         val sharingResult = fetchSection("sharing")
         val runtimeResult = fetchSection("runtime_v2")
@@ -203,6 +205,16 @@ class DaemonClient @Inject constructor(
         val routing = routingResult.dataOrReturnFailure() ?: return routingResult.asFailure()
         val apps = appsResult.dataOrReturnFailure() ?: return appsResult.asFailure()
         val dns = dnsResult.dataOrReturnFailure() ?: return dnsResult.asFailure()
+        val ipv6 = when (ipv6Result) {
+            is DaemonClientResult.Ok -> ipv6Result.data
+            is DaemonClientResult.DaemonError ->
+                if (ipv6Result.message.contains("unknown config key: ipv6", ignoreCase = true)) {
+                    json.encodeToJsonElement(DaemonIPv6Section.serializer(), DaemonIPv6Section())
+                } else {
+                    return ipv6Result
+                }
+            else -> return ipv6Result.asFailure()
+        }
         val health = when (healthResult) {
             is DaemonClientResult.Ok -> healthResult.data
             is DaemonClientResult.DaemonError ->
@@ -249,6 +261,7 @@ class DaemonClient @Inject constructor(
         val routingSection = json.decodeFromJsonElement(DaemonRoutingSection.serializer(), routing)
         val appsSection = json.decodeFromJsonElement(DaemonAppsSection.serializer(), apps)
         val dnsSection = json.decodeFromJsonElement(DaemonDnsSection.serializer(), dns)
+        val ipv6Section = json.decodeFromJsonElement(DaemonIPv6Section.serializer(), ipv6)
         val healthSection = json.decodeFromJsonElement(DaemonHealthSection.serializer(), health)
         val sharingSection = json.decodeFromJsonElement(DaemonSharingSection.serializer(), sharing)
         val runtimeSection = json.decodeFromJsonElement(DaemonRuntimeV2Section.serializer(), runtime)
@@ -273,6 +286,7 @@ class DaemonClient @Inject constructor(
             panel.extra?.let { put("panel", it) }
             put("routing_raw", routing)
             put("dns_raw", dns)
+            put("ipv6_raw", ipv6)
             put("health_raw", health)
             put("sharing_raw", sharing)
         }
@@ -285,7 +299,7 @@ class DaemonClient @Inject constructor(
                 nodes = effectiveNodes,
                 runtime = runtimeSection.toPanelRuntime(),
                 routing = routingSection.toPanelRouting(appsSection),
-                dns = dnsSection.toPanelDns(),
+                dns = dnsSection.toPanelDns(ipv6Section),
                 health = healthSection.toPanelHealth(),
                 sharing = sharingSection.toPanelSharing(),
                 tun = panel.tun ?: TunConfig(),
@@ -308,6 +322,7 @@ class DaemonClient @Inject constructor(
         val daemonRouting = config.routing.toDaemonRoutingSection(extra?.obj("routing_raw"))
         val daemonApps = config.routing.toDaemonAppsSection()
         val daemonDns = config.dns.toDaemonDnsSection(extra?.obj("dns_raw"))
+        val daemonIPv6 = config.dns.toDaemonIPv6Section(extra?.obj("ipv6_raw"))
         val daemonHealth = config.health.toDaemonHealthSection(extra?.obj("health_raw"))
         val daemonSharing = config.sharing.toDaemonSharingSection(extra?.obj("sharing_raw"))
         val daemonRuntime = config.runtime.toDaemonRuntimeSection()
@@ -318,6 +333,7 @@ class DaemonClient @Inject constructor(
             daemonRouting = daemonRouting,
             daemonApps = daemonApps,
             daemonDns = daemonDns,
+            daemonIPv6 = daemonIPv6,
             daemonHealth = daemonHealth,
             daemonSharing = daemonSharing,
             daemonRuntime = daemonRuntime,
@@ -366,6 +382,7 @@ class DaemonClient @Inject constructor(
         daemonRouting: DaemonRoutingSection,
         daemonApps: DaemonAppsSection,
         daemonDns: DaemonDnsSection,
+        daemonIPv6: DaemonIPv6Section,
         daemonHealth: DaemonHealthSection,
         daemonSharing: DaemonSharingSection,
         daemonRuntime: DaemonRuntimeV2Section,
@@ -385,6 +402,7 @@ class DaemonClient @Inject constructor(
         put("routing", json.encodeToJsonElement(DaemonRoutingSection.serializer(), daemonRouting))
         put("apps", json.encodeToJsonElement(DaemonAppsSection.serializer(), daemonApps))
         put("dns", json.encodeToJsonElement(DaemonDnsSection.serializer(), daemonDns))
+        put("ipv6", json.encodeToJsonElement(DaemonIPv6Section.serializer(), daemonIPv6))
         put("health", json.encodeToJsonElement(DaemonHealthSection.serializer(), daemonHealth))
         put("sharing", json.encodeToJsonElement(DaemonSharingSection.serializer(), daemonSharing))
         put("runtime_v2", json.encodeToJsonElement(DaemonRuntimeV2Section.serializer(), daemonRuntime))
@@ -426,6 +444,7 @@ class DaemonClient @Inject constructor(
                     daemonRouting = config.routing.toDaemonRoutingSection(extra?.obj("routing_raw")),
                     daemonApps = config.routing.toDaemonAppsSection(),
                     daemonDns = config.dns.toDaemonDnsSection(extra?.obj("dns_raw")),
+                    daemonIPv6 = config.dns.toDaemonIPv6Section(extra?.obj("ipv6_raw")),
                     daemonHealth = config.health.toDaemonHealthSection(extra?.obj("health_raw")),
                     daemonSharing = config.sharing.toDaemonSharingSection(extra?.obj("sharing_raw")),
                     daemonRuntime = config.runtime.toDaemonRuntimeSection(),
@@ -1672,22 +1691,40 @@ private data class DaemonAppsSection(
 
 @Serializable
 private data class DaemonDnsSection(
+    @SerialName("hijack_per_uid")
+    val hijackPerUid: Boolean = true,
     @SerialName("proxy_dns")
     val proxyDns: String = "https://1.1.1.1/dns-query",
     @SerialName("direct_dns")
     val directDns: String = "https://dns.google/dns-query",
+    @SerialName("bootstrap_ip")
+    val bootstrapIp: String = "1.1.1.1",
     @SerialName("block_quic_dns")
     val blockQuicDns: Boolean = false,
     @SerialName("fake_ip")
     val fakeIp: Boolean = false,
 ) {
-    fun toPanelDns(): com.privstack.panel.model.DnsConfig =
+    fun toPanelDns(ipv6: DaemonIPv6Section): com.privstack.panel.model.DnsConfig =
         com.privstack.panel.model.DnsConfig(
             remoteDns = proxyDns,
             directDns = directDns,
+            bootstrapIp = bootstrapIp,
+            ipv6Mode = ipv6.toPanelDnsIpv6Mode(),
             blockQuic = blockQuicDns,
             fakeDns = fakeIp,
         )
+}
+
+@Serializable
+private data class DaemonIPv6Section(
+    val mode: String = "mirror",
+) {
+    fun toPanelDnsIpv6Mode(): DnsIpv6Mode = when (mode.lowercase()) {
+        "prefer_ipv4" -> DnsIpv6Mode.PREFER_IPV4
+        "prefer_ipv6" -> DnsIpv6Mode.PREFER_IPV6
+        "disable", "disabled", "off", "ipv4_only" -> DnsIpv6Mode.IPV4_ONLY
+        else -> DnsIpv6Mode.MIRROR
+    }
 }
 
 @Serializable
@@ -1883,12 +1920,28 @@ private fun com.privstack.panel.model.RoutingConfig.toDaemonAppsSection(): Daemo
 private fun com.privstack.panel.model.DnsConfig.toDaemonDnsSection(base: JsonObject?): DaemonDnsSection {
     val merged = buildJsonObject {
         base?.forEach { (key, value) -> put(key, value) }
+        put("hijack_per_uid", base?.get("hijack_per_uid")?.jsonPrimitive?.booleanOrNull ?: true)
         put("proxy_dns", remoteDns)
         put("direct_dns", directDns)
+        put("bootstrap_ip", bootstrapIp)
         put("block_quic_dns", blockQuic)
         put("fake_ip", fakeDns)
     }
     return bridgeJson.decodeFromJsonElement(DaemonDnsSection.serializer(), merged)
+}
+
+private fun com.privstack.panel.model.DnsConfig.toDaemonIPv6Section(base: JsonObject?): DaemonIPv6Section {
+    val mode = when (ipv6Mode) {
+        DnsIpv6Mode.MIRROR -> "mirror"
+        DnsIpv6Mode.PREFER_IPV4 -> "prefer_ipv4"
+        DnsIpv6Mode.PREFER_IPV6 -> "prefer_ipv6"
+        DnsIpv6Mode.IPV4_ONLY -> "disable"
+    }
+    val merged = buildJsonObject {
+        base?.forEach { (key, value) -> put(key, value) }
+        put("mode", mode)
+    }
+    return bridgeJson.decodeFromJsonElement(DaemonIPv6Section.serializer(), merged)
 }
 
 private fun HealthConfig.toDaemonHealthSection(base: JsonObject?): DaemonHealthSection {

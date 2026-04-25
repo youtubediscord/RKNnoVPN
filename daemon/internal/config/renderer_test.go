@@ -54,6 +54,7 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 		}
 	}
 
+	var dnsInbound map[string]any
 	for _, rawInbound := range rendered["inbounds"].([]any) {
 		inbound := rawInbound.(map[string]any)
 		if _, ok := inbound["sniff"]; ok {
@@ -62,17 +63,38 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 		if _, ok := inbound["sniff_override_destination"]; ok {
 			t.Fatalf("removed inbound sniff_override_destination field rendered: %#v", inbound)
 		}
+		if inbound["tag"] == "dns-in" {
+			dnsInbound = inbound
+		}
+	}
+	if dnsInbound == nil {
+		t.Fatal("DNS redirect inbound was not rendered")
+	}
+	if dnsInbound["type"] != "redirect" {
+		t.Fatalf("DNS inbound must use redirect, got %#v", dnsInbound)
+	}
+	if _, ok := dnsInbound["override_address"]; ok {
+		t.Fatalf("DNS redirect inbound must not override destination: %#v", dnsInbound)
+	}
+	if _, ok := dnsInbound["override_port"]; ok {
+		t.Fatalf("DNS redirect inbound must not override destination port: %#v", dnsInbound)
 	}
 
 	rules := rendered["route"].(map[string]any)["rules"].([]any)
 	if rendered["route"].(map[string]any)["default_domain_resolver"] != "direct-dns" {
 		t.Fatalf("route should define default_domain_resolver: %#v", rendered["route"])
 	}
+	if _, ok := rendered["route"].(map[string]any)["default_mark"]; ok {
+		t.Fatalf("route must not mark sing-box's own outbound sockets on Android: %#v", rendered["route"])
+	}
 	if _, ok := rendered["route"].(map[string]any)["auto_detect_interface"]; ok {
 		t.Fatalf("route should not require default interface during service start: %#v", rendered["route"])
 	}
 	if rules[0].(map[string]any)["action"] != "sniff" {
 		t.Fatalf("first route rule should sniff tproxy traffic: %#v", rules[0])
+	}
+	if got := rules[0].(map[string]any)["inbound"].([]any); len(got) != 2 || got[0] != "tproxy-in" || got[1] != "dns-in" {
+		t.Fatalf("sniff rule should cover tproxy and DNS redirect inbounds: %#v", rules[0])
 	}
 	if rules[1].(map[string]any)["action"] != "hijack-dns" {
 		t.Fatalf("DNS route rule should use hijack-dns action: %#v", rules[1])
@@ -100,6 +122,81 @@ func TestRenderOmitsClashAPIByDefault(t *testing.T) {
 	}
 	if experimental, ok := rendered["experimental"]; ok {
 		t.Fatalf("clash API must be production-off by default, got experimental=%#v", experimental)
+	}
+}
+
+func TestRenderAppliesDNSIPv6Mode(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.IPv6.Mode = "disable"
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	dns := rendered["dns"].(map[string]any)
+	if dns["strategy"] != "ipv4_only" {
+		t.Fatalf("IPv6 disabled should render ipv4_only DNS strategy: %#v", dns)
+	}
+	firstRule := dns["rules"].([]any)[0].(map[string]any)
+	if firstRule["action"] != "predefined" {
+		t.Fatalf("IPv6 disabled should synthesize empty AAAA responses: %#v", firstRule)
+	}
+	queryTypes := firstRule["query_type"].([]any)
+	if len(queryTypes) != 1 || queryTypes[0] != "AAAA" {
+		t.Fatalf("unexpected IPv6 DNS suppression rule: %#v", firstRule)
+	}
+
+	cfg.IPv6.Mode = "prefer_ipv4"
+	data, err = RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	dns = rendered["dns"].(map[string]any)
+	if dns["strategy"] != "prefer_ipv4" {
+		t.Fatalf("prefer_ipv4 should render DNS strategy: %#v", dns)
+	}
+}
+
+func TestRenderPreservesDNSIPv6ModeWithFakeIP(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.DNS.FakeIP = true
+	cfg.IPv6.Mode = "disable"
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	dns := rendered["dns"].(map[string]any)
+	if dns["strategy"] != "ipv4_only" {
+		t.Fatalf("FakeIP should preserve IPv6 DNS strategy: %#v", dns)
+	}
+	rules := dns["rules"].([]any)
+	if rules[0].(map[string]any)["action"] != "predefined" {
+		t.Fatalf("AAAA suppression should run before FakeIP: %#v", rules)
+	}
+	if rules[1].(map[string]any)["server"] != "fakeip" {
+		t.Fatalf("FakeIP DNS rule should remain after IPv6 suppression: %#v", rules)
 	}
 }
 

@@ -9,6 +9,7 @@ import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.ConnectionState
 import com.privstack.panel.model.DaemonStatus
+import com.privstack.panel.model.DnsIpv6Mode
 import com.privstack.panel.model.FallbackPolicy
 import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.repository.CommandOutcome
@@ -43,11 +44,16 @@ private fun isMethodNotFound(result: DaemonClientResult.DaemonError): Boolean =
 
 enum class RoutingMode { GLOBAL, WHITELIST, BYPASS, DIRECT }
 
-enum class DnsPreset(val label: String, val url: String) {
-    CLOUDFLARE("Cloudflare", "https://1.1.1.1/dns-query"),
-    GOOGLE("Google", "https://dns.google/dns-query"),
-    ADGUARD("AdGuard", "https://dns.adguard-dns.com/dns-query"),
-    CUSTOM("Custom", ""),
+enum class DnsPreset(
+    val remoteUrl: String,
+    val directUrl: String,
+    val bootstrapIp: String,
+) {
+    CLOUDFLARE("https://1.1.1.1/dns-query", "https://1.1.1.1/dns-query", "1.1.1.1"),
+    GOOGLE("https://dns.google/dns-query", "https://dns.google/dns-query", "8.8.8.8"),
+    MULLVAD("https://adblock.dns.mullvad.net/dns-query", "https://adblock.dns.mullvad.net/dns-query", "194.242.2.3"),
+    ADGUARD("https://dns.adguard-dns.com/dns-query", "https://dns.adguard-dns.com/dns-query", "94.140.14.14"),
+    CUSTOM("", "", ""),
 }
 
 enum class ThemeMode { LIGHT, DARK, SYSTEM }
@@ -77,7 +83,12 @@ data class SettingsUiState(
     val routingMode: RoutingMode = RoutingMode.GLOBAL,
     // DNS
     val dnsPreset: DnsPreset = DnsPreset.CLOUDFLARE,
-    val customDnsUrl: String = "",
+    val remoteDnsUrl: String = DnsPreset.CLOUDFLARE.remoteUrl,
+    val directDnsUrl: String = DnsPreset.CLOUDFLARE.directUrl,
+    val bootstrapDnsIp: String = DnsPreset.CLOUDFLARE.bootstrapIp,
+    val dnsIpv6Mode: DnsIpv6Mode = DnsIpv6Mode.MIRROR,
+    val blockQuicDns: Boolean = true,
+    val fakeDns: Boolean = false,
     val urlTestUrl: String = "https://www.gstatic.com/generate_204",
     val alwaysDirectPackagesText: String = "",
     val sharingEnabled: Boolean = false,
@@ -166,23 +177,109 @@ class SettingsViewModel @Inject constructor(
 
     fun setDnsPreset(preset: DnsPreset) {
         val previousPreset = _uiState.value.dnsPreset
-        _uiState.update { it.copy(dnsPreset = preset, errorMessage = null) }
-        if (preset != DnsPreset.CUSTOM) {
-            saveDnsToProfile(preset.url, previousPreset)
+        if (preset == DnsPreset.CUSTOM) {
+            _uiState.update { it.copy(dnsPreset = preset, errorMessage = null) }
+            return
+        }
+        _uiState.update {
+            it.copy(
+                dnsPreset = preset,
+                remoteDnsUrl = preset.remoteUrl,
+                directDnsUrl = preset.directUrl,
+                bootstrapDnsIp = preset.bootstrapIp,
+                errorMessage = null,
+            )
+        }
+        saveDnsToProfile(previousPreset)
+    }
+
+    fun setRemoteDnsUrl(url: String) {
+        _uiState.update {
+            it.copy(
+                dnsPreset = DnsPreset.CUSTOM,
+                remoteDnsUrl = url,
+                errorMessage = null,
+            )
         }
     }
 
-    fun setCustomDnsUrl(url: String) {
-        _uiState.update { it.copy(customDnsUrl = url) }
+    fun setDirectDnsUrl(url: String) {
+        _uiState.update {
+            it.copy(
+                dnsPreset = DnsPreset.CUSTOM,
+                directDnsUrl = url,
+                errorMessage = null,
+            )
+        }
     }
 
-    fun applyCustomDns() {
-        val url = _uiState.value.customDnsUrl
-        if (url.isNotBlank()) {
-            val previousPreset = _uiState.value.dnsPreset
-            _uiState.update { it.copy(dnsPreset = DnsPreset.CUSTOM, errorMessage = null) }
-            saveDnsToProfile(url, previousPreset)
+    fun setBootstrapDnsIp(value: String) {
+        _uiState.update {
+            it.copy(
+                dnsPreset = DnsPreset.CUSTOM,
+                bootstrapDnsIp = value,
+                errorMessage = null,
+            )
         }
+    }
+
+    fun setDnsIpv6Mode(mode: DnsIpv6Mode) {
+        val previous = _uiState.value.dnsIpv6Mode
+        _uiState.update { it.copy(dnsIpv6Mode = mode, errorMessage = null) }
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(dns = config.dns.copy(ipv6Mode = mode))
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save DNS IPv6 mode: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(dnsIpv6Mode = previous, errorMessage = err) }
+            }
+        }
+    }
+
+    fun setBlockQuicDns(enabled: Boolean) {
+        val previous = _uiState.value.blockQuicDns
+        _uiState.update { it.copy(blockQuicDns = enabled, errorMessage = null) }
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(dns = config.dns.copy(blockQuic = enabled))
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save DNS QUIC policy: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(blockQuicDns = previous, errorMessage = err) }
+            }
+        }
+    }
+
+    fun setFakeDns(enabled: Boolean) {
+        val previous = _uiState.value.fakeDns
+        _uiState.update { it.copy(fakeDns = enabled, errorMessage = null) }
+        viewModelScope.launch {
+            val ok = profileRepository.updateConfig { config ->
+                config.copy(dns = config.dns.copy(fakeDns = enabled))
+            }
+            if (!ok) {
+                val err = profileRepository.error.value
+                Log.w(TAG, "Failed to save FakeDNS policy: $err")
+                profileRepository.refresh()
+                _uiState.update { it.copy(fakeDns = previous, errorMessage = err) }
+            }
+        }
+    }
+
+    fun applyDnsSettings() {
+        val state = _uiState.value
+        if (state.remoteDnsUrl.isBlank() || state.directDnsUrl.isBlank() || state.bootstrapDnsIp.isBlank()) {
+            _uiState.update {
+                it.copy(errorMessage = messages.get(com.privstack.panel.R.string.dns_settings_required))
+            }
+            return
+        }
+        saveDnsToProfile(state.dnsPreset)
     }
 
     fun setUrlTestUrl(url: String) {
@@ -613,8 +710,11 @@ class SettingsViewModel @Inject constructor(
             com.privstack.panel.model.RoutingMode.RULES -> RoutingMode.DIRECT
         }
 
-        val dnsUrl = config.dns.remoteDns
-        val dnsPreset = DnsPreset.entries.find { it.url == dnsUrl && it != DnsPreset.CUSTOM }
+        val dnsPreset = DnsPreset.entries.find {
+            it != DnsPreset.CUSTOM &&
+                it.remoteUrl == config.dns.remoteDns &&
+                it.directUrl == config.dns.directDns
+        }
             ?: DnsPreset.CUSTOM
 
         _uiState.update {
@@ -622,7 +722,12 @@ class SettingsViewModel @Inject constructor(
                 fallbackPolicy = config.runtime.fallbackPolicy,
                 routingMode = routingMode,
                 dnsPreset = dnsPreset,
-                customDnsUrl = if (dnsPreset == DnsPreset.CUSTOM) dnsUrl else it.customDnsUrl,
+                remoteDnsUrl = config.dns.remoteDns,
+                directDnsUrl = config.dns.directDns,
+                bootstrapDnsIp = config.dns.bootstrapIp,
+                dnsIpv6Mode = config.dns.ipv6Mode,
+                blockQuicDns = config.dns.blockQuic,
+                fakeDns = config.dns.fakeDns,
                 urlTestUrl = config.health.checkUrl,
                 alwaysDirectPackagesText = config.routing.alwaysDirectAppList.joinToString("\n"),
                 sharingEnabled = config.sharing.enabled,
@@ -737,12 +842,22 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Save the DNS URL to the daemon's profile config.
+     * Save DNS settings to the daemon profile config.
      */
-    private fun saveDnsToProfile(url: String, previousPreset: DnsPreset) {
+    private fun saveDnsToProfile(previousPreset: DnsPreset) {
+        val state = _uiState.value
         viewModelScope.launch {
             val ok = profileRepository.updateConfig { config ->
-                config.copy(dns = config.dns.copy(remoteDns = url))
+                config.copy(
+                    dns = config.dns.copy(
+                        remoteDns = state.remoteDnsUrl.trim(),
+                        directDns = state.directDnsUrl.trim(),
+                        bootstrapIp = state.bootstrapDnsIp.trim(),
+                        ipv6Mode = state.dnsIpv6Mode,
+                        blockQuic = state.blockQuicDns,
+                        fakeDns = state.fakeDns,
+                    )
+                )
             }
             if (!ok) {
                 val err = profileRepository.error.value
