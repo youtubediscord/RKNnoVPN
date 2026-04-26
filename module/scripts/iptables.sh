@@ -22,7 +22,7 @@ set -eu
 # ============================================================================
 
 TAG="PrivStack:iptables"
-SCRIPT_VERSION="v1.7.7"
+SCRIPT_VERSION="v1.7.8"
 
 # Chain name prefix — all PrivStack chains start with this
 CHAIN_PREFIX="PRIVSTACK"
@@ -119,6 +119,8 @@ validate_env() {
     BYPASS_UIDS="${BYPASS_UIDS:-}"
     SOCKS_PORT="${SOCKS_PORT:-0}"
     HTTP_PORT="${HTTP_PORT:-0}"
+    CHAIN_PROXY_PORTS="${CHAIN_PROXY_PORTS:-}"
+    CHAIN_PROXY_UIDS="${CHAIN_PROXY_UIDS:-}"
     DNS_MODE="${DNS_MODE:-per_uid}"
     DNS_SCOPE="${DNS_SCOPE:-}"
 
@@ -155,6 +157,8 @@ DNS_PORT=${DNS_PORT}
 API_PORT=${API_PORT}
 SOCKS_PORT=${SOCKS_PORT}
 HTTP_PORT=${HTTP_PORT}
+CHAIN_PROXY_PORTS="${CHAIN_PROXY_PORTS}"
+CHAIN_PROXY_UIDS="${CHAIN_PROXY_UIDS}"
 FWMARK=${FWMARK}
 ROUTE_TABLE=${ROUTE_TABLE}
 ROUTE_TABLE_V6=${ROUTE_TABLE_V6}
@@ -217,6 +221,41 @@ emit_socks_port_protection() {
     fi
 }
 
+chain_proxy_port_reserved() {
+    local port="$1"
+    local reserved
+    for reserved in "${TPROXY_PORT}" "${DNS_PORT}" "${API_PORT}" "${SOCKS_PORT}" "${HTTP_PORT}"; do
+        if [ -n "${reserved}" ] && [ "${reserved}" -gt 0 ] 2>/dev/null && [ "${port}" = "${reserved}" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+emit_chain_proxy_port_protection() {
+    local chain="$1"
+    local port uid
+    if [ -z "${CHAIN_PROXY_PORTS}" ] || [ -z "${CHAIN_PROXY_UIDS}" ]; then
+        return 0
+    fi
+    for port in ${CHAIN_PROXY_PORTS}; do
+        case "${port}" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        if [ "${port}" -le 0 ] 2>/dev/null || chain_proxy_port_reserved "${port}"; then
+            continue
+        fi
+        for uid in ${CHAIN_PROXY_UIDS}; do
+            case "${uid}" in
+                ''|*[!0-9]*) continue ;;
+            esac
+            echo "-A ${chain} -p tcp --dport ${port} -m owner --uid-owner ${uid} -j RETURN"
+        done
+        echo "-A ${chain} -p tcp --dport ${port} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${chain} -p tcp --dport ${port} -j RETURN"
+    done
+}
+
 check_listener_protection() {
     local ipt="$1"
     local proto="$2"
@@ -246,6 +285,17 @@ check_local_listener_protection() {
     fi
     if http_port_enabled; then
         check_listener_protection "${ipt}" tcp "${HTTP_PORT}" "HTTP" || missing=1
+    fi
+    if [ -n "${CHAIN_PROXY_UIDS}" ]; then
+        for port in ${CHAIN_PROXY_PORTS}; do
+            case "${port}" in
+                ''|*[!0-9]*) continue ;;
+            esac
+            if [ "${port}" -le 0 ] 2>/dev/null || chain_proxy_port_reserved "${port}"; then
+                continue
+            fi
+            check_listener_protection "${ipt}" tcp "${port}" "CHAIN_PROXY" || missing=1
+        done
     fi
     return "${missing}"
 }
@@ -337,6 +387,7 @@ fi)
 $(emit_api_port_protection "${CHAIN_OUT}")
 $(emit_socks_port_protection "${CHAIN_OUT}")
 $(emit_http_port_protection "${CHAIN_OUT}")
+$(emit_chain_proxy_port_protection "${CHAIN_OUT}")
 
 # 6. Bypass UIDs: specific UIDs that must always go direct.
 #    UID 1073 = NetworkStack — needed for captive portal detection.
@@ -445,6 +496,7 @@ fi)
 $(emit_api_port_protection "${CHAIN_OUT}")
 $(emit_socks_port_protection "${CHAIN_OUT}")
 $(emit_http_port_protection "${CHAIN_OUT}")
+$(emit_chain_proxy_port_protection "${CHAIN_OUT}")
 
 # 6. Bypass UIDs
 $(for uid in ${BYPASS_UIDS}; do
@@ -675,6 +727,8 @@ do_start() {
     log_info "  API_PORT=${API_PORT}"
     log_info "  SOCKS_PORT=${SOCKS_PORT}"
     log_info "  HTTP_PORT=${HTTP_PORT}"
+    log_info "  CHAIN_PROXY_PORTS=${CHAIN_PROXY_PORTS:-<none>}"
+    log_info "  CHAIN_PROXY_UIDS=${CHAIN_PROXY_UIDS:-<none>}"
     log_info "  FWMARK=${FWMARK}"
     log_info "  CORE_GID=${CORE_GID}"
     log_info "  PROXY_UIDS=${PROXY_UIDS:-<none>}"

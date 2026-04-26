@@ -194,6 +194,22 @@ func TestEffectiveLocalPortsSkipsDisabledHelpersAndAPI(t *testing.T) {
 	}
 }
 
+func TestEffectiveLocalPortsIncludesChainedProxyPorts(t *testing.T) {
+	manager := New("/data/adb/privstack", map[string]string{
+		"TPROXY_PORT":       "10853",
+		"DNS_PORT":          "10856",
+		"API_PORT":          "0",
+		"SOCKS_PORT":        "0",
+		"HTTP_PORT":         "0",
+		"CHAIN_PROXY_PORTS": "10808 10809 bad 10808",
+	}, nil)
+
+	got := manager.effectiveLocalPorts()
+	if strings.Join(intsToStrings(got), ",") != "10853,10856,10808,10809" {
+		t.Fatalf("expected chained proxy ports, got %#v", got)
+	}
+}
+
 func intsToStrings(values []int) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {

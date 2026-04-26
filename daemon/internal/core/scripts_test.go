@@ -1,11 +1,14 @@
 package core
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 )
 
 func TestParsePackagesListUIDs(t *testing.T) {
@@ -141,6 +144,99 @@ func TestBuildAppRoutingEnvModes(t *testing.T) {
 	if off.AppMode != "off" || off.ProxyUIDs != "" || off.DirectUIDs != "" || off.DNSScope != "off" || off.LegacyDNSMode != "off" {
 		t.Fatalf("unexpected off env: %#v", off)
 	}
+}
+
+func TestBuildChainedProxyProtectionEnvAllowsMutualLocalProxyUIDs(t *testing.T) {
+	withProcNetTCPTestEnv(t, `
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:2A38 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10123 0 111 1 00000000
+   1: 0100007F:2A39 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10124 0 112 1 00000000
+`, "")
+	cfg := config.DefaultConfig()
+	cfg.Panel.Nodes = jsonRawMessage(t, `{
+		"id":"nekobox",
+		"name":"NekoBox local",
+		"protocol":"SOCKS",
+		"server":"127.0.0.1",
+		"port":10808,
+		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":10808}}
+	}`, `{
+		"id":"bbdpi",
+		"name":"BBDPI local",
+		"protocol":"SOCKS",
+		"server":"localhost",
+		"port":10809,
+		"outbound":{"protocol":"socks","settings":{"address":"localhost","port":10809}}
+	}`)
+
+	ports, uids := BuildChainedProxyProtectionEnv(cfg)
+	if ports != "10808 10809" {
+		t.Fatalf("unexpected chain proxy ports: %q", ports)
+	}
+	if uids != "10123 10124" {
+		t.Fatalf("unexpected chain proxy UIDs: %q", uids)
+	}
+}
+
+func TestBuildChainedProxyProtectionEnvSkipsUnownedAndReservedPorts(t *testing.T) {
+	withProcNetTCPTestEnv(t, `
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:2A38 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10123 0 111 1 00000000
+`, "")
+	cfg := config.DefaultConfig()
+	cfg.Proxy.APIPort = 10808
+	cfg.Panel.Nodes = jsonRawMessage(t, `{
+		"id":"api-duplicate",
+		"protocol":"SOCKS",
+		"server":"127.0.0.1",
+		"port":10808,
+		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":10808}}
+	}`, `{
+		"id":"not-listening",
+		"protocol":"SOCKS",
+		"server":"127.0.0.1",
+		"port":10809,
+		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":10809}}
+	}`)
+
+	ports, uids := BuildChainedProxyProtectionEnv(cfg)
+	if ports != "" || uids != "" {
+		t.Fatalf("reserved/unowned ports must stay fail-open, got ports=%q uids=%q", ports, uids)
+	}
+}
+
+func withProcNetTCPTestEnv(t *testing.T, tcp string, tcp6 string) {
+	t.Helper()
+	oldFiles := procNetTCPFiles
+	t.Cleanup(func() {
+		procNetTCPFiles = oldFiles
+	})
+	dir := t.TempDir()
+	paths := []string{}
+	if tcp != "" {
+		path := filepath.Join(dir, "tcp")
+		if err := os.WriteFile(path, []byte(tcp), 0644); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+	if tcp6 != "" {
+		path := filepath.Join(dir, "tcp6")
+		if err := os.WriteFile(path, []byte(tcp6), 0644); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+	procNetTCPFiles = paths
+}
+
+func jsonRawMessage(t *testing.T, values ...string) []json.RawMessage {
+	t.Helper()
+	raw := make([]json.RawMessage, 0, len(values))
+	for _, value := range values {
+		raw = append(raw, json.RawMessage(value))
+	}
+	return raw
 }
 
 func withPackageResolverTestEnv(t *testing.T, packagesList string, command func(bool) (string, error)) {

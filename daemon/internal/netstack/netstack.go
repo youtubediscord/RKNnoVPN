@@ -368,6 +368,12 @@ func (m Manager) effectiveLocalPorts() []int {
 		m.envInt("SOCKS_PORT"),
 		m.envInt("HTTP_PORT"),
 	}
+	for _, field := range strings.Fields(m.envValue("CHAIN_PROXY_PORTS")) {
+		port, err := strconv.Atoi(field)
+		if err == nil {
+			ports = append(ports, port)
+		}
+	}
 	seen := make(map[int]bool, len(ports))
 	result := make([]int, 0, len(ports))
 	for _, port := range ports {
