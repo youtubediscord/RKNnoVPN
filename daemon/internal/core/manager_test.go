@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 )
@@ -135,6 +136,22 @@ func TestStartStopsBeforeSpawnAndNetstackWhenConfigCheckFails(t *testing.T) {
 		if stage.Name == "spawn-core" || stage.Name == "netstack-apply" {
 			t.Fatalf("config-check failure must not reach %s: %#v", stage.Name, report)
 		}
+	}
+}
+
+func TestSingBoxConfigCheckTimeout(t *testing.T) {
+	dataDir := t.TempDir()
+	singBoxPath := filepath.Join(dataDir, "sing-box")
+	if err := os.WriteFile(singBoxPath, []byte("#!/bin/sh\nwhile :; do :; done\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runSingBoxConfigCheck(singBoxPath, filepath.Join(dataDir, "singbox.json"), 100*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected config check timeout")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got %v", err)
 	}
 }
 

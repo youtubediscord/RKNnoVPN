@@ -18,6 +18,9 @@ PRIVD_SOCK="${PRIVSTACK_DIR}/run/daemon.sock"
 CONFIG_FILE="${PRIVSTACK_DIR}/config/config.json"
 MANUAL_FLAG="${PRIVSTACK_DIR}/config/manual"
 LOG_FILE="${PRIVSTACK_DIR}/logs/service.log"
+MODULE_PROP="${MODDIR}/module.prop"
+LOG_VERSION_FILE="${PRIVSTACK_DIR}/logs/.version"
+LOG_ARCHIVE_DIR="${PRIVSTACK_DIR}/logs/archive"
 
 TAG="privstack:service"
 BOOT_TIMEOUT=120
@@ -48,6 +51,57 @@ log_error() {
     msg="$(ts) [ERROR] $1"
     echo "$msg" >> "$LOG_FILE" 2>/dev/null
     /system/bin/log -t "$TAG" -p e "$1" 2>/dev/null
+}
+
+module_version() {
+    if [ -f "$MODULE_PROP" ]; then
+        sed -n 's/^version=//p' "$MODULE_PROP" 2>/dev/null | head -n 1
+    fi
+}
+
+rotate_logs_if_version_changed() {
+    mkdir -p "${PRIVSTACK_DIR}/logs" 2>/dev/null || return 0
+    chown 0:0 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+    chmod 0700 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+
+    CURRENT_VERSION="$(module_version)"
+    [ -n "$CURRENT_VERSION" ] || return 0
+
+    PREVIOUS_VERSION=""
+    if [ -f "$LOG_VERSION_FILE" ]; then
+        PREVIOUS_VERSION="$(sed -n '1p' "$LOG_VERSION_FILE" 2>/dev/null)"
+    fi
+    if [ "$PREVIOUS_VERSION" = "$CURRENT_VERSION" ]; then
+        return 0
+    fi
+
+    STAMP="$(date "+%Y%m%d-%H%M%S" 2>/dev/null || echo "now")"
+    FROM_VERSION="${PREVIOUS_VERSION:-unknown}"
+    ARCHIVE_DIR="${LOG_ARCHIVE_DIR}/${FROM_VERSION}_to_${CURRENT_VERSION}_${STAMP}"
+    MOVED=0
+
+    for name in privd.log sing-box.log service.log rescue_reset.log net_change.log; do
+        src="${PRIVSTACK_DIR}/logs/${name}"
+        if [ -s "$src" ]; then
+            mkdir -p "$ARCHIVE_DIR" 2>/dev/null || continue
+            if mv "$src" "${ARCHIVE_DIR}/${name}" 2>/dev/null; then
+                MOVED=1
+            fi
+        fi
+    done
+
+    if [ "$MOVED" = "1" ]; then
+        chown -R 0:0 "$ARCHIVE_DIR" 2>/dev/null
+        chmod 0700 "$ARCHIVE_DIR" 2>/dev/null
+        for f in "$ARCHIVE_DIR"/*; do
+            [ -f "$f" ] && chmod 0600 "$f" 2>/dev/null
+        done
+        echo "$(ts) [INFO] Rotated logs for module ${FROM_VERSION} -> ${CURRENT_VERSION}: ${ARCHIVE_DIR}" >> "$LOG_FILE" 2>/dev/null
+    fi
+
+    echo "$CURRENT_VERSION" > "$LOG_VERSION_FILE" 2>/dev/null
+    chown 0:0 "$LOG_VERSION_FILE" 2>/dev/null
+    chmod 0600 "$LOG_VERSION_FILE" 2>/dev/null
 }
 
 # ============================================================================
@@ -87,6 +141,7 @@ detect_busybox() {
     BUSYBOX=""
 }
 
+rotate_logs_if_version_changed
 detect_busybox
 log_info "Busybox: ${BUSYBOX:-not found}"
 

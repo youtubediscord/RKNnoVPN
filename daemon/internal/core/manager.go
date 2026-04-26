@@ -3,6 +3,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -273,6 +274,8 @@ type listenerWaitSpec struct {
 	Port    int
 	Timeout time.Duration
 }
+
+const singBoxCheckTimeout = 20 * time.Second
 
 // CoreManager owns the sing-box child process and the iptables / DNS
 // rules that make transparent proxying work.
@@ -698,7 +701,22 @@ func (m *CoreManager) openSingBoxLog() (*os.File, string, error) {
 
 func (m *CoreManager) checkSingBoxConfig(configPath string) error {
 	binPath := filepath.Join(m.dataDir, "bin", "sing-box")
-	out, err := ExecCommand(binPath, "check", "-c", configPath)
+	return runSingBoxConfigCheck(binPath, configPath, singBoxCheckTimeout)
+}
+
+func runSingBoxConfigCheck(binPath string, configPath string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, binPath, "check", "-c", configPath)
+	outBytes, err := cmd.CombinedOutput()
+	out := strings.TrimSpace(string(outBytes))
+	if ctx.Err() == context.DeadlineExceeded {
+		if out != "" {
+			return fmt.Errorf("sing-box check timed out after %s; output: %s", timeout, out)
+		}
+		return fmt.Errorf("sing-box check timed out after %s", timeout)
+	}
 	if err != nil {
 		if out != "" {
 			return fmt.Errorf("sing-box check failed: %w; output: %s", err, out)
