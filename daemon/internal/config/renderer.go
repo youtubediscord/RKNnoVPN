@@ -232,10 +232,12 @@ func buildInbounds(cfg *Config) []map[string]interface{} {
 			"listen_port": cfg.Proxy.TProxyPort,
 		},
 		{
-			"type":        "redirect",
-			"tag":         "dns-in",
-			"listen":      "::",
-			"listen_port": cfg.Proxy.DNSPort,
+			"type":             "direct",
+			"tag":              "dns-in",
+			"listen":           "::",
+			"listen_port":      cfg.Proxy.DNSPort,
+			"override_address": firstNonEmpty(cfg.DNS.BootstrapIP, "1.1.1.1"),
+			"override_port":    53,
 		},
 	}
 	if panelInbounds.HTTPPort > 0 {

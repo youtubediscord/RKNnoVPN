@@ -13,7 +13,7 @@ permissions:
 env:
   GO_VERSION: "1.22"
   SINGBOX_GO_VERSION: "1.24.x"
-  SINGBOX_VERSION: "latest"
+  SINGBOX_VERSION: "stable"
   SINGBOX_TAGS: "with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0"
   ANDROID_API: "23"
   ANDROID_NDK_VERSION: "27.2.12479018"
@@ -41,16 +41,22 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       ref: ${{ steps.resolve.outputs.ref }}
     steps:
-      - name: Resolve latest release
+      - name: Resolve sing-box release
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "${SINGBOX_VERSION}" == "latest" ]]; then
-            VERSION="$(gh release list --repo SagerNet/sing-box --limit 1 --json tagName --jq '.[0].tagName')"
-          else
-            VERSION="v${SINGBOX_VERSION#v}"
-          fi
+          case "${SINGBOX_VERSION}" in
+            stable|"")
+              VERSION="$(gh release view --repo SagerNet/sing-box --json tagName --jq .tagName)"
+              ;;
+            latest|alpha|prerelease)
+              VERSION="$(gh release list --repo SagerNet/sing-box --limit 1 --json tagName --jq '.[0].tagName')"
+              ;;
+            *)
+              VERSION="v${SINGBOX_VERSION#v}"
+              ;;
+          esac
           if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
             echo "Failed to resolve sing-box release" >&2
             exit 1

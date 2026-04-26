@@ -411,16 +411,15 @@ func (h *HealthMonitor) checkDNSListener() CheckResult {
 }
 
 // checkDNS intentionally does not send a standalone query to the local DNS
-// port. The sing-box DNS inbound is a transparent redirect listener: direct
-// probes to 127.0.0.1:<dnsPort> have no original destination and loop back to
-// the listener itself. DNS readiness is therefore represented by listener and
-// iptables hook checks; data-plane health is covered by the outbound URL probe.
+// port. DNS readiness is represented by listener and iptables hook checks; the
+// data-plane is covered by the outbound URL probe, which exercises the selected
+// proxy route instead of a synthetic root-originated lookup.
 func (h *HealthMonitor) checkDNS() CheckResult {
 	port := h.dnsPort
 	if port <= 0 {
 		port = 10856
 	}
-	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS redirect listener 127.0.0.1:%d проверяется без standalone lookup", port)}
+	return CheckResult{Pass: true, Detail: fmt.Sprintf("DNS listener 127.0.0.1:%d проверяется без standalone lookup", port)}
 }
 
 // --------------------------------------------------------------------------

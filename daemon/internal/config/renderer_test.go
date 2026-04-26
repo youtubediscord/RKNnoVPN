@@ -68,16 +68,16 @@ func TestRenderSingboxConfigAvoidsRemovedSingBox113Fields(t *testing.T) {
 		}
 	}
 	if dnsInbound == nil {
-		t.Fatal("DNS redirect inbound was not rendered")
+		t.Fatal("DNS direct inbound was not rendered")
 	}
-	if dnsInbound["type"] != "redirect" {
-		t.Fatalf("DNS inbound must use redirect, got %#v", dnsInbound)
+	if dnsInbound["type"] != "direct" {
+		t.Fatalf("DNS inbound must use direct override listener, got %#v", dnsInbound)
 	}
-	if _, ok := dnsInbound["override_address"]; ok {
-		t.Fatalf("DNS redirect inbound must not override destination: %#v", dnsInbound)
+	if dnsInbound["override_address"] != "1.1.1.1" {
+		t.Fatalf("DNS direct inbound must override destination away from itself: %#v", dnsInbound)
 	}
-	if _, ok := dnsInbound["override_port"]; ok {
-		t.Fatalf("DNS redirect inbound must not override destination port: %#v", dnsInbound)
+	if dnsInbound["override_port"] != float64(53) {
+		t.Fatalf("DNS direct inbound must override destination port 53: %#v", dnsInbound)
 	}
 
 	rules := rendered["route"].(map[string]any)["rules"].([]any)

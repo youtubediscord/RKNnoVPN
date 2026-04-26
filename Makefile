@@ -1,8 +1,8 @@
 # PrivStack — Local Build Commands
 # Requires: Go 1.22+, Android SDK, JDK 17
 
-SINGBOX_VERSION ?= latest
-SINGBOX_RESOLVED_VERSION := $(shell if [ "$(SINGBOX_VERSION)" = "latest" ]; then gh release list --repo SagerNet/sing-box --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null | sed 's/^v//'; else echo "$(SINGBOX_VERSION)" | sed 's/^v//'; fi)
+SINGBOX_VERSION ?= stable
+SINGBOX_RESOLVED_VERSION := $(shell if [ "$(SINGBOX_VERSION)" = "stable" ]; then gh release view --repo SagerNet/sing-box --json tagName --jq .tagName 2>/dev/null | sed 's/^v//'; elif [ "$(SINGBOX_VERSION)" = "latest" ] || [ "$(SINGBOX_VERSION)" = "alpha" ] || [ "$(SINGBOX_VERSION)" = "prerelease" ]; then gh release list --repo SagerNet/sing-box --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null | sed 's/^v//'; else echo "$(SINGBOX_VERSION)" | sed 's/^v//'; fi)
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 OUT_DIR := out
 MODULE_DIR := module
