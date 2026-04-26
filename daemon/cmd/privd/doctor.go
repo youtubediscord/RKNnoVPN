@@ -660,7 +660,7 @@ func doctorReleaseIntegrityIssues(report doctorReleaseIntegrity) []string {
 	if report.Error != "" {
 		issues = append(issues, "release integrity check failed: "+report.Error)
 	}
-	if report.MissingManifest {
+	if report.MissingManifest && !report.OK {
 		issues = append(issues, "current release manifest is missing")
 	}
 	if len(report.MissingFiles) > 0 {
@@ -691,11 +691,13 @@ func doctorReleaseIntegrityReport(dataDir string) doctorReleaseIntegrity {
 	report.ReleasePath = releasePath
 	manifestPath := filepath.Join(releasePath, "install-manifest.json")
 	report.ManifestPath = manifestPath
+	report.Version = filepath.Base(releasePath)
 
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			report.MissingManifest = true
+			report.OK = true
 		} else {
 			report.Error = err.Error()
 		}

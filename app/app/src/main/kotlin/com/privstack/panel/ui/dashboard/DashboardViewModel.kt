@@ -202,7 +202,9 @@ class DashboardViewModel @Inject constructor(
         }
 
         _uiState.update {
-            val operationalDegraded = status.health.healthy &&
+            val showRuntimeHealth = status.state != ConnectionState.DISCONNECTED
+            val operationalDegraded = showRuntimeHealth &&
+                status.health.healthy &&
                 !status.health.operationalHealthy &&
                 status.health.checkedAt > 0L
             val healthIssueMessage = messages.formatHealthIssue(
@@ -220,8 +222,8 @@ class DashboardViewModel @Inject constructor(
                 latencyMs = status.latencyMs,
                 traffic = status.traffic,
                 trafficHistory = _trafficRing.toList(),
-                dnsChecked = status.health.checkedAt > 0L,
-                dnsOperational = status.health.dnsOperational,
+                dnsChecked = showRuntimeHealth && status.health.checkedAt > 0L,
+                dnsOperational = showRuntimeHealth && status.health.dnsOperational,
                 operationalDegraded = operationalDegraded,
                 operationalIssueMessage = if (operationalDegraded) {
                     healthIssueMessage

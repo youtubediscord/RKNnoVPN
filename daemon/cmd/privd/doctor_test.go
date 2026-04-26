@@ -417,6 +417,28 @@ func TestDoctorReleaseIntegrityReportDetectsMismatch(t *testing.T) {
 	}
 }
 
+func TestDoctorReleaseIntegrityReportTreatsMissingManifestAsLegacy(t *testing.T) {
+	dataDir := t.TempDir()
+	releaseDir := filepath.Join(dataDir, "releases", "v1.7.9")
+	if err := os.MkdirAll(filepath.Join(releaseDir, "bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(releaseDir, filepath.Join(dataDir, "current")); err != nil {
+		t.Fatal(err)
+	}
+
+	report := doctorReleaseIntegrityReport(dataDir)
+	if !report.OK || !report.MissingManifest {
+		t.Fatalf("missing manifest should be legacy/unverified, got %#v", report)
+	}
+	if report.Version != "v1.7.9" {
+		t.Fatalf("expected version inferred from release path, got %q", report.Version)
+	}
+	if issues := doctorReleaseIntegrityIssues(report); len(issues) != 0 {
+		t.Fatalf("missing legacy manifest should not create a compatibility issue, got %#v", issues)
+	}
+}
+
 func mustMarshalForTest(t *testing.T, value interface{}) string {
 	t.Helper()
 	data, err := json.Marshal(value)

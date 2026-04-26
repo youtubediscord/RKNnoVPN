@@ -31,7 +31,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/watcher"
 )
 
-var Version = "v1.7.9"
+var Version = "v1.7.10"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {

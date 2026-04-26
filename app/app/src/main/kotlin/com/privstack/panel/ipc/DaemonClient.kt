@@ -619,12 +619,12 @@ class DaemonClient @Inject constructor(
         }
 
     suspend fun backendReset(): DaemonClientResult<ResetReport> =
-        call("backend.reset", timeoutMs = 60_000L) {
+        call("backend.reset", timeoutMs = RESET_TIMEOUT_MS) {
             json.decodeFromJsonElement(ResetReport.serializer(), it)
         }
 
     suspend fun legacyNetworkReset(): DaemonClientResult<ResetReport> =
-        call("network-reset", timeoutMs = 60_000L) {
+        call("network-reset", timeoutMs = RESET_TIMEOUT_MS) {
             json.decodeFromJsonElement(ResetReport.serializer(), it)
         }
 
@@ -1209,6 +1209,7 @@ private fun stableReleaseVersion(raw: String): String? {
 }
 
 private val REPAIR_METHODS = setOf("backend.stop", "backend.reset", "network-reset", "network.reset")
+private const val RESET_TIMEOUT_MS = 240_000L
 private val REQUIRED_METHOD_ALTERNATIVES = listOf(
     setOf("backend.reset", "network-reset", "network.reset"),
     setOf("config-import", "config.import"),
