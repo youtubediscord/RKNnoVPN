@@ -311,6 +311,7 @@ fun SettingsScreen(
                 headlineContent = {
                     FilledTonalButton(
                         onClick = viewModel::resetNetworkRules,
+                        enabled = !state.isResetting,
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = MaterialTheme.colorScheme.errorContainer,
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,

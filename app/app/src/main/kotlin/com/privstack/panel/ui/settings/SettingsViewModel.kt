@@ -105,6 +105,7 @@ data class SettingsUiState(
     // Error
     val errorMessage: String? = null,
     val lastResetSummary: String? = null,
+    val isResetting: Boolean = false,
     val logsText: String = "",
     val isLoadingLogs: Boolean = false,
     val shareLogsText: String? = null,
@@ -398,11 +399,13 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun resetNetworkRules() {
+        if (_uiState.value.isResetting) return
         _uiState.update {
             it.copy(
                 daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_resetting),
                 errorMessage = null,
                 lastResetSummary = null,
+                isResetting = true,
             )
         }
         viewModelScope.launch {
@@ -419,6 +422,7 @@ class SettingsViewModel @Inject constructor(
                             },
                             errorMessage = report.errors.takeIf { it.isNotEmpty() }?.joinToString("\n"),
                             lastResetSummary = summarizeResetReport(report),
+                            isResetting = false,
                         )
                     }
                 }
@@ -429,6 +433,7 @@ class SettingsViewModel @Inject constructor(
                         it.copy(
                             daemonStatusText = messages.get(com.privstack.panel.R.string.state_error),
                             errorMessage = message,
+                            isResetting = false,
                         )
                     }
                 }

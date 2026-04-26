@@ -31,7 +31,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/watcher"
 )
 
-var Version = "v1.7.11"
+var Version = "v1.7.12"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {
@@ -50,6 +50,7 @@ type daemon struct {
 	mu                    sync.Mutex // protects cfg
 	metricsMu             sync.Mutex
 	runtimeOpMu           sync.Mutex
+	resetMu               sync.Mutex
 	reportMu              sync.Mutex
 	runtimeDesiredRunning bool
 	runtimeOpEpoch        uint64

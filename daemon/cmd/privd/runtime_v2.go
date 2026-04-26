@@ -476,6 +476,9 @@ func (d *daemon) hasRecentEgress() bool {
 }
 
 func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.BackendKind) runtimev2.ResetReport {
+	d.resetMu.Lock()
+	defer d.resetMu.Unlock()
+
 	report := runtimev2.ResetReport{
 		BackendKind: backend,
 		Generation:  generation,
