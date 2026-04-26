@@ -604,7 +604,7 @@ class DaemonClient @Inject constructor(
         call("backend.status") { json.decodeFromJsonElement(BackendStatusV2.serializer(), it) }
 
     suspend fun backendStart(): DaemonClientResult<BackendStatusV2> =
-        call("backend.start", timeoutMs = 30_000L) {
+        call("backend.start", timeoutMs = START_TIMEOUT_MS) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
 
@@ -614,7 +614,7 @@ class DaemonClient @Inject constructor(
         }
 
     suspend fun backendRestart(): DaemonClientResult<BackendStatusV2> =
-        call("backend.restart", timeoutMs = 60_000L) {
+        call("backend.restart", timeoutMs = START_TIMEOUT_MS) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
 
@@ -1209,6 +1209,7 @@ private fun stableReleaseVersion(raw: String): String? {
 }
 
 private val REPAIR_METHODS = setOf("backend.stop", "backend.reset", "network-reset", "network.reset")
+private const val START_TIMEOUT_MS = 120_000L
 private const val RESET_TIMEOUT_MS = 240_000L
 private val REQUIRED_METHOD_ALTERNATIVES = listOf(
     setOf("backend.reset", "network-reset", "network.reset"),

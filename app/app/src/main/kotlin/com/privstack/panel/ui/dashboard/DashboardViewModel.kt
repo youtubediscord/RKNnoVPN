@@ -202,7 +202,8 @@ class DashboardViewModel @Inject constructor(
         }
 
         _uiState.update {
-            val showRuntimeHealth = status.state != ConnectionState.DISCONNECTED
+            val showRuntimeHealth = status.state == ConnectionState.CONNECTED ||
+                status.state == ConnectionState.ERROR
             val operationalDegraded = showRuntimeHealth &&
                 status.health.healthy &&
                 !status.health.operationalHealthy &&

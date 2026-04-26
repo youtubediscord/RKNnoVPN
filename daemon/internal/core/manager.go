@@ -378,15 +378,20 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 
 	// 1. Render the sing-box JSON config.
 	configPath := filepath.Join(m.dataDir, "config", "rendered", "singbox.json")
+	m.logger.Printf("rendering sing-box config to %s", configPath)
 	if err := renderConfig(m.config, profile, configPath); err != nil {
+		m.logger.Printf("render sing-box config failed: %v", err)
 		m.state = StateStopped
 		return failStage("render-config", "render config", "CONFIG_RENDER_FAILED", err, false)
 	}
 	recordStage("render-config", "ok", "", configPath, false)
+	m.logger.Printf("checking sing-box config %s", configPath)
 	if err := m.checkSingBoxConfig(configPath); err != nil {
+		m.logger.Printf("sing-box config check failed: %v", err)
 		m.state = StateStopped
 		return failStage("config-check", "config check", "CONFIG_CHECK_FAILED", err, false)
 	}
+	m.logger.Printf("sing-box config check passed")
 	recordStage("config-check", "ok", "", configPath, false)
 
 	// 2. Spawn sing-box.
