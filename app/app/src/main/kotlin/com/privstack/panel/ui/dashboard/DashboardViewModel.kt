@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.privstack.panel.i18n.UserMessageFormatter
+import com.privstack.panel.model.BackendPhase
 import com.privstack.panel.model.ConnectionState
 import com.privstack.panel.model.DaemonConnectionState
 import com.privstack.panel.model.DaemonStatus
@@ -202,8 +203,7 @@ class DashboardViewModel @Inject constructor(
         }
 
         _uiState.update {
-            val showRuntimeHealth = status.state == ConnectionState.CONNECTED ||
-                status.state == ConnectionState.ERROR
+            val showRuntimeHealth = status.shouldShowRuntimeHealth()
             val operationalDegraded = showRuntimeHealth &&
                 status.health.healthy &&
                 !status.health.operationalHealthy &&
@@ -254,8 +254,25 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
+    private fun DaemonStatus.shouldShowRuntimeHealth(): Boolean {
+        val runtimeSettled = health.phase !in TRANSIENT_OR_STOPPED_PHASES
+        return runtimeSettled &&
+            (state == ConnectionState.CONNECTED || state == ConnectionState.ERROR)
+    }
+
     override fun onCleared() {
         super.onCleared()
         statusRepository.stopPolling()
     }
 }
+
+private val TRANSIENT_OR_STOPPED_PHASES = setOf(
+    BackendPhase.STOPPED,
+    BackendPhase.APPLYING,
+    BackendPhase.STARTING,
+    BackendPhase.CONFIG_CHECKED,
+    BackendPhase.CORE_SPAWNED,
+    BackendPhase.CORE_LISTENING,
+    BackendPhase.STOPPING,
+    BackendPhase.RESETTING,
+)

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -18,6 +19,7 @@ type panelNode struct {
 	Protocol string          `json:"protocol"`
 	Server   string          `json:"server"`
 	Port     int             `json:"port"`
+	Link     string          `json:"link"`
 	Outbound json.RawMessage `json:"outbound"`
 }
 
@@ -253,6 +255,13 @@ func buildInbounds(cfg *Config) []map[string]interface{} {
 
 func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}, error) {
 	nodeProfiles := ProfilesFromPanelNodes(cfg)
+	if len(nodeProfiles) > 0 {
+		var err error
+		nodeProfiles, err = renderablePanelProfiles(cfg, nodeProfiles)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if len(nodeProfiles) == 0 {
 		if profile.Address == "" {
 			return nil, fmt.Errorf("renderer: node address is empty")
@@ -761,7 +770,178 @@ func profileFromPanelNode(raw json.RawMessage, index int) (*NodeProfile, error) 
 	}
 
 	applyStreamSettings(profile, mapFromMap(outbound, "streamSettings"))
+	applyPanelLinkFallback(profile, node.Link)
 	return profile, nil
+}
+
+func renderablePanelProfiles(cfg *Config, profiles []*NodeProfile) ([]*NodeProfile, error) {
+	activeID := strings.TrimSpace(cfg.Panel.ActiveNodeID)
+	renderable := make([]*NodeProfile, 0, len(profiles))
+	skipped := 0
+	for _, profile := range profiles {
+		if _, err := buildProxyOutbound(profile); err != nil {
+			if activeID != "" && profile.ID == activeID {
+				return nil, fmt.Errorf("renderer: active node %q is invalid: %w", nodeDisplayName(profile), err)
+			}
+			skipped++
+			continue
+		}
+		renderable = append(renderable, profile)
+	}
+	if len(renderable) == 0 && len(profiles) > 0 {
+		return nil, fmt.Errorf("renderer: no usable panel nodes; skipped %d invalid node(s)", skipped)
+	}
+	return renderable, nil
+}
+
+func nodeDisplayName(profile *NodeProfile) string {
+	return firstNonEmpty(profile.Name, profile.ID, profile.Address, profile.Tag)
+}
+
+func applyPanelLinkFallback(profile *NodeProfile, link string) {
+	link = strings.TrimSpace(link)
+	if link == "" {
+		return
+	}
+	switch profile.Protocol {
+	case "shadowsocks":
+		method, password, host, port, ok := parseShadowsocksLink(link)
+		if !ok {
+			return
+		}
+		if profile.Address == "" {
+			profile.Address = host
+		}
+		if profile.Port == 0 {
+			profile.Port = port
+		}
+		if profile.Password == "" {
+			profile.Password = password
+			profile.UUID = password
+		}
+		if profile.SSMethod == "" {
+			profile.SSMethod = method
+		}
+	case "trojan":
+		password, host, port, ok := parseUserInfoProxyLink(link, "trojan")
+		if !ok {
+			return
+		}
+		if profile.Address == "" {
+			profile.Address = host
+		}
+		if profile.Port == 0 {
+			profile.Port = port
+		}
+		if profile.Password == "" && profile.UUID == "" {
+			profile.Password = password
+			profile.UUID = password
+		}
+	}
+}
+
+func parseShadowsocksLink(link string) (method string, password string, host string, port int, ok bool) {
+	body, found := strings.CutPrefix(strings.TrimSpace(link), "ss://")
+	if !found {
+		return "", "", "", 0, false
+	}
+	body = strings.SplitN(body, "#", 2)[0]
+
+	if at := strings.LastIndex(body, "@"); at >= 0 {
+		userInfo := body[:at]
+		hostPort := strings.SplitN(body[at+1:], "?", 2)[0]
+		host, port, ok := parseHostPortValue(hostPort)
+		if !ok {
+			return "", "", "", 0, false
+		}
+		decoded := decodeShadowsocksUserInfo(userInfo)
+		if decoded == "" {
+			decoded, _ = url.QueryUnescape(userInfo)
+		}
+		method, password, ok := splitMethodPassword(decoded)
+		if !ok {
+			return "", "", "", 0, false
+		}
+		return method, password, host, port, true
+	}
+
+	decoded := decodeShadowsocksUserInfo(strings.SplitN(body, "?", 2)[0])
+	if decoded == "" {
+		return "", "", "", 0, false
+	}
+	at := strings.LastIndex(decoded, "@")
+	if at < 0 {
+		return "", "", "", 0, false
+	}
+	method, password, ok = splitMethodPassword(decoded[:at])
+	if !ok {
+		return "", "", "", 0, false
+	}
+	host, port, ok = parseHostPortValue(decoded[at+1:])
+	if !ok {
+		return "", "", "", 0, false
+	}
+	return method, password, host, port, true
+}
+
+func parseUserInfoProxyLink(link string, scheme string) (secret string, host string, port int, ok bool) {
+	parsed, err := url.Parse(link)
+	if err != nil || !strings.EqualFold(parsed.Scheme, scheme) || parsed.User == nil {
+		return "", "", 0, false
+	}
+	secret = parsed.User.Username()
+	if secret == "" {
+		return "", "", 0, false
+	}
+	portValue, err := strconv.Atoi(parsed.Port())
+	if err != nil || portValue <= 0 {
+		return "", "", 0, false
+	}
+	return secret, parsed.Hostname(), portValue, parsed.Hostname() != ""
+}
+
+func decodeShadowsocksUserInfo(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	decoders := []*base64.Encoding{
+		base64.RawURLEncoding,
+		base64.URLEncoding,
+		base64.RawStdEncoding,
+		base64.StdEncoding,
+	}
+	for _, decoder := range decoders {
+		if decoded, err := decoder.DecodeString(value); err == nil {
+			return string(decoded)
+		}
+	}
+	return ""
+}
+
+func splitMethodPassword(value string) (string, string, bool) {
+	colon := strings.Index(value, ":")
+	if colon <= 0 || colon == len(value)-1 {
+		return "", "", false
+	}
+	return value[:colon], value[colon+1:], true
+}
+
+func parseHostPortValue(value string) (string, int, bool) {
+	host, portText, err := net.SplitHostPort(value)
+	if err != nil {
+		lastColon := strings.LastIndex(value, ":")
+		if lastColon <= 0 || lastColon == len(value)-1 {
+			return "", 0, false
+		}
+		host = strings.Trim(value[:lastColon], "[]")
+		portText = value[lastColon+1:]
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port <= 0 || port > 65535 || host == "" {
+		return "", 0, false
+	}
+	return host, port, true
 }
 
 func applyStreamSettings(profile *NodeProfile, stream map[string]interface{}) {

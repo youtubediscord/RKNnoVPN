@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -391,6 +392,148 @@ func TestRenderPanelNodesAsURLTestOutbounds(t *testing.T) {
 	route := rendered["route"].(map[string]any)
 	if route["final"] != "proxy" {
 		t.Fatalf("route final should target selector proxy, got %#v", route["final"])
+	}
+}
+
+func TestRenderPanelShadowsocksFallsBackToShareLinkSecret(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"ss-node",
+			"name":"SS",
+			"protocol":"SHADOWSOCKS",
+			"server":"127.0.0.1",
+			"port":8388,
+			"link":"ss://aes-128-gcm:secret@127.0.0.1:8388#SS",
+			"outbound":{
+				"protocol":"shadowsocks",
+				"settings":{
+					"servers":[{
+						"address":"127.0.0.1",
+						"port":8388,
+						"method":"aes-128-gcm",
+						"password":""
+					}]
+				}
+			}
+		}`),
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	outbounds := rendered["outbounds"].([]any)
+	proxy := outbounds[0].(map[string]any)
+	if proxy["type"] != "shadowsocks" || proxy["password"] != "secret" {
+		t.Fatalf("expected shadowsocks password from share link, got %#v", proxy)
+	}
+}
+
+func TestRenderAutoSkipsInvalidPanelNode(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"bad-ss",
+			"name":"Bad SS",
+			"protocol":"SHADOWSOCKS",
+			"server":"127.0.0.1",
+			"port":8388,
+			"outbound":{
+				"protocol":"shadowsocks",
+				"settings":{
+					"servers":[{"address":"127.0.0.1","port":8388,"method":"aes-128-gcm","password":""}]
+				}
+			}
+		}`),
+		json.RawMessage(`{
+			"id":"good-vless",
+			"name":"Good VLESS",
+			"protocol":"VLESS",
+			"server":"one.example",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"one.example",
+						"port":443,
+						"users":[{"id":"00000000-0000-0000-0000-000000000001","encryption":"none"}]
+					}]
+				}
+			}
+		}`),
+	}
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	outbounds := rendered["outbounds"].([]any)
+	if len(outbounds) != 2 {
+		t.Fatalf("expected one usable proxy plus direct, got %#v", outbounds)
+	}
+	proxy := outbounds[0].(map[string]any)
+	if proxy["type"] != "vless" || proxy["tag"] != "proxy" {
+		t.Fatalf("expected valid VLESS proxy after skipping invalid SS, got %#v", proxy)
+	}
+}
+
+func TestRenderActiveInvalidPanelNodeFails(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = ""
+	cfg.Node.UUID = ""
+	cfg.Panel.ActiveNodeID = "bad-ss"
+	cfg.Panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{
+			"id":"bad-ss",
+			"name":"Bad SS",
+			"protocol":"SHADOWSOCKS",
+			"server":"127.0.0.1",
+			"port":8388,
+			"outbound":{
+				"protocol":"shadowsocks",
+				"settings":{
+					"servers":[{"address":"127.0.0.1","port":8388,"method":"aes-128-gcm","password":""}]
+				}
+			}
+		}`),
+		json.RawMessage(`{
+			"id":"good-vless",
+			"name":"Good VLESS",
+			"protocol":"VLESS",
+			"server":"one.example",
+			"port":443,
+			"outbound":{
+				"protocol":"vless",
+				"settings":{
+					"vnext":[{
+						"address":"one.example",
+						"port":443,
+						"users":[{"id":"00000000-0000-0000-0000-000000000001","encryption":"none"}]
+					}]
+				}
+			}
+		}`),
+	}
+
+	_, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err == nil || !strings.Contains(err.Error(), "active node") {
+		t.Fatalf("expected active invalid node error, got %v", err)
 	}
 }
 

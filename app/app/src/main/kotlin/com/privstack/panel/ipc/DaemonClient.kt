@@ -1395,10 +1395,10 @@ private fun BackendStatusV2.toDaemonStatus(
         com.privstack.panel.model.BackendPhase.APPLYING,
         com.privstack.panel.model.BackendPhase.STARTING,
         com.privstack.panel.model.BackendPhase.CONFIG_CHECKED,
-        com.privstack.panel.model.BackendPhase.STOPPING,
-        com.privstack.panel.model.BackendPhase.RESETTING -> com.privstack.panel.model.ConnectionState.CONNECTING
         com.privstack.panel.model.BackendPhase.CORE_SPAWNED,
         com.privstack.panel.model.BackendPhase.CORE_LISTENING,
+        com.privstack.panel.model.BackendPhase.STOPPING,
+        com.privstack.panel.model.BackendPhase.RESETTING -> com.privstack.panel.model.ConnectionState.CONNECTING
         com.privstack.panel.model.BackendPhase.FAILED -> com.privstack.panel.model.ConnectionState.ERROR
     }
 
