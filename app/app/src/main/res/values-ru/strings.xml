@@ -237,6 +237,7 @@
     <string name="error_github_http_status">GitHub API вернул HTTP %1$s</string>
     <string name="error_checksum_failed">Проверка SHA256 не пройдена</string>
     <string name="error_download_http_status">Загрузка завершилась с HTTP %1$s</string>
+    <string name="error_config_saved_not_applied">Настройки сохранены, но runtime их не применил: %1$s</string>
     <string name="error_daemon_with_code">Ошибка демона %1$d: %2$s</string>
     <string name="error_root_access_denied">Root-доступ запрещён</string>
     <string name="error_root_access_denied_with_reason">Root-доступ запрещён: %1$s</string>

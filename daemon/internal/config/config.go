@@ -346,7 +346,9 @@ func (c *Config) ResolvePanelInbounds() PanelInboundsConfig {
 	if decoded.HTTPPort > 0 {
 		result.HTTPPort = decoded.HTTPPort
 	}
-	result.AllowLAN = decoded.AllowLAN
+	// Helper inbounds are diagnostics/local-control surfaces. Keep them
+	// localhost-only even if older APK state still carries allowLan=true.
+	result.AllowLAN = false
 	return result
 }
 

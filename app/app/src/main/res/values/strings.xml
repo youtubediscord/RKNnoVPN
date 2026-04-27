@@ -248,6 +248,7 @@
     <string name="error_unexpected_with_reason">Unexpected error: %1$s</string>
     <string name="error_operation_failed_with_reason">%1$s failed: %2$s</string>
     <string name="error_no_profile_loaded">No profile loaded</string>
+    <string name="error_config_saved_not_applied">Settings were saved, but runtime did not apply them: %1$s</string>
     <string name="operation_accepted">Operation accepted. Waiting for completion…</string>
     <string name="operation_start">Start</string>
     <string name="operation_stop">Stop</string>

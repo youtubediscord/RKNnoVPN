@@ -973,11 +973,7 @@ func (d *daemon) handlePanelSet(params *json.RawMessage) (interface{}, *ipc.RPCE
 		return nil, d.configApplyRPCError(err)
 	}
 
-	return map[string]interface{}{
-		"status":        "ok",
-		"reload":        p.Reload,
-		"runtimeStatus": d.runtimeV2.Status(),
-	}, nil
+	return d.configMutationSuccess("ok", p.Reload, -1), nil
 }
 
 func (d *daemon) handleConfigGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1066,12 +1062,7 @@ func (d *daemon) handleConfigSet(params *json.RawMessage) (interface{}, *ipc.RPC
 	if err := d.applyConfig(newCfg, false); err != nil {
 		return nil, d.configApplyRPCError(err)
 	}
-	return map[string]interface{}{
-		"status":        "ok",
-		"reload":        false,
-		"updated":       1,
-		"runtimeStatus": d.runtimeV2.Status(),
-	}, nil
+	return d.configMutationSuccess("ok", false, 1), nil
 }
 
 func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1124,12 +1115,7 @@ func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc
 		return nil, d.configApplyRPCError(err)
 	}
 
-	return map[string]interface{}{
-		"status":        "ok",
-		"reload":        p.Reload,
-		"updated":       len(p.Values),
-		"runtimeStatus": d.runtimeV2.Status(),
-	}, nil
+	return d.configMutationSuccess("ok", p.Reload, len(p.Values)), nil
 }
 
 func (d *daemon) handleConfigList(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1194,9 +1180,12 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		}
 	}
 	d.mu.Lock()
-	newCfg.Panel = d.cfg.Panel
+	oldPanel := d.cfg.Panel
+	newCfg.Panel = oldPanel
 	d.mu.Unlock()
+	panelProvided := false
 	if panelRaw, ok := raw["panel"]; ok {
+		panelProvided = true
 		if err := json.Unmarshal(panelRaw, &newCfg.Panel); err != nil {
 			return nil, &ipc.RPCError{
 				Code:    ipc.CodeConfigError,
@@ -1213,22 +1202,19 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		}
 	}
 
-	if err := d.applyConfig(newCfg, true); err != nil {
-		return nil, d.configApplyRPCError(err)
-	}
-	if _, ok := raw["panel"]; ok {
+	if panelProvided {
 		if err := config.SavePanel(d.panelPath, newCfg.Panel); err != nil {
-			return nil, d.configApplyRPCError(
-				fmt.Errorf("apply config import failed; panel saved was not persisted: %w", err),
-			)
+			return nil, d.configApplyRPCError(fmt.Errorf("persist panel: %w", err))
 		}
 	}
+	if err := d.applyConfig(newCfg, true); err != nil {
+		if panelProvided {
+			_ = config.SavePanel(d.panelPath, oldPanel)
+		}
+		return nil, d.configApplyRPCError(err)
+	}
 
-	return map[string]interface{}{
-		"status":        "imported",
-		"reload":        true,
-		"runtimeStatus": d.runtimeV2.Status(),
-	}, nil
+	return d.configMutationSuccess("imported", true, -1), nil
 }
 
 func isFullConfigImportKey(key string) bool {
@@ -1284,24 +1270,59 @@ func (d *daemon) configApplyRPCError(err error) *ipc.RPCError {
 	var busy *runtimev2.OperationBusyError
 	if errors.As(err, &busy) {
 		rpcErr := d.rpcErrorFromRuntimeError(err)
-		if strings.Contains(err.Error(), "config saved") || strings.Contains(err.Error(), "panel saved") {
-			rpcErr.Data = map[string]interface{}{
-				"config_saved": true,
-				"busy":         busy.Data(),
-			}
-		}
+		saved := configMutationWasSaved(err)
+		rpcErr.Data = d.configMutationErrorData(err, saved)
+		rpcErr.Data.(map[string]interface{})["busy"] = busy.Data()
 		return rpcErr
 	}
 	rpcErr := &ipc.RPCError{
 		Code:    ipc.CodeInternalError,
 		Message: err.Error(),
 	}
-	if strings.Contains(err.Error(), "config saved") || strings.Contains(err.Error(), "panel saved") {
-		rpcErr.Data = map[string]interface{}{
-			"config_saved": true,
-		}
-	}
+	rpcErr.Data = d.configMutationErrorData(err, configMutationWasSaved(err))
 	return rpcErr
+}
+
+func (d *daemon) configMutationSuccess(status string, reload bool, updated int) map[string]interface{} {
+	result := map[string]interface{}{
+		"ok":              true,
+		"status":          status,
+		"reload":          reload,
+		"config_saved":    true,
+		"runtime_applied": true,
+	}
+	if updated >= 0 {
+		result["updated"] = updated
+	}
+	if d.runtimeV2 != nil {
+		result["runtimeStatus"] = d.runtimeV2.Status()
+	}
+	return result
+}
+
+func (d *daemon) configMutationErrorData(err error, saved bool) map[string]interface{} {
+	data := map[string]interface{}{
+		"ok":              false,
+		"config_saved":    saved,
+		"runtime_applied": false,
+		"message":         err.Error(),
+		"code":            runtimeErrorCode(err, "CONFIG_APPLY_FAILED"),
+	}
+	if d.runtimeV2 != nil {
+		data["runtimeStatus"] = d.runtimeV2.Status()
+	}
+	if resetReport := resetReportFromRuntimeError(err); resetReport != nil {
+		data["resetReport"] = resetReport
+	}
+	return data
+}
+
+func configMutationWasSaved(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "config saved") || strings.Contains(msg, "panel saved")
 }
 
 func (d *daemon) failIfRuntimeOperationActive() error {
@@ -1801,11 +1822,18 @@ func (d *daemon) handleSubscriptionFetch(params *json.RawMessage) (interface{}, 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	const maxSubscriptionBody = 4 * 1024 * 1024
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubscriptionBody+1))
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInternalError,
 			Message: "subscription read failed: " + err.Error(),
+		}
+	}
+	if len(body) > maxSubscriptionBody {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "subscription response is too large",
 		}
 	}
 

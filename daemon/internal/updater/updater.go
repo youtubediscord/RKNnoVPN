@@ -140,6 +140,15 @@ func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, 
 	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return nil, fmt.Errorf("updater: mkdir %s: %w", destDir, err)
 	}
+	if info.ModuleURL == "" || info.ApkURL == "" {
+		return nil, fmt.Errorf("updater: release is missing required module or APK artifact")
+	}
+	if info.ChecksumURL == "" {
+		return nil, fmt.Errorf("updater: release is missing sha256sums.txt")
+	}
+	if err := cleanupDownloadedArtifacts(destDir); err != nil {
+		return nil, err
+	}
 
 	totalSize := info.ModuleSize + info.ApkSize
 	var downloaded int64
@@ -169,13 +178,6 @@ func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, 
 			return nil, fmt.Errorf("updater: download apk: %w", err)
 		}
 		result.ApkPath = p
-	}
-
-	if result.ModulePath == "" && result.ApkPath == "" {
-		return nil, fmt.Errorf("updater: no downloadable update artifacts found")
-	}
-	if info.ChecksumURL == "" {
-		return nil, fmt.Errorf("updater: release is missing sha256sums.txt")
 	}
 
 	checksumPath := filepath.Join(destDir, "SHA256SUMS.txt")
@@ -257,11 +259,21 @@ func downloadFile(url, dest string, onProgress func(int64)) error {
 		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
 
-	f, err := os.Create(dest)
+	tmp := dest + ".tmp"
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	cleanup := true
+	defer func() {
+		_ = f.Close()
+		if cleanup {
+			_ = os.Remove(tmp)
+		}
+	}()
 
 	buf := make([]byte, 64*1024)
 	for {
@@ -279,6 +291,30 @@ func downloadFile(url, dest string, onProgress func(int64)) error {
 		}
 		if readErr != nil {
 			return readErr
+		}
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+func cleanupDownloadedArtifacts(destDir string) error {
+	for _, name := range []string{"module.zip", "panel.apk", "SHA256SUMS.txt"} {
+		path := filepath.Join(destDir, name)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("updater: remove stale %s: %w", name, err)
+		}
+		tmpPath := path + ".tmp"
+		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("updater: remove stale %s.tmp: %w", name, err)
 		}
 	}
 	return nil

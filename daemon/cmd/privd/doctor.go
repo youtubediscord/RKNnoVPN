@@ -20,7 +20,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
-const controlProtocolVersion = 3
+const controlProtocolVersion = 4
 
 type doctorCommandResult struct {
 	Command string   `json:"command"`
@@ -765,6 +765,7 @@ func supportedCapabilities() []string {
 		"backend.reset.structured",
 		"backend.reset.warnings.v1",
 		"config.import.v2",
+		"config.mutation.envelope.v1",
 		"config.schema.v4",
 		"diagnostics.bundle.v2",
 		"diagnostics.health.v2",

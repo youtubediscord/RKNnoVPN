@@ -716,7 +716,8 @@ func (o *Orchestrator) finishOperationLocked(op OperationStatus, completion oper
 		o.health = healthFromError(completion.err)
 	}
 	o.last = operationResult(op, completion, time.Now())
-	if o.active != nil && o.active.OperationID == op.OperationID {
+	active := o.active
+	if active != nil && active.OperationID == op.OperationID {
 		o.active = nil
 	}
 	result := "ok"
@@ -724,12 +725,12 @@ func (o *Orchestrator) finishOperationLocked(op OperationStatus, completion oper
 		result = "failed"
 	}
 	step := operationStepFromHealth(o.health)
-	if step.Name == "" && o.active != nil && o.active.OperationID == op.OperationID {
+	if step.Name == "" && active != nil && active.OperationID == op.OperationID {
 		step = operationStep{
-			Name:   o.active.Step,
-			Status: o.active.StepStatus,
-			Code:   o.active.StepCode,
-			Detail: o.active.StepDetail,
+			Name:   active.Step,
+			Status: active.StepStatus,
+			Code:   active.StepCode,
+			Detail: active.StepDetail,
 		}
 	}
 	logEvent := OperationLogEvent{

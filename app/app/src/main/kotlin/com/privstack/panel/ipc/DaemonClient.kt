@@ -55,6 +55,7 @@ private val bridgeJson = Json {
 
 private const val METHOD_NOT_FOUND_CODE = -32601
 private const val COMPATIBILITY_ERROR_CODE = -32090
+private const val CONFIG_APPLY_ERROR_CODE = -32003
 
 /**
  * Typed, high-level client for daemon IPC methods.
@@ -69,7 +70,7 @@ class DaemonClient @Inject constructor(
     private val executor: PrivctlExecutor
 ) {
     companion object {
-        const val MIN_CONTROL_PROTOCOL_VERSION = 3
+        const val MIN_CONTROL_PROTOCOL_VERSION = 4
         const val MIN_SCHEMA_VERSION = 4
         val REQUIRED_METHODS: Set<String> = setOf(
             "backend.status",
@@ -317,7 +318,7 @@ class DaemonClient @Inject constructor(
         reload: Boolean = true,
     ): DaemonClientResult<ConfigMutationInfo> {
         requireCompatible("config-set-many")?.let { return it.asFailure() }
-        val activeNode = config.nodes.find { it.id == config.activeNodeId } ?: config.nodes.firstOrNull()
+        val activeNode = config.selectableActiveNode()
         val daemonNode = activeNode?.toDaemonNodeSection() ?: DaemonNodeSection()
         val daemonTransport = activeNode?.toDaemonTransportSection() ?: DaemonTransportSection()
         val extra = config.extra?.jsonObject
@@ -357,6 +358,7 @@ class DaemonClient @Inject constructor(
         config: ProfileConfig,
         reload: Boolean = true,
     ): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("panel-set")?.let { return it.asFailure() }
         return when (val result = callConfigMutation(
             "panel-set",
             buildJsonObject {
@@ -433,7 +435,7 @@ class DaemonClient @Inject constructor(
         config: ProfileConfig,
         reload: Boolean,
     ): DaemonClientResult<ConfigMutationInfo> {
-        val activeNode = config.nodes.find { it.id == config.activeNodeId } ?: config.nodes.firstOrNull()
+        val activeNode = config.selectableActiveNode()
         val extra = config.extra?.jsonObject
         val params = buildJsonObject {
             put(
@@ -884,18 +886,49 @@ class DaemonClient @Inject constructor(
     private suspend fun callConfigMutation(
         method: String,
         params: JsonObject,
-    ): DaemonClientResult<ConfigMutationInfo> =
-        call(method, params, timeoutMs = 60_000L) { element ->
-            val obj = element.jsonObject
-            ConfigMutationInfo(
-                status = obj["status"]?.jsonPrimitive?.contentOrNull.orEmpty(),
-                reload = obj["reload"]?.jsonPrimitive?.booleanOrNull ?: false,
-                updated = obj["updated"]?.jsonPrimitive?.intOrNull,
-                runtimeStatus = obj["runtimeStatus"]?.let {
-                    json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
-                },
-            )
+    ): DaemonClientResult<ConfigMutationInfo> {
+        return when (val raw = executor.execute(method, params, timeoutMs = 60_000L)) {
+            is PrivctlResult.Success -> try {
+                val info = parseConfigMutationInfo(raw.data)
+                if (!info.ok || !info.runtimeApplied) {
+                    DaemonClientResult.DaemonError(
+                        CONFIG_APPLY_ERROR_CODE,
+                        info.message.ifBlank { "configuration was not applied" },
+                        raw.data,
+                    )
+                } else {
+                    DaemonClientResult.Ok(info)
+                }
+            } catch (e: Exception) {
+                DaemonClientResult.ParseError(raw.data.toString(), e)
+            }
+            is PrivctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details)
+            is PrivctlResult.RootDenied -> DaemonClientResult.RootDenied(raw.reason)
+            is PrivctlResult.Timeout -> DaemonClientResult.Timeout(raw.method)
+            is PrivctlResult.DaemonNotFound -> DaemonClientResult.DaemonNotFound(raw.path)
+            is PrivctlResult.UnexpectedError -> DaemonClientResult.Failure(raw.throwable)
         }
+    }
+
+    private fun parseConfigMutationInfo(element: JsonElement): ConfigMutationInfo {
+        val obj = element.jsonObject
+        val ok = obj.booleanField("ok") ?: true
+        val configSaved = obj.booleanField("config_saved", "configSaved") ?: ok
+        val runtimeApplied = obj.booleanField("runtime_applied", "runtimeApplied") ?: ok
+        return ConfigMutationInfo(
+            ok = ok,
+            status = obj["status"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            reload = obj["reload"]?.jsonPrimitive?.booleanOrNull ?: false,
+            updated = obj["updated"]?.jsonPrimitive?.intOrNull,
+            configSaved = configSaved,
+            runtimeApplied = runtimeApplied,
+            code = obj["code"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            message = obj["message"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            runtimeStatus = obj["runtimeStatus"]?.let {
+                json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
+            },
+        )
+    }
 
     private fun isMethodNotFound(result: DaemonClientResult.DaemonError): Boolean =
         result.code == METHOD_NOT_FOUND_CODE ||
@@ -1275,9 +1308,14 @@ data class UpdateInstallInfo(
 )
 
 data class ConfigMutationInfo(
+    val ok: Boolean = true,
     val status: String = "",
     val reload: Boolean = false,
     val updated: Int? = null,
+    val configSaved: Boolean = true,
+    val runtimeApplied: Boolean = true,
+    val code: String = "",
+    val message: String = "",
     val runtimeStatus: BackendStatusV2? = null,
 )
 
@@ -1965,6 +2003,14 @@ private fun DaemonClientResult<JsonElement>.dataOrReturnFailure(): JsonElement? 
 private fun JsonObject.obj(key: String): JsonObject? =
     this[key] as? JsonObject
 
+private fun JsonObject.booleanField(vararg keys: String): Boolean? {
+    for (key in keys) {
+        val value = this[key]?.jsonPrimitive?.booleanOrNull
+        if (value != null) return value
+    }
+    return null
+}
+
 private fun <T> DaemonClientResult<T>.asFailure(): DaemonClientResult<Nothing> = when (this) {
     is DaemonClientResult.DaemonError -> this
     is DaemonClientResult.RootDenied -> this
@@ -2010,6 +2056,11 @@ private fun ProfileConfig.toDaemonPanelSection(): DaemonPanelSection =
         inbounds = inbounds,
         extra = extra?.jsonObject?.obj("panel"),
     )
+
+private fun ProfileConfig.selectableActiveNode(): com.privstack.panel.model.Node? {
+    val selectable = nodes.filterNot { it.stale }
+    return selectable.find { it.id == activeNodeId } ?: selectable.firstOrNull()
+}
 
 private fun com.privstack.panel.model.RoutingConfig.toDaemonAppsSection(): DaemonAppsSection =
     when (mode) {

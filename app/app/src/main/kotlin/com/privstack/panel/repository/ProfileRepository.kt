@@ -119,8 +119,41 @@ class ProfileRepository @Inject constructor(
     }
 
     /** Set the active node for this profile. */
-    suspend fun setActiveNode(nodeId: String): Boolean = mutatePanel("setActiveNode") { config ->
-        config.copy(activeNodeId = nodeId)
+    suspend fun setActiveNode(nodeId: String): Boolean = mutex.withLock {
+        _loading.value = true
+        _error.value = null
+        try {
+            val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                if (_error.value.isNullOrBlank()) {
+                    _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                }
+                return@withLock false
+            }
+            if (current.nodes.none { it.id == nodeId && !it.stale }) {
+                _error.value = messages.get(com.privstack.panel.R.string.node_not_found)
+                return@withLock false
+            }
+            if (!ensureRuntimeIdle("setActiveNode")) {
+                return@withLock false
+            }
+            when (val result = client.panelSet(current.copy(activeNodeId = nodeId))) {
+                is DaemonClientResult.Ok -> {
+                    publishRuntimeStatus(result.data)
+                    refreshUnlockedWithStatus("setActiveNode")
+                }
+                else -> {
+                    val msg = describeFailure(result)
+                    Log.w(TAG, "setActiveNode panel update failed: $msg")
+                    if (result.configWasSaved()) {
+                        return@withLock refreshAfterSavedFailure("setActiveNode", msg)
+                    }
+                    _error.value = msg
+                    false
+                }
+            }
+        } finally {
+            _loading.value = false
+        }
     }
 
     /** Let the daemon selector use automatic node selection. */
@@ -183,8 +216,7 @@ class ProfileRepository @Inject constructor(
                     val msg = describeFailure(result)
                     Log.w(TAG, "setProfile failed: $msg")
                     if (result.configWasSaved()) {
-                        _error.value = msg
-                        return@withLock refreshUnlockedWithStatus("setProfile")
+                        return@withLock refreshAfterSavedFailure("setProfile", msg)
                     }
                     _error.value = msg
                     false
@@ -230,8 +262,7 @@ class ProfileRepository @Inject constructor(
                     val msg = describeFailure(result)
                     Log.w(TAG, "$tag failed: $msg")
                     if (result.configWasSaved()) {
-                        _error.value = msg
-                        return refreshUnlockedWithStatus(tag)
+                        return refreshAfterSavedFailure(tag, msg)
                     }
                     _error.value = msg
                     false
@@ -268,8 +299,7 @@ class ProfileRepository @Inject constructor(
                     val msg = describeFailure(result)
                     Log.w(TAG, "$tag panel update failed: $msg")
                     if (result.configWasSaved()) {
-                        _error.value = msg
-                        return refreshUnlockedWithStatus(tag)
+                        return refreshAfterSavedFailure(tag, msg)
                     }
                     _error.value = msg
                     false
@@ -307,6 +337,12 @@ class ProfileRepository @Inject constructor(
                 false
             }
         }
+    }
+
+    private suspend fun refreshAfterSavedFailure(tag: String, message: String): Boolean {
+        _error.value = message
+        refreshUnlockedWithStatus("$tag saved-failure")
+        return false
     }
 
     private suspend fun refreshUnlockedOrNull(): ProfileConfig? {
@@ -394,8 +430,7 @@ class ProfileRepository @Inject constructor(
                 val msg = describeFailure(result)
                 Log.w(TAG, "persistPanelUnlocked failed: $msg")
                 if (result.configWasSaved()) {
-                    _error.value = msg
-                    return refreshUnlockedWithStatus("persistPanelUnlocked")
+                    return refreshAfterSavedFailure("persistPanelUnlocked", msg)
                 }
                 _error.value = msg
                 false
@@ -466,7 +501,8 @@ class ProfileRepository @Inject constructor(
 
     private fun <T> DaemonClientResult<T>.configWasSaved(): Boolean {
         val error = this as? DaemonClientResult.DaemonError ?: return false
-        val details = error.details?.jsonObject ?: return false
-        return details["config_saved"]?.jsonPrimitive?.booleanOrNull == true
+        val details = runCatching { error.details?.jsonObject }.getOrNull() ?: return false
+        return details["config_saved"]?.jsonPrimitive?.booleanOrNull == true ||
+            details["configSaved"]?.jsonPrimitive?.booleanOrNull == true
     }
 }

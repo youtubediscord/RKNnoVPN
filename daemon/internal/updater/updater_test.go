@@ -2,8 +2,6 @@ package updater
 
 import (
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,21 +84,9 @@ func TestVerifyChecksumsAcceptsAllDownloadedArtifacts(t *testing.T) {
 }
 
 func TestDownloadUpdateRejectsMissingChecksumAsset(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/module.zip":
-			_, _ = w.Write([]byte("module"))
-		case "/panel.apk":
-			_, _ = w.Write([]byte("apk"))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
 	_, err := DownloadUpdate(&UpdateInfo{
-		ModuleURL:  server.URL + "/module.zip",
-		ApkURL:     server.URL + "/panel.apk",
+		ModuleURL:  "https://example.invalid/module.zip",
+		ApkURL:     "https://example.invalid/panel.apk",
 		ModuleSize: int64(len("module")),
 		ApkSize:    int64(len("apk")),
 	}, t.TempDir(), nil)

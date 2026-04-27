@@ -23,6 +23,7 @@ type Server struct {
 	handlers   map[string]Handler
 	mu         sync.RWMutex
 	done       chan struct{}
+	stopOnce   sync.Once
 	wg         sync.WaitGroup
 }
 
@@ -69,13 +70,15 @@ func (s *Server) Start() error {
 // Stop gracefully shuts down the server: stops accepting new connections
 // and waits for in-flight requests to finish.
 func (s *Server) Stop() {
-	close(s.done)
-	if s.listener != nil {
-		s.listener.Close()
-	}
-	s.wg.Wait()
-	os.Remove(s.socketPath)
-	log.Printf("ipc: server stopped")
+	s.stopOnce.Do(func() {
+		close(s.done)
+		if s.listener != nil {
+			s.listener.Close()
+		}
+		s.wg.Wait()
+		os.Remove(s.socketPath)
+		log.Printf("ipc: server stopped")
+	})
 }
 
 func (s *Server) acceptLoop() {

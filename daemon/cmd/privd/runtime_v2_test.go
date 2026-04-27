@@ -55,6 +55,47 @@ func TestBuildRuntimeV2HealthSnapshotSeparatesOperationalFailures(t *testing.T) 
 	}
 }
 
+func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
+	d := &daemon{}
+
+	result := d.configMutationSuccess("ok", true, 2)
+
+	if result["ok"] != true {
+		t.Fatalf("mutation success must set ok=true: %#v", result)
+	}
+	if result["config_saved"] != true {
+		t.Fatalf("mutation success must set config_saved=true: %#v", result)
+	}
+	if result["runtime_applied"] != true {
+		t.Fatalf("mutation success must set runtime_applied=true: %#v", result)
+	}
+	if result["updated"] != 2 {
+		t.Fatalf("mutation success lost updated count: %#v", result)
+	}
+}
+
+func TestConfigApplyRPCErrorEnvelopeKeepsSavedFailureVisible(t *testing.T) {
+	d := &daemon{}
+
+	rpcErr := d.configApplyRPCError(errors.New("config saved: apply config hot-swap failed"))
+	data, ok := rpcErr.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected structured mutation error data, got %#v", rpcErr.Data)
+	}
+	if data["ok"] != false {
+		t.Fatalf("saved apply failure must set ok=false: %#v", data)
+	}
+	if data["config_saved"] != true {
+		t.Fatalf("saved apply failure must set config_saved=true: %#v", data)
+	}
+	if data["runtime_applied"] != false {
+		t.Fatalf("saved apply failure must set runtime_applied=false: %#v", data)
+	}
+	if data["code"] == "" || data["message"] == "" {
+		t.Fatalf("saved apply failure must include code and message: %#v", data)
+	}
+}
+
 func TestBuildRuntimeV2HealthSnapshotIncludesLatestStageReport(t *testing.T) {
 	cfg := config.DefaultConfig()
 	manager := core.NewCoreManager(cfg, t.TempDir(), nil)

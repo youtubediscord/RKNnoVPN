@@ -161,7 +161,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	stagedScriptsDir := filepath.Join(staging, "scripts")
 	if info, err := os.Stat(stagedScriptsDir); err == nil && info.IsDir() {
 		logger.Println("updating scripts")
-		if err := copyDir(stagedScriptsDir, scriptsDir, 0755); err != nil {
+		if err := replaceDirFromSource(stagedScriptsDir, scriptsDir, 0755); err != nil {
 			rollbackBinaries()
 			return fmt.Errorf("copy scripts: %w", err)
 		}
@@ -180,10 +180,13 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	}
 	for _, name := range moduleFiles {
 		src := filepath.Join(staging, name)
+		dst := filepath.Join(moduleDir, name)
 		if _, err := os.Stat(src); os.IsNotExist(err) {
+			if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+				logger.Printf("warning: remove stale module file %s: %v", name, err)
+			}
 			continue
 		}
-		dst := filepath.Join(moduleDir, name)
 		perm := os.FileMode(0644)
 		if strings.HasSuffix(name, ".sh") {
 			perm = 0755
@@ -198,7 +201,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	stagedDefaults := filepath.Join(staging, "defaults")
 	if info, err := os.Stat(stagedDefaults); err == nil && info.IsDir() {
 		moduleDefaults := filepath.Join(moduleDir, "defaults")
-		if err := copyDir(stagedDefaults, moduleDefaults, 0644); err != nil {
+		if err := replaceDirFromSource(stagedDefaults, moduleDefaults, 0644); err != nil {
 			logger.Printf("warning: copy defaults: %v", err)
 		}
 	}
@@ -916,6 +919,49 @@ func copyDir(srcDir, dstDir string, filePerm os.FileMode) error {
 
 		return copyFile(path, target, filePerm)
 	})
+}
+
+func replaceDirFromSource(srcDir, dstDir string, filePerm os.FileMode) error {
+	parent := filepath.Dir(dstDir)
+	base := filepath.Base(dstDir)
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(parent, "."+base+"-new-*")
+	if err != nil {
+		return err
+	}
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(tmp)
+		}
+	}()
+	if err := copyDir(srcDir, tmp, filePerm); err != nil {
+		return err
+	}
+
+	old := filepath.Join(parent, fmt.Sprintf(".%s-old-%d", base, time.Now().UnixNano()))
+	oldExists := false
+	if _, err := os.Lstat(dstDir); err == nil {
+		if err := os.Rename(dstDir, old); err != nil {
+			return err
+		}
+		oldExists = true
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Rename(tmp, dstDir); err != nil {
+		if oldExists {
+			_ = os.Rename(old, dstDir)
+		}
+		return err
+	}
+	published = true
+	if oldExists {
+		_ = os.RemoveAll(old)
+	}
+	return nil
 }
 
 // findSubdir checks if the path <base>/<a>/<b> exists and returns it, or "".

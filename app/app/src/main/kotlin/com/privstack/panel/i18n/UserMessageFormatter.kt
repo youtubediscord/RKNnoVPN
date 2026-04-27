@@ -5,6 +5,7 @@ import androidx.annotation.StringRes
 import com.privstack.panel.R
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.RuntimeStageReport
+import kotlinx.serialization.json.booleanOrNull
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -35,12 +36,17 @@ class UserMessageFormatter @Inject constructor(
         is DaemonClientResult.DaemonError ->
             when (result.code) {
                 COMPATIBILITY_ERROR_CODE -> result.message
-                RUNTIME_BUSY_CODE -> formatRuntimeBusy(result)
-                else -> get(
-                    R.string.error_daemon_with_code,
-                    result.code,
-                    result.message,
-                )
+                else -> if (result.configWasSaved()) {
+                    get(R.string.error_config_saved_not_applied, result.message)
+                } else if (result.code == RUNTIME_BUSY_CODE) {
+                    formatRuntimeBusy(result)
+                } else {
+                    get(
+                        R.string.error_daemon_with_code,
+                        result.code,
+                        result.message,
+                    )
+                }
             }
         is DaemonClientResult.RootDenied -> get(R.string.error_root_access_denied)
         is DaemonClientResult.Timeout -> get(R.string.error_request_timed_out_with_method, result.method)
@@ -96,6 +102,12 @@ class UserMessageFormatter @Inject constructor(
             "restart", "reload" -> get(R.string.error_operation_busy_named, get(R.string.operation_reload))
             else -> get(R.string.error_runtime_busy)
         }
+    }
+
+    private fun DaemonClientResult.DaemonError.configWasSaved(): Boolean {
+        val details = runCatching { this.details?.jsonObject }.getOrNull() ?: return false
+        return details["config_saved"]?.jsonPrimitive?.booleanOrNull == true ||
+            details["configSaved"]?.jsonPrimitive?.booleanOrNull == true
     }
 
     fun formatHealthIssue(

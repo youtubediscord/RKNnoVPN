@@ -786,7 +786,7 @@ func TestRenderAddsInternalStatusSOCKSInboundWhenExplicitlyEnabled(t *testing.T)
 	}
 }
 
-func TestRenderHelperInboundsHonorAllowLAN(t *testing.T) {
+func TestRenderHelperInboundsIgnoreAllowLAN(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "example.com"
 	cfg.Node.Port = 443
@@ -812,8 +812,8 @@ func TestRenderHelperInboundsHonorAllowLAN(t *testing.T) {
 				continue
 			}
 			found = true
-			if inbound["listen"] != "0.0.0.0" {
-				t.Fatalf("%s did not honor allowLan: %#v", wantTag, inbound)
+			if inbound["listen"] != "127.0.0.1" {
+				t.Fatalf("%s escaped localhost despite allowLan: %#v", wantTag, inbound)
 			}
 		}
 		if !found {
