@@ -304,6 +304,29 @@ com.proxy.owner 10123 0 /data/user/0/com.proxy.owner default 3003
 	}
 }
 
+func TestVerifyChainedProxyOwnerPackagesRejectsUnresolvedOwner(t *testing.T) {
+	withProcNetTCPTestEnv(t, "", "")
+	withPackageResolverTestEnv(t, `
+com.proxy.other 10124 0 /data/user/0/com.proxy.other default 3003
+`, func(bool) (string, error) {
+		return "", fmt.Errorf("cmd unavailable")
+	})
+	cfg := config.DefaultConfig()
+	cfg.Profile.Nodes = jsonRawMessage(t, `{
+		"id":"nekobox",
+		"protocol":"SOCKS",
+		"server":"127.0.0.1",
+		"port":10808,
+		"ownerPackage":"com.proxy.owner",
+		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":10808}}
+	}`)
+
+	err := VerifyChainedProxyOwnerPackages(cfg)
+	if err == nil || !strings.Contains(err.Error(), "did not resolve to a UID") {
+		t.Fatalf("expected unresolved owner error, got %v", err)
+	}
+}
+
 func withProcNetTCPTestEnv(t *testing.T, tcp string, tcp6 string) {
 	t.Helper()
 	oldFiles := procNetTCPFiles

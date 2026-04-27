@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -68,6 +69,7 @@ import com.rknnovpn.panel.R
 import com.rknnovpn.panel.`import`.ClipboardWatcher
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.NodeSourceType
+import com.rknnovpn.panel.ui.common.AppPackagePickerDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -602,6 +604,7 @@ private fun EditNodeDialog(
     var name by remember(node.id) { mutableStateOf(node.name) }
     var group by remember(node.id) { mutableStateOf(node.group) }
     var ownerPackage by remember(node.id) { mutableStateOf(node.ownerPackage) }
+    var showOwnerPicker by remember(node.id) { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -631,6 +634,11 @@ private fun EditNodeDialog(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    TextButton(onClick = { showOwnerPicker = true }) {
+                        Icon(Icons.Filled.Apps, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(stringResource(R.string.choose_app))
+                    }
                 }
             }
         },
@@ -648,6 +656,13 @@ private fun EditNodeDialog(
             }
         },
     )
+    if (showOwnerPicker) {
+        AppPackagePickerDialog(
+            title = stringResource(R.string.choose_app),
+            onDismiss = { showOwnerPicker = false },
+            onSelect = { ownerPackage = it },
+        )
+    }
 }
 
 @Composable

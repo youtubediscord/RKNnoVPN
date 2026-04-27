@@ -3,12 +3,11 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 )
 
 func (d *daemon) singBoxVersion(path string, maxLines int) diagnosticCommandResult {
@@ -105,22 +104,7 @@ func selfTestProtectedAppsDirect() bool {
 }
 
 func diagnosticLocalhostProxyPortsClear(cfg *config.Config) bool {
-	ports := []int{10808, 10809, 9090}
-	if cfg != nil {
-		profileInbounds := cfg.ResolveProfileInbounds()
-		ports = append(ports, cfg.Proxy.APIPort, profileInbounds.SocksPort, profileInbounds.HTTPPort)
-	}
-	seen := map[int]bool{}
-	for _, port := range ports {
-		if port <= 0 || seen[port] {
-			continue
-		}
-		seen[port] = true
-		if isTCPPortListening("127.0.0.1", port, 150*time.Millisecond) {
-			return false
-		}
-	}
-	return true
+	return diagnostics.LocalhostProxyPortsClear(cfg)
 }
 
 func runDiagnosticCommand(maxLines int, name string, args ...string) diagnosticCommandResult {
@@ -137,67 +121,15 @@ func runDiagnosticCommand(maxLines int, name string, args ...string) diagnosticC
 }
 
 func diagnosticPortStatuses(cfg *config.Config) []diagnosticPortStatus {
-	ports := effectiveLocalPorts(cfg)
-	roles := diagnosticLocalPortRoles(cfg)
-	result := make([]diagnosticPortStatus, 0, len(ports))
-	for _, port := range ports {
-		role := strings.Join(roles[port], ",")
-		result = append(result, diagnosticPortStatus{
-			Role:         role,
-			Port:         port,
-			TCPListening: isTCPPortListening("127.0.0.1", port, 150*time.Millisecond),
-			Conflict:     len(roles[port]) > 1,
-		})
-	}
-	return result
+	return diagnostics.PortStatuses(cfg)
 }
 
 func diagnosticLocalPortConflicts(cfg *config.Config) []diagnosticPortConflict {
-	roles := diagnosticLocalPortRoles(cfg)
-	conflicts := make([]diagnosticPortConflict, 0)
-	ports := make([]int, 0, len(roles))
-	for port := range roles {
-		ports = append(ports, port)
-	}
-	sort.Ints(ports)
-	for _, port := range ports {
-		if len(roles[port]) <= 1 {
-			continue
-		}
-		conflicts = append(conflicts, diagnosticPortConflict{
-			Port:  port,
-			Roles: append([]string(nil), roles[port]...),
-		})
-	}
-	return conflicts
+	return diagnostics.LocalPortConflicts(cfg)
 }
 
 func diagnosticLocalPortRoles(cfg *config.Config) map[int][]string {
-	if cfg == nil {
-		return nil
-	}
-	profileInbounds := cfg.ResolveProfileInbounds()
-	candidates := []struct {
-		role string
-		port int
-	}{
-		{"tproxy", valueOrDefaultInt(cfg.Proxy.TProxyPort, 10853)},
-		{"dns", valueOrDefaultInt(cfg.Proxy.DNSPort, 10856)},
-		{"clash_api", cfg.Proxy.APIPort},
-		{"socks_helper", profileInbounds.SocksPort},
-		{"http_helper", profileInbounds.HTTPPort},
-	}
-	roles := map[int][]string{}
-	for _, candidate := range candidates {
-		if candidate.port <= 0 {
-			continue
-		}
-		roles[candidate.port] = append(roles[candidate.port], candidate.role)
-	}
-	for port := range roles {
-		sort.Strings(roles[port])
-	}
-	return roles
+	return diagnostics.LocalPortRoles(cfg)
 }
 
 func (d *daemon) diagnosticLogs(maxLines int) []diagnosticLogSection {

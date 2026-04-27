@@ -9,12 +9,8 @@ import (
 
 type profileConfigMutationResult = applytx.ConfigTransactionResult
 
-// persistProfileConfigMutation is the daemon-owned transaction gate for every
-// mutation that changes user intent and its runtime projection.
-func (d *daemon) persistProfileConfigMutation(nextCfg *config.Config, reload bool) (profileConfigMutationResult, error) {
-	return d.persistProfileConfigMutationForAction(nextCfg, reload, "profile.apply")
-}
-
+// persistProfileConfigMutationForAction is the daemon-owned transaction gate
+// for every mutation that changes user intent and its runtime projection.
 func (d *daemon) persistProfileConfigMutationForAction(nextCfg *config.Config, reload bool, action string) (profileConfigMutationResult, error) {
 	operation := runtimeOperationForConfigMutation(action)
 	return applytx.ConfigTransaction{

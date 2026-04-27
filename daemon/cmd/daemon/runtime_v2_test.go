@@ -551,8 +551,8 @@ func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 	if !ok {
 		t.Fatalf("runtimeStatus missing from import payload: %#v", result)
 	}
-	if !statusHasOperation(status, runtimev2.OperationReload) {
-		t.Fatalf("config import should expose reload operation, got %#v", status)
+	if !statusHasOperation(status, runtimev2.OperationConfigMutation) {
+		t.Fatalf("config import should expose config-mutation operation, got %#v", status)
 	}
 	d.runtimeV2.SetStatusObserver(nil)
 	savedProfile, found, err := profiledoc.Load(d.profilePath)
@@ -565,7 +565,7 @@ func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 	if savedProfile.Health.IntervalSec != importCfg.Health.IntervalSec {
 		t.Fatalf("saved imported profile health interval = %d, want %d", savedProfile.Health.IntervalSec, importCfg.Health.IntervalSec)
 	}
-	waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationReload)
+	waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationConfigMutation)
 }
 
 func TestConfigImportRejectsLinkPayload(t *testing.T) {

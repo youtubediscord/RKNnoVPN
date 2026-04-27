@@ -1,7 +1,7 @@
 package control
 
 import (
-	"fmt"
+	"errors"
 	"sort"
 	"strings"
 
@@ -13,16 +13,16 @@ type Registrar interface {
 }
 
 func RegisterContractHandlers(registrar Registrar, handlers map[string]ipc.Handler) error {
+	if registrar == nil {
+		return errors.New("ipc registrar is not configured")
+	}
 	contractMethods := make(map[string]bool, len(handlers))
 	var missing []string
 	for _, contract := range ipc.MethodContracts() {
 		contractMethods[contract.Method] = true
-		handler, ok := handlers[contract.Method]
-		if !ok {
+		if _, ok := handlers[contract.Method]; !ok {
 			missing = append(missing, contract.Method)
-			continue
 		}
-		registrar.Register(contract.Method, handler)
 	}
 	var extra []string
 	for method := range handlers {
@@ -40,7 +40,10 @@ func RegisterContractHandlers(registrar Registrar, handlers map[string]ipc.Handl
 		if len(extra) > 0 {
 			parts = append(parts, "daemon handler(s) without contract methods: "+strings.Join(extra, ", "))
 		}
-		return fmt.Errorf("%s", strings.Join(parts, "; "))
+		return errors.New(strings.Join(parts, "; "))
+	}
+	for _, contract := range ipc.MethodContracts() {
+		registrar.Register(contract.Method, handlers[contract.Method])
 	}
 	return nil
 }

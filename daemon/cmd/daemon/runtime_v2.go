@@ -9,12 +9,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
@@ -904,43 +904,15 @@ func isIgnorableResetScriptError(err error) bool {
 }
 
 func effectiveLocalPorts(cfg *config.Config) []int {
-	if cfg == nil {
-		return nil
-	}
-	profileInbounds := cfg.ResolveProfileInbounds()
-	ports := []int{
-		valueOrDefaultInt(cfg.Proxy.TProxyPort, 10853),
-		valueOrDefaultInt(cfg.Proxy.DNSPort, 10856),
-		cfg.Proxy.APIPort,
-		profileInbounds.SocksPort,
-		profileInbounds.HTTPPort,
-	}
-	seen := make(map[int]bool, len(ports))
-	result := make([]int, 0, len(ports))
-	for _, port := range ports {
-		if port <= 0 || seen[port] {
-			continue
-		}
-		seen[port] = true
-		result = append(result, port)
-	}
-	return result
+	return diagnostics.EffectiveLocalPorts(cfg)
 }
 
 func valueOrDefaultInt(value int, fallback int) int {
-	if value == 0 {
-		return fallback
-	}
-	return value
+	return diagnostics.ValueOrDefaultInt(value, fallback)
 }
 
 func isTCPPortListening(host string, port int, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), timeout)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
+	return diagnostics.TCPPortListening(host, port, timeout)
 }
 
 func firstLineContaining(text string, needle string) string {

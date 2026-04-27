@@ -85,6 +85,10 @@
     <string name="node_name_label">Имя</string>
     <string name="node_group_label">Группа</string>
     <string name="node_owner_package_label">Пакет локального прокси</string>
+    <string name="choose_app">Выбрать приложение</string>
+    <string name="app_picker_search">Поиск приложения или пакета</string>
+    <string name="app_picker_empty">Приложения не найдены</string>
+    <string name="add_app">Добавить приложение</string>
     <string name="save">Сохранить</string>
     <string name="copy_link">Копировать ссылку</string>
     <string name="test_latency">Проверить задержку</string>

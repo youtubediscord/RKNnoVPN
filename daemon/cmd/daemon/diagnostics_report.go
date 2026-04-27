@@ -7,6 +7,7 @@ import (
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
@@ -178,57 +179,19 @@ func (d *daemon) buildSelfCheckSummary(lines int) (diagnosticSummary, error) {
 
 func (d *daemon) diagnosticNetstackReport(cfg *config.Config) netstack.Report {
 	if cfg == nil {
-		return netstack.Report{
-			Operation: "verify-cleanup",
-			Status:    "failed",
-			Steps: []netstack.Step{{
-				Name:   "verify-cleanup",
-				Status: "failed",
-				Detail: "config unavailable for cleanup verification",
-			}},
-			Leftovers: []string{"config unavailable for cleanup verification"},
-		}
+		return diagnostics.VerifyCleanup(d.dataDir, nil, false)
 	}
-	return netstack.New(d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript).
-		WithExecCommand(core.ExecCommand).
-		VerifyCleanup()
+	return diagnostics.VerifyCleanup(d.dataDir, buildScriptEnv(cfg, d.dataDir), true)
 }
 
 func (d *daemon) diagnosticNetstackRuntimeReport(cfg *config.Config) netstack.Report {
 	if cfg == nil {
-		return netstack.Report{
-			Operation: "verify",
-			Status:    "failed",
-			Steps: []netstack.Step{{
-				Name:   "netstack-verify",
-				Status: "failed",
-				Detail: "config unavailable for runtime netstack verification",
-			}},
-			Errors: []string{"config unavailable for runtime netstack verification"},
-		}
+		return diagnostics.VerifyRuntime(d.dataDir, nil, false, false)
 	}
 	if d.coreMgr == nil {
-		return netstack.Report{
-			Operation: "verify",
-			Status:    "skipped",
-			Steps: []netstack.Step{{
-				Name:   "netstack-verify",
-				Status: "skipped",
-				Detail: "core manager unavailable",
-			}},
-		}
+		return diagnostics.VerifyRuntime(d.dataDir, buildScriptEnv(cfg, d.dataDir), true, false)
 	}
 	status := d.coreMgr.Status()
-	if status.State != core.StateRunning.String() && status.State != core.StateDegraded.String() {
-		return netstack.Report{
-			Operation: "verify",
-			Status:    "skipped",
-			Steps: []netstack.Step{{
-				Name:   "netstack-verify",
-				Status: "skipped",
-				Detail: "runtime is not active",
-			}},
-		}
-	}
-	return netstack.New(d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript).Verify()
+	runtimeActive := status.State == core.StateRunning.String() || status.State == core.StateDegraded.String()
+	return diagnostics.VerifyRuntime(d.dataDir, buildScriptEnv(cfg, d.dataDir), true, runtimeActive)
 }

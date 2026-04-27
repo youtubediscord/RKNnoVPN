@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 )
 
 const controlProtocolVersion = 5
@@ -35,17 +36,9 @@ type diagnosticJSONSection struct {
 	Error   string      `json:"error,omitempty"`
 }
 
-type diagnosticPortStatus struct {
-	Role         string `json:"role,omitempty"`
-	Port         int    `json:"port"`
-	TCPListening bool   `json:"tcpListening"`
-	Conflict     bool   `json:"conflict,omitempty"`
-}
+type diagnosticPortStatus = diagnostics.PortStatus
 
-type diagnosticPortConflict struct {
-	Port  int      `json:"port"`
-	Roles []string `json:"roles"`
-}
+type diagnosticPortConflict = diagnostics.PortConflict
 
 type diagnosticPackageResolution struct {
 	Mode                         string                        `json:"mode,omitempty"`
@@ -130,25 +123,4 @@ type diagnosticRoutingSummary struct {
 	Groups             []string `json:"groups,omitempty"`
 	AppGroupRouteCount int      `json:"appGroupRouteCount,omitempty"`
 	SharingEnabled     bool     `json:"sharingEnabled"`
-}
-
-type diagnosticReleaseIntegrity struct {
-	CurrentPath     string   `json:"currentPath"`
-	ReleasePath     string   `json:"releasePath,omitempty"`
-	ManifestPath    string   `json:"manifestPath,omitempty"`
-	Version         string   `json:"version,omitempty"`
-	InstalledAt     string   `json:"installedAt,omitempty"`
-	CheckedFiles    int      `json:"checkedFiles"`
-	OK              bool     `json:"ok"`
-	MissingCurrent  bool     `json:"missingCurrent,omitempty"`
-	MissingManifest bool     `json:"missingManifest,omitempty"`
-	MissingFiles    []string `json:"missingFiles,omitempty"`
-	Mismatches      []string `json:"mismatches,omitempty"`
-	Error           string   `json:"error,omitempty"`
-}
-
-type diagnosticReleaseManifest struct {
-	Version     string            `json:"version"`
-	InstalledAt string            `json:"installed_at"`
-	Files       map[string]string `json:"files_sha256"`
 }

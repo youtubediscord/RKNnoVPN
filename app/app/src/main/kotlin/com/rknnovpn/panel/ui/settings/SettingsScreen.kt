@@ -17,10 +17,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DarkMode
@@ -68,6 +70,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rknnovpn.panel.R
 import com.rknnovpn.panel.model.DnsIpv6Mode
 import com.rknnovpn.panel.model.FallbackPolicy
+import com.rknnovpn.panel.ui.common.AppPackagePickerDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,6 +81,7 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var showAlwaysDirectAppPicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.shareLogsEventId) {
         val logs = state.shareLogsText
@@ -230,6 +234,15 @@ fun SettingsScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
             )
+
+            TextButton(
+                onClick = { showAlwaysDirectAppPicker = true },
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) {
+                Icon(Icons.Filled.Apps, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.add_app))
+            }
 
             TextButton(
                 onClick = viewModel::applyAlwaysDirectPackages,
@@ -479,6 +492,13 @@ fun SettingsScreen(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+    if (showAlwaysDirectAppPicker) {
+        AppPackagePickerDialog(
+            title = stringResource(R.string.choose_app),
+            onDismiss = { showAlwaysDirectAppPicker = false },
+            onSelect = viewModel::addAlwaysDirectPackage,
+        )
     }
 }
 

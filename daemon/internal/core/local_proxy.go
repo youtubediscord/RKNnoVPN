@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -56,7 +57,7 @@ func VerifyChainedProxyOwnerPackages(cfg *config.Config) error {
 		}
 	}
 	if len(problems) > 0 {
-		return fmt.Errorf(strings.Join(problems, "; "))
+		return errors.New(strings.Join(problems, "; "))
 	}
 	return nil
 }

@@ -85,6 +85,10 @@
     <string name="node_name_label">Name</string>
     <string name="node_group_label">Group</string>
     <string name="node_owner_package_label">Local proxy app package</string>
+    <string name="choose_app">Choose app</string>
+    <string name="app_picker_search">Search app or package</string>
+    <string name="app_picker_empty">No apps found</string>
+    <string name="add_app">Add app</string>
     <string name="save">Save</string>
     <string name="copy_link">Copy link</string>
     <string name="test_latency">Test latency</string>
