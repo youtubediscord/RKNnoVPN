@@ -500,6 +500,9 @@ func validateProfileProjectionConfig(profile ProfileProjectionConfig) error {
 		if node.Port < 0 || node.Port > 65535 {
 			return fmt.Errorf("profile.nodes[%d].port must be 0-65535, got %d", index, node.Port)
 		}
+		if node.Source == nil {
+			return fmt.Errorf("profile.nodes[%d].source is required", index)
+		}
 		source := normalizedProfileNodeSource(node.Stale, node.Source)
 		switch source.Type {
 		case "MANUAL":
@@ -730,7 +733,6 @@ func normalizeProfileProjectionConfig(profile ProfileProjectionConfig) ProfilePr
 		profile.Subscriptions = []json.RawMessage{}
 	}
 	profile.Subscriptions = normalizeProfileSubscriptions(profile.Subscriptions)
-	profile.Subscriptions = backfillProfileSubscriptionsFromNodes(profile.Nodes, profile.Subscriptions)
 	if len(profile.Inbounds) > 0 {
 		var inbounds ProfileInboundsConfig
 		if err := json.Unmarshal(profile.Inbounds, &inbounds); err == nil && inbounds.AllowLAN {
@@ -741,74 +743,6 @@ func normalizeProfileProjectionConfig(profile ProfileProjectionConfig) ProfilePr
 		}
 	}
 	return profile
-}
-
-type profileSubscriptionAggregate struct {
-	URL           string
-	LastFetchedAt int64
-	NodeCount     int
-	StaleCount    int
-}
-
-func backfillProfileSubscriptionsFromNodes(nodes []json.RawMessage, subscriptions []json.RawMessage) []json.RawMessage {
-	existing := make(map[string]bool)
-	for _, raw := range subscriptions {
-		var subscription ProfileSubscriptionConfig
-		if err := json.Unmarshal(raw, &subscription); err != nil {
-			continue
-		}
-		key := strings.TrimSpace(subscription.ProviderKey)
-		if key != "" {
-			existing[key] = true
-		}
-	}
-
-	aggregates := make(map[string]*profileSubscriptionAggregate)
-	for _, raw := range nodes {
-		var node profileNodeValidationConfig
-		if err := json.Unmarshal(raw, &node); err != nil {
-			continue
-		}
-		source := normalizedProfileNodeSource(node.Stale, node.Source)
-		if source.Type != "SUBSCRIPTION" || source.ProviderKey == "" || existing[source.ProviderKey] {
-			continue
-		}
-		aggregate := aggregates[source.ProviderKey]
-		if aggregate == nil {
-			aggregate = &profileSubscriptionAggregate{URL: source.URL}
-			aggregates[source.ProviderKey] = aggregate
-		}
-		if aggregate.URL == "" && source.URL != "" {
-			aggregate.URL = source.URL
-		}
-		if source.LastSeenAt > aggregate.LastFetchedAt {
-			aggregate.LastFetchedAt = source.LastSeenAt
-		}
-		aggregate.NodeCount++
-		if node.Stale {
-			aggregate.StaleCount++
-		}
-	}
-
-	for providerKey, aggregate := range aggregates {
-		url := aggregate.URL
-		if url == "" {
-			url = providerKey
-		}
-		subscription := ProfileSubscriptionConfig{
-			ProviderKey:       providerKey,
-			URL:               url,
-			LastFetchedAt:     aggregate.LastFetchedAt,
-			LastSeenNodeCount: aggregate.NodeCount,
-			StaleNodeCount:    aggregate.StaleCount,
-		}
-		raw, err := json.Marshal(subscription)
-		if err != nil {
-			continue
-		}
-		subscriptions = append(subscriptions, raw)
-	}
-	return subscriptions
 }
 
 func normalizeProfileSubscriptions(subscriptions []json.RawMessage) []json.RawMessage {
@@ -822,9 +756,6 @@ func normalizeProfileSubscriptions(subscriptions []json.RawMessage) []json.RawMe
 		subscription.ProviderKey = strings.TrimSpace(subscription.ProviderKey)
 		subscription.URL = strings.TrimSpace(subscription.URL)
 		subscription.Name = strings.TrimSpace(subscription.Name)
-		if subscription.ProviderKey == "" && subscription.URL != "" {
-			subscription.ProviderKey = strings.ToLower(subscription.URL)
-		}
 		normalizedRaw, err := json.Marshal(subscription)
 		if err != nil {
 			normalized = append(normalized, raw)
@@ -854,6 +785,10 @@ func normalizeProfileNodes(nodes []json.RawMessage) []json.RawMessage {
 				source = &decoded
 			}
 		}
+		if source == nil {
+			normalized = append(normalized, raw)
+			continue
+		}
 		normalizedSource := normalizedProfileNodeSource(stale, source)
 		sourceRaw, err := json.Marshal(normalizedSource)
 		if err != nil {
@@ -873,22 +808,12 @@ func normalizeProfileNodes(nodes []json.RawMessage) []json.RawMessage {
 
 func normalizedProfileNodeSource(stale bool, source *ProfileNodeSourceConfig) ProfileNodeSourceConfig {
 	if source == nil {
-		return ProfileNodeSourceConfig{Type: "MANUAL"}
+		return ProfileNodeSourceConfig{}
 	}
 	normalized := *source
 	normalized.Type = strings.ToUpper(strings.TrimSpace(normalized.Type))
-	if normalized.Type == "" {
-		if stale {
-			normalized.Type = "SUBSCRIPTION"
-		} else {
-			normalized.Type = "MANUAL"
-		}
-	}
 	normalized.ProviderKey = strings.TrimSpace(normalized.ProviderKey)
 	normalized.URL = strings.TrimSpace(normalized.URL)
-	if normalized.Type == "SUBSCRIPTION" && normalized.ProviderKey == "" && normalized.URL != "" {
-		normalized.ProviderKey = strings.ToLower(normalized.URL)
-	}
 	return normalized
 }
 

@@ -27,7 +27,7 @@ type RuntimeStateFile struct {
 }
 
 func RuntimeStatePath(dataDir string) string {
-	return filepath.Join(dataDir, "data", runtimeStateFileName)
+	return filepath.Join(dataDir, "run", runtimeStateFileName)
 }
 
 func RuntimeStateFromStatus(status Status, now time.Time) RuntimeStateFile {

@@ -296,11 +296,7 @@ func Normalize(doc Document) (Document, []Warning, error) {
 		}
 		node.Source.Type = strings.ToUpper(strings.TrimSpace(node.Source.Type))
 		if node.Source.Type == "" {
-			if node.Stale {
-				node.Source.Type = "SUBSCRIPTION"
-			} else {
-				node.Source.Type = "MANUAL"
-			}
+			return doc, warnings, fmt.Errorf("profile.nodes[%d].source.type is required", i)
 		}
 		switch node.Source.Type {
 		case "MANUAL":
@@ -310,9 +306,6 @@ func Normalize(doc Document) (Document, []Warning, error) {
 		case "SUBSCRIPTION":
 			node.Source.URL = strings.TrimSpace(node.Source.URL)
 			node.Source.ProviderKey = strings.TrimSpace(node.Source.ProviderKey)
-			if node.Source.ProviderKey == "" && node.Source.URL != "" {
-				node.Source.ProviderKey = ProviderKeyFor(node.Source.URL)
-			}
 			if node.Source.ProviderKey == "" {
 				return doc, warnings, fmt.Errorf("profile.nodes[%d].source.providerKey is required for subscription nodes", i)
 			}
