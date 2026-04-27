@@ -18,7 +18,6 @@ import com.privstack.panel.model.Severity as DaemonSeverity
 import com.privstack.panel.repository.StatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -158,11 +157,7 @@ class AuditViewModel @Inject constructor(
     //  Audit
     // ---------------------------------------------------------------- //
 
-    /**
-     * Run the full audit suite. In production this would call `privctl audit`
-     * via the daemon IPC layer. If the daemon does not support it yet, we
-     * gracefully fall back to the built-in simulated checks.
-     */
+    /** Run the full audit suite through the daemon IPC layer. */
     fun runAudit() {
         if (_audit.value.isRunning) return
         viewModelScope.launch {
@@ -172,18 +167,9 @@ class AuditViewModel @Inject constructor(
                 val auditResult = when (val result = statusRepository.audit()) {
                     is DaemonClientResult.Ok -> buildAuditState(result.data)
                     is DaemonClientResult.DaemonError -> {
-                        // Old daemon builds do not expose the audit RPC yet.
-                        if (result.code == -32601 ||
-                            result.message.contains("method not found", ignoreCase = true) ||
-                            result.message.contains("unknown command", ignoreCase = true)
-                        ) {
-                            delay(1_200L)
-                            buildAuditState(executeChecks())
-                        } else {
-                            throw IllegalStateException(
-                                string(R.string.audit_error_daemon_failed, result.message)
-                            )
-                        }
+                        throw IllegalStateException(
+                            string(R.string.audit_error_daemon_failed, result.message)
+                        )
                     }
                     is DaemonClientResult.RootDenied -> {
                         throw IllegalStateException(string(R.string.audit_error_root_denied))
@@ -266,10 +252,6 @@ class AuditViewModel @Inject constructor(
             }
         }
     }
-
-    // ---------------------------------------------------------------- //
-    //  Internal: simulated audit checks
-    // ---------------------------------------------------------------- //
 
     private fun queryInstalledApps(): List<Pair<String, String>> {
         val pm = context.packageManager
@@ -367,107 +349,6 @@ class AuditViewModel @Inject constructor(
         DaemonSeverity.INFO -> Severity.PASS
     }
 
-    private fun executeChecks(): List<AuditFinding> = listOf(
-        simulatedFinding(
-            AuditCheckId.VPN_API_SURFACE,
-            true,
-            R.string.audit_check_vpn_api_surface_title,
-            R.string.audit_check_vpn_api_surface_detail,
-            R.string.audit_check_vpn_api_surface_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.TUN_INTERFACE,
-            false,
-            R.string.audit_check_tun_interface_title,
-            R.string.audit_check_tun_interface_detail,
-            R.string.audit_check_tun_interface_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.NOT_VPN_CAPABILITY,
-            true,
-            R.string.audit_check_not_vpn_capability_title,
-            R.string.audit_check_not_vpn_capability_detail,
-            R.string.audit_check_not_vpn_capability_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.API_PORT_PROTECTED,
-            true,
-            R.string.audit_check_api_port_protected_title,
-            R.string.audit_check_api_port_protected_detail,
-            R.string.audit_check_api_port_protected_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.DNS_LEAK,
-            false,
-            R.string.audit_check_dns_leak_title,
-            R.string.audit_check_dns_leak_detail,
-            R.string.audit_check_dns_leak_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.PACKAGE_VISIBILITY,
-            false,
-            R.string.audit_check_package_visibility_title,
-            R.string.audit_check_package_visibility_detail,
-            R.string.audit_check_package_visibility_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.IPTABLES_LOOP_SAFE,
-            true,
-            R.string.audit_check_iptables_loop_safe_title,
-            R.string.audit_check_iptables_loop_safe_detail,
-            R.string.audit_check_iptables_loop_safe_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.PROC_NET_LEAK,
-            false,
-            R.string.audit_check_proc_net_leak_title,
-            R.string.audit_check_proc_net_leak_detail,
-            R.string.audit_check_proc_net_leak_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.IPV6_RULES_MIRROR,
-            true,
-            R.string.audit_check_ipv6_rules_mirror_title,
-            R.string.audit_check_ipv6_rules_mirror_detail,
-            R.string.audit_check_ipv6_rules_mirror_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.ICMP_HANDLING,
-            true,
-            R.string.audit_check_icmp_handling_title,
-            R.string.audit_check_icmp_handling_detail,
-            R.string.audit_check_icmp_handling_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.SELINUX_STATUS,
-            true,
-            R.string.audit_check_selinux_status_title,
-            R.string.audit_check_selinux_status_detail,
-            R.string.audit_check_selinux_status_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.MODULE_INTEGRITY,
-            true,
-            R.string.audit_check_module_integrity_title,
-            R.string.audit_check_module_integrity_detail,
-            R.string.audit_check_module_integrity_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.PRIVATE_DNS_UNCHANGED,
-            false,
-            R.string.audit_check_private_dns_unchanged_title,
-            R.string.audit_check_private_dns_unchanged_detail,
-            R.string.audit_check_private_dns_unchanged_remediation,
-        ),
-        simulatedFinding(
-            AuditCheckId.NETWORK_CHANGE_HANDLER,
-            true,
-            R.string.audit_check_network_change_handler_title,
-            R.string.audit_check_network_change_handler_detail,
-            R.string.audit_check_network_change_handler_remediation,
-        ),
-    )
-
     private fun computeRisk(findings: List<AuditFinding>): RiskLevel {
         val maxSeverity = findings
             .filter { !it.passed }
@@ -480,22 +361,6 @@ class AuditViewModel @Inject constructor(
             else -> RiskLevel.GREEN
         }
     }
-
-    private fun simulatedFinding(
-        checkId: AuditCheckId,
-        passed: Boolean,
-        @StringRes titleRes: Int,
-        @StringRes detailRes: Int,
-        @StringRes remediationRes: Int,
-    ): AuditFinding = AuditFinding(
-        checkId = checkId,
-        passed = passed,
-        title = string(titleRes),
-        detail = string(detailRes),
-        remediation = string(remediationRes),
-        category = localizedAuditCategory(checkId.category),
-        severity = if (passed) Severity.PASS else checkId.defaultSeverity,
-    )
 
     private fun localizedAuditCategory(category: AuditCategoryKey): String = when (category) {
         AuditCategoryKey.API -> string(R.string.audit_category_api)

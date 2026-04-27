@@ -34,9 +34,20 @@ def main() -> int:
         errors.append("missing versions object")
     else:
         methods = versions.get("supported_methods") or []
-        for method in ("doctor", "self-check", "network.reset"):
+        for method in ("doctor", "self-check", "backend.reset", "profile.get", "profile.apply"):
             if method not in methods:
                 warnings.append(f"supported_methods does not advertise {method}")
+
+    profile = data.get("profile")
+    if profile is None and isinstance(summary, dict):
+        profile = summary.get("profile")
+    if not isinstance(profile, dict):
+        warnings.append("missing profile summary object")
+    else:
+        if not profile.get("schemaVersion"):
+            warnings.append("profile.schemaVersion is empty")
+        if profile.get("desiredGeneration", 0) < profile.get("appliedGeneration", 0):
+            warnings.append("profile desiredGeneration is older than appliedGeneration")
 
     package_resolution = data.get("package_resolution")
     if not isinstance(package_resolution, dict):

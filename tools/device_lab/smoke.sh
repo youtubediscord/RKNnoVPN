@@ -61,7 +61,7 @@ fi
 
 if [ "$ALLOW_RESET" = "1" ]; then
 	note "running explicit reset smoke step"
-	capture_su network_reset "'$PRIVCTL_PATH' network.reset" || FAILED=1
+	capture_su network_reset "'$PRIVCTL_PATH' backend.reset" || FAILED=1
 	capture_su_raw doctor_after_reset.json "'$PRIVCTL_PATH' doctor '{\"lines\":160}'" || FAILED=1
 	if command -v python3 >/dev/null 2>&1; then
 		python3 "$SCRIPT_DIR/check_doctor.py" "$RUN_DIR/doctor_after_reset.json" --strict-package-resolution >"$RUN_DIR/doctor_after_reset_check.txt" 2>&1 || FAILED=1

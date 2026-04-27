@@ -15,6 +15,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
+	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
@@ -58,7 +59,7 @@ func TestBuildRuntimeV2HealthSnapshotSeparatesOperationalFailures(t *testing.T) 
 func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 	d := &daemon{}
 
-	result := d.configMutationSuccess("config-set-many", "ok", true, true, 2)
+	result := d.configMutationSuccess("config-import", "ok", true, true, 2)
 
 	if result["ok"] != true {
 		t.Fatalf("mutation success must set ok=true: %#v", result)
@@ -66,11 +67,17 @@ func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 	if result["config_saved"] != true {
 		t.Fatalf("mutation success must set config_saved=true: %#v", result)
 	}
-	if result["runtime_applied"] != true {
-		t.Fatalf("mutation success must set runtime_applied=true: %#v", result)
+	if result["status"] != "accepted" {
+		t.Fatalf("mutation success must expose accepted runtime operation: %#v", result)
 	}
-	if result["runtime_apply"] != "applied" {
+	if result["runtime_applied"] != false {
+		t.Fatalf("mutation success must not claim async runtime apply completed: %#v", result)
+	}
+	if result["runtime_apply"] != "accepted" {
 		t.Fatalf("mutation success must expose runtime apply status: %#v", result)
+	}
+	if result["accepted"] != true || result["operation_active"] != true {
+		t.Fatalf("mutation success must expose active accepted operation: %#v", result)
 	}
 	if result["updated"] != 2 {
 		t.Fatalf("mutation success lost updated count: %#v", result)
@@ -79,10 +86,10 @@ func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 	if !ok {
 		t.Fatalf("mutation success must expose transaction operation: %#v", result)
 	}
-	if operation["type"] != "config-mutation" || operation["action"] != "config-set-many" {
+	if operation["type"] != "config-mutation" || operation["action"] != "config-import" {
 		t.Fatalf("unexpected mutation operation identity: %#v", operation)
 	}
-	if operation["runtimeApply"] != "applied" {
+	if operation["runtimeApply"] != "accepted" || operation["operationActive"] != true {
 		t.Fatalf("mutation operation must expose runtime apply status: %#v", operation)
 	}
 }
@@ -90,7 +97,7 @@ func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 func TestConfigApplyRPCErrorEnvelopeKeepsSavedFailureVisible(t *testing.T) {
 	d := &daemon{}
 
-	rpcErr := d.configApplyRPCError("config-set-many", errors.New("config saved: apply config hot-swap failed"))
+	rpcErr := d.configApplyRPCError("config-import", errors.New("config saved: apply config hot-swap failed"))
 	data, ok := rpcErr.Data.(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected structured mutation error data, got %#v", rpcErr.Data)
@@ -454,14 +461,14 @@ func TestBackendStatusIncludesCompatibilitySnapshot(t *testing.T) {
 	}
 }
 
-func TestLegacyStartUsesRuntimeActorWhenAlreadyRunning(t *testing.T) {
+func TestBackendStartUsesRuntimeActorWhenAlreadyRunning(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.initRuntimeV2()
 	d.coreMgr.SetState(core.StateRunning)
 
-	payload, rpcErr := d.handleStart(nil)
+	payload, rpcErr := d.handleBackendStart(nil)
 	if rpcErr != nil {
-		t.Fatalf("legacy start should be idempotent through runtime actor, got %#v", rpcErr)
+		t.Fatalf("backend start should be idempotent through runtime actor, got %#v", rpcErr)
 	}
 	status, ok := payload.(runtimev2.Status)
 	if !ok {
@@ -472,14 +479,14 @@ func TestLegacyStartUsesRuntimeActorWhenAlreadyRunning(t *testing.T) {
 	}
 }
 
-func TestLegacyStartRecordsMissingNodeFailure(t *testing.T) {
+func TestBackendStartRecordsMissingNodeFailure(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfg.Node.Address = ""
 	d.cfg.Panel.Nodes = nil
 	d.initRuntimeV2()
 
-	if _, rpcErr := d.handleStart(nil); rpcErr != nil {
-		t.Fatalf("legacy start should accept through runtime actor, got %#v", rpcErr)
+	if _, rpcErr := d.handleBackendStart(nil); rpcErr != nil {
+		t.Fatalf("backend start should accept through runtime actor, got %#v", rpcErr)
 	}
 	status := waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationStart)
 	if status.LastOperation == nil || status.LastOperation.Succeeded {
@@ -490,7 +497,7 @@ func TestLegacyStartRecordsMissingNodeFailure(t *testing.T) {
 	}
 }
 
-func TestLegacyReloadReturnsRuntimeStatus(t *testing.T) {
+func TestBackendRestartReturnsRuntimeStatus(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
 	d.panelPath = config.PanelPath(d.cfgPath)
@@ -500,18 +507,18 @@ func TestLegacyReloadReturnsRuntimeStatus(t *testing.T) {
 	d.initRuntimeV2()
 	d.coreMgr.SetState(core.StateRunning)
 
-	payload, rpcErr := d.handleReload(nil)
+	payload, rpcErr := d.handleBackendRestart(nil)
 	if rpcErr != nil {
-		t.Fatalf("reload failed: %#v", rpcErr)
+		t.Fatalf("backend restart failed: %#v", rpcErr)
 	}
 	status, ok := payload.(runtimev2.Status)
 	if !ok {
-		t.Fatalf("reload should return runtime status, got %T", payload)
+		t.Fatalf("backend restart should return runtime status, got %T", payload)
 	}
-	if !statusHasOperation(status, runtimev2.OperationReload) {
-		t.Fatalf("reload response should expose reload operation, got %#v", status)
+	if !statusHasOperation(status, runtimev2.OperationRestart) {
+		t.Fatalf("backend restart response should expose restart operation, got %#v", status)
 	}
-	waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationReload)
+	waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationRestart)
 }
 
 func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
@@ -534,7 +541,7 @@ func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected import payload type %T", payload)
 	}
-	if result["status"] != "imported" || result["reload"] != true {
+	if result["status"] != "accepted" || result["reload"] != true || result["runtime_apply"] != "accepted" {
 		t.Fatalf("unexpected import payload %#v", result)
 	}
 	status, ok := result["runtimeStatus"].(runtimev2.Status)
@@ -677,7 +684,7 @@ func TestPanelApplyWithoutReloadBusyDoesNotPersistPanel(t *testing.T) {
 	}
 }
 
-func TestConfigSetReturnsRuntimeStatus(t *testing.T) {
+func TestProfileApplyReturnsRuntimeStatus(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
 	d.panelPath = config.PanelPath(d.cfgPath)
@@ -686,32 +693,30 @@ func TestConfigSetReturnsRuntimeStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rawHealth, err := json.Marshal(d.cfg.Health)
-	if err != nil {
-		t.Fatal(err)
-	}
-	paramsRaw, err := json.Marshal(map[string]json.RawMessage{
-		"key":   json.RawMessage(`"health"`),
-		"value": rawHealth,
+	doc := profiledoc.FromConfig(d.cfg)
+	doc.Health.IntervalSec = 45
+	paramsRaw, err := json.Marshal(map[string]interface{}{
+		"profile": doc,
+		"reload":  false,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	params := json.RawMessage(paramsRaw)
 
-	payload, rpcErr := d.handleConfigSet(&params)
+	payload, rpcErr := d.handleProfileApply(&params)
 	if rpcErr != nil {
-		t.Fatalf("config set failed: %#v", rpcErr)
+		t.Fatalf("profile apply failed: %#v", rpcErr)
 	}
 	result, ok := payload.(map[string]interface{})
 	if !ok {
-		t.Fatalf("unexpected config-set payload type %T", payload)
+		t.Fatalf("unexpected profile.apply payload type %T", payload)
 	}
-	if result["status"] != "ok" || result["reload"] != false || result["updated"] != 1 {
-		t.Fatalf("unexpected config-set result %#v", result)
+	if result["status"] != "ok" || result["configSaved"] != true || result["runtimeApply"] != "not_requested" {
+		t.Fatalf("unexpected profile.apply result %#v", result)
 	}
 	if _, ok := result["runtimeStatus"].(runtimev2.Status); !ok {
-		t.Fatalf("runtimeStatus missing from config-set result: %#v", result)
+		t.Fatalf("runtimeStatus missing from profile.apply result: %#v", result)
 	}
 }
 

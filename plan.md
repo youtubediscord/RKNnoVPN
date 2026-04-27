@@ -27,7 +27,7 @@
 - хранение списка nodes в `panel.nodes`;
 - рендер нескольких nodes как `sing-box` outbounds;
 - `urltest` outbound с тегом `proxy`;
-- TCP/URL node-test RPC;
+- `diagnostics.testNodes` TCP/URL RPC;
 - APK без `INTERNET`;
 - сборка `sing-box` latest release;
 - статическая сборка под `arm64` и `armv7`;
@@ -68,23 +68,19 @@ Acceptance:
 
 - TCP до node есть, core запущен, routing готов -> UI не показывает большую
   красную `Ошибка` только из-за DNS/URL probe;
-- `node-test` сохраняет TCP-direct диагностику даже если tunnel/url недоступен;
+- `diagnostics.testNodes` сохраняет TCP-direct диагностику даже если tunnel/url недоступен;
 - `self-check` возвращает краткий health/privacy/compatibility summary без
   полного diagnostic bundle;
 - self-check/doctor summary включает компактные `compatibility` и `runtime`
   поля: версии daemon/module/schema/control protocol, release status и последнюю
   runtime stage summary; compatibility summary также показывает current release
   version и результат `sing-box check`;
-- APK IPC client имеет typed `selfCheck()` с fallback на legacy alias
-  `self.check`, чтобы UI мог получать короткий repair summary без полного
-  doctor bundle;
+- APK IPC client имеет typed `selfCheck()` только через canonical `self-check`, чтобы UI
+  мог получать короткий repair summary без полного doctor bundle;
 - `StatusRepository` прокидывает typed `selfCheck()` наверх, чтобы будущий
   Settings/Audit экран не зависел от низкоуровневого IPC клиента;
-- Audit fallback для старого daemon теперь одинаково распознаёт `method not
-  found` и `unknown command`, чтобы legacy builds не превращались в красную
-  ошибку UI;
-- `backend.reset` и `network-reset` не блокируются из-за version mismatch или
-  отсутствующего `sing-box`;
+- `backend.reset` не блокируется из-за version mismatch или отсутствующего
+  `sing-box`;
 - кривой module update zip отбрасывается до остановки рабочего runtime.
 
 ### M1. Transactional runtime
@@ -170,25 +166,23 @@ Acceptance:
 - APK не вызывает неподдерживаемый RPC;
 - start/restart требуют working `sing-box`;
 - reset/logs/doctor/node TCP diagnostics остаются доступны для ремонта;
-- update installer проверяет zip до downtime.
+- update installer принимает только canonical verified update dir, требует
+  `update-manifest.json` + checksums и проверяет module zip до APK install /
+  runtime downtime.
 - `version` отдаёт `schema_version`, `panel_min_version`, `capabilities`,
   `supported_methods`, module/core/daemon metadata.
 - APK gate проверяет schema/capabilities перед не-repair RPC, а repair-команды
   остаются доступными для восстановления.
-- APK больше не блокирует `backend.reset`/`network-reset` через `version()`, а
-  `node-test` имеет legacy fallback, чтобы TCP diagnostics оставался доступен
-  при mismatch нового diagnostics API.
-- APK `stop()` больше не блокируется через `version()` и падает назад на
-  legacy `stop`, если `backend.stop` отсутствует.
-- `diagnostics.testNodes` убран из hard-required APK methods, потому что
-  legacy `node-test` является поддерживаемым repair fallback.
-- Legacy `node-test` bridge сохраняет `url_error_class`, чтобы UI показывал
+- APK required-methods перечисляет canonical RPC contract, включая
+  `profile.get`, `profile.apply`, `profile.importNodes`,
+  `profile.setActiveNode`, `subscription.preview`, `subscription.refresh`,
+  `backend.reset`, `backend.stop`, `diagnostics.testNodes`,
+  update/logs/doctor/self-check методы.
+- Legacy IPC aliases удалены из daemon registration, privctl help, APK client и
+  doctor supported methods.
+- `diagnostics.testNodes` сохраняет `url_error_class`, чтобы UI показывал
   классифицированную причину отказа, а не только сырой error string.
-- Compatibility check считает `backend.reset`/`network-reset` и
-  `config-import`/`config.import` альтернативными entrypoint, а не разными
-  обязательными методами.
-- `panel-set` больше не hard-required для APK status: если метод отсутствует,
-  панель падает назад на legacy panel write через `config-set-many`.
+- Compatibility check больше не принимает альтернативные legacy entrypoints.
 
 ### M4. Privacy invariants
 
@@ -253,7 +247,7 @@ Daemon, module defaults и APK model defaults выровнены на whitelist/
 - selected node;
 - APK/module mismatch.
 - summary в diagnostic bundle сразу показывает health/privacy/compatibility
-  issues, TCP-only node-test и необходимость reboot после cleanup leftovers.
+  issues, TCP-only diagnostics и необходимость reboot после cleanup leftovers.
 - diagnostic/status payload показывает `active_node_mode` (`auto_selector`,
   `manual`, `single_node`, `manual_missing`), а Dashboard отображает auto/manual
   понятным текстом.
@@ -295,8 +289,8 @@ server/port/SNI остаются видимыми для диагностики 
    сделан: WireGuard config text/encoded URI импортируется как node, daemon
    рендерит sing-box `wireguard` outbound без `interface_name`/kernel WG.
 5. hotspot/sharing mode; начальный control-plane slice сделан:
-   `sharing.enabled/interfaces` протянуты в daemon/APK config, а
-   `net_handler.sh` добавляет tethering TPROXY rules только при
+    `sharing.enabled/interfaces` протянуты в daemon/APK config, а
+   daemon-owned netstack apply добавляет tethering TPROXY rules только при
    `SHARING_MODE=hotspot`. UI-slice тоже сделан в Settings.
 
 ## Этап 1. Stabilize current multi-outbound layer
@@ -308,18 +302,18 @@ server/port/SNI остаются видимыми для диагностики 
 - Убедиться, что `panel.nodes -> outbounds[] -> urltest proxy` работает на реальном устройстве.
 - Проверить VLESS Reality, Trojan, Shadowsocks, SOCKS5, Hysteria2, TUIC.
 - Проверить DNS на `sing-box 1.14.x`.
-- Проверить, что `node-test` возвращает:
+- Проверить, что `diagnostics.testNodes` возвращает:
   - TCP connect ms;
   - URL delay ms;
   - status/error.
 - Исправить UI для пустого списка серверов.
-- Убедиться, что `privctl node-test` не требует running core для TCP-теста, но корректно сообщает, что URL delay невозможен без Clash API.
+- Убедиться, что `privctl diagnostics.testNodes` не требует running core для TCP-теста, но корректно сообщает, что URL delay невозможен без Clash API.
 
 Acceptance:
 
-- `privctl start` запускает core без legacy DNS fatal.
+- `privctl backend.start` запускает core без DNS fatal.
 - `sing-box.log` при ошибках содержит конкретный fatal.
-- `privctl node-test` показывает результаты по всем сохранённым nodes.
+- `privctl diagnostics.testNodes` показывает результаты по всем сохранённым nodes.
 - UI не даёт запускать core без node.
 
 ## Этап 2. Selector + manual override
@@ -498,7 +492,7 @@ Acceptance:
   - reserved bytes, если нужно;
 - renderer `type: wireguard`;
 - участие WG nodes в `urltest`;
-- node-test для WG endpoint и URL delay.
+- `diagnostics.testNodes` для WG endpoint и URL delay.
 
 Важно:
 

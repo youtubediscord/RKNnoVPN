@@ -1,9 +1,11 @@
 package updater
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -105,6 +107,34 @@ func TestVerifyDownloadedUpdateRequiresChecksumFile(t *testing.T) {
 	}
 }
 
+func TestVerifyDownloadedUpdateRequiresVerifiedManifest(t *testing.T) {
+	dir := t.TempDir()
+	modulePath := filepath.Join(dir, "module.zip")
+	apkPath := filepath.Join(dir, "panel.apk")
+	writeTestFile(t, modulePath, 0644, "module")
+	writeTestFile(t, apkPath, 0644, "apk")
+	writeChecksumsForTest(t, dir)
+
+	err := VerifyDownloadedUpdate(modulePath, apkPath)
+	if err == nil || !strings.Contains(err.Error(), "verified update manifest") {
+		t.Fatalf("expected missing verified manifest error, got %v", err)
+	}
+}
+
+func TestVerifyDownloadedUpdateAcceptsManifestVerifiedArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	modulePath := filepath.Join(dir, "module.zip")
+	apkPath := filepath.Join(dir, "panel.apk")
+	writeTestFile(t, modulePath, 0644, "module")
+	writeTestFile(t, apkPath, 0644, "apk")
+	writeChecksumsForTest(t, dir)
+	writeVerifiedManifestForTest(t, dir, "v1.7.4")
+
+	if err := VerifyDownloadedUpdate(modulePath, apkPath); err != nil {
+		t.Fatalf("expected manifest-verified update to pass: %v", err)
+	}
+}
+
 func TestValidateModuleStagingRejectsIncompleteBundle(t *testing.T) {
 	staging := t.TempDir()
 	binDir := filepath.Join(staging, "binaries", runtimeBinaryArch())
@@ -137,7 +167,6 @@ func TestValidateModuleStagingAcceptsCompleteBundle(t *testing.T) {
 		"customize.sh",
 		"scripts/dns.sh",
 		"scripts/iptables.sh",
-		"scripts/net_handler.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
 		"scripts/lib/privstack_env.sh",
@@ -173,7 +202,6 @@ func TestValidateModuleStagingRejectsBadModuleProp(t *testing.T) {
 		"customize.sh",
 		"scripts/dns.sh",
 		"scripts/iptables.sh",
-		"scripts/net_handler.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
 		"scripts/lib/privstack_env.sh",
@@ -189,6 +217,32 @@ func TestValidateModuleStagingRejectsBadModuleProp(t *testing.T) {
 
 	if err := validateModuleStaging(staging, binDir); err == nil {
 		t.Fatal("expected invalid module id to reject staged module")
+	}
+}
+
+func TestPreflightModuleUpdateRejectsIncompleteZip(t *testing.T) {
+	dataDir := t.TempDir()
+	zipPath := filepath.Join(dataDir, "module.zip")
+	writeZipForTest(t, zipPath, map[string]zipTestFile{
+		"module.prop": {mode: 0644, body: "id=privstack\nversion=v1.7.4\nversionCode=174\n"},
+	})
+
+	if _, err := PreflightModuleUpdate(zipPath, dataDir); err == nil {
+		t.Fatal("expected incomplete module zip to fail preflight")
+	}
+}
+
+func TestPreflightModuleUpdateReturnsNormalizedModuleVersion(t *testing.T) {
+	dataDir := t.TempDir()
+	zipPath := filepath.Join(dataDir, "module.zip")
+	writeCompleteModuleZipForTest(t, zipPath, "V1.7.4")
+
+	info, err := PreflightModuleUpdate(zipPath, dataDir)
+	if err != nil {
+		t.Fatalf("expected complete module zip to pass preflight: %v", err)
+	}
+	if info.Version != "v1.7.4" || info.VersionCode != "174" {
+		t.Fatalf("unexpected preflight info: %#v", info)
 	}
 }
 
@@ -210,7 +264,6 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		"customize.sh",
 		"scripts/dns.sh",
 		"scripts/iptables.sh",
-		"scripts/net_handler.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
 		"scripts/lib/privstack_env.sh",
@@ -415,6 +468,122 @@ func writeTestFile(t *testing.T, path string, perm os.FileMode, contents ...stri
 		content = contents[0]
 	}
 	if err := os.WriteFile(path, []byte(content), perm); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeChecksumsForTest(t *testing.T, dir string) {
+	t.Helper()
+	moduleHash, err := sha256File(filepath.Join(dir, "module.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apkHash, err := sha256File(filepath.Join(dir, "panel.apk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sums := moduleHash + "  RKNnoVPN-module.zip\n" +
+		apkHash + "  RKNnoVPN-panel.apk\n"
+	if err := os.WriteFile(filepath.Join(dir, "SHA256SUMS.txt"), []byte(sums), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeVerifiedManifestForTest(t *testing.T, dir string, version string) {
+	t.Helper()
+	moduleHash, err := sha256File(filepath.Join(dir, "module.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apkHash, err := sha256File(filepath.Join(dir, "panel.apk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checksumHash, err := sha256File(filepath.Join(dir, "SHA256SUMS.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(VerifiedUpdateManifest{
+		ManifestVersion: 1,
+		CurrentVersion:  "v1.7.3",
+		LatestVersion:   version,
+		ModuleSHA256:    moduleHash,
+		ApkSHA256:       apkHash,
+		ChecksumsSHA256: checksumHash,
+		VerifiedAt:      "2026-04-27T00:00:00Z",
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(filepath.Join(dir, "update-manifest.json"), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type zipTestFile struct {
+	mode os.FileMode
+	body string
+}
+
+func writeCompleteModuleZipForTest(t *testing.T, zipPath string, version string) {
+	t.Helper()
+	files := map[string]zipTestFile{}
+	for _, name := range []string{"sing-box", "privd", "privctl"} {
+		files[filepath.ToSlash(filepath.Join("binaries", runtimeBinaryArch(), name))] = zipTestFile{mode: 0755, body: "bin\n"}
+	}
+	for _, path := range []string{
+		"OWNERSHIP.md",
+		"service.sh",
+		"post-fs-data.sh",
+		"uninstall.sh",
+		"customize.sh",
+		"scripts/dns.sh",
+		"scripts/iptables.sh",
+		"scripts/rescue_reset.sh",
+		"scripts/routing.sh",
+		"scripts/lib/privstack_env.sh",
+		"scripts/lib/privstack_install.sh",
+		"scripts/lib/privstack_installer_flow.sh",
+		"scripts/lib/privstack_netstack.sh",
+		"scripts/lib/privstack_iptables_rules.sh",
+		"defaults/config.json",
+	} {
+		files[path] = zipTestFile{mode: 0644, body: "test\n"}
+	}
+	files["module.prop"] = zipTestFile{
+		mode: 0644,
+		body: "id=privstack\nversion=" + version + "\nversionCode=174\n",
+	}
+	writeZipForTest(t, zipPath, files)
+}
+
+func writeZipForTest(t *testing.T, path string, files map[string]zipTestFile) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	zw := zip.NewWriter(out)
+	for name, file := range files {
+		header := &zip.FileHeader{
+			Name:   filepath.ToSlash(name),
+			Method: zip.Deflate,
+		}
+		header.SetMode(file.mode)
+		writer, err := zw.CreateHeader(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(file.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
 }

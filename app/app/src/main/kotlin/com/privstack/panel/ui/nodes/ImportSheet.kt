@@ -73,6 +73,7 @@ fun ImportSheet(
     candidates: List<ImportCandidate>,
     isLoading: Boolean,
     errorMessage: String?,
+    statusMessage: String?,
     onDetectUris: (String) -> Unit,
     onToggleCandidate: (Int) -> Unit,
     onImportSelected: () -> Unit,
@@ -161,6 +162,16 @@ fun ImportSheet(
                 )
             }
 
+            if (errorMessage == null && statusMessage != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = statusMessage,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
             if (isLoading) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
@@ -197,6 +208,7 @@ fun ImportSheet(
                         ) {
                             Checkbox(
                                 checked = candidate.selected,
+                                enabled = candidate.selectable,
                                 onCheckedChange = { onToggleCandidate(index) },
                             )
                             Column(modifier = Modifier.weight(1f)) {
@@ -218,12 +230,19 @@ fun ImportSheet(
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 val selectedCount = candidates.count { it.selected }
+                val subscriptionPreview = candidates.any { !it.selectable }
                 Button(
                     onClick = onImportSelected,
                     enabled = selectedCount > 0 && !isLoading,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(stringResource(R.string.import_selected, selectedCount))
+                    Text(
+                        if (subscriptionPreview) {
+                            stringResource(R.string.apply_subscription_preview)
+                        } else {
+                            stringResource(R.string.import_selected, selectedCount)
+                        }
+                    )
                 }
             }
         }

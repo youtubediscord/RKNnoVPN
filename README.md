@@ -169,13 +169,13 @@ Workflow:
 Проверка состояния:
 
 ```sh
-su -c '/data/adb/privstack/bin/privctl status'
+su -c '/data/adb/privstack/bin/privctl backend.status'
 ```
 
 Запуск:
 
 ```sh
-su -c '/data/adb/privstack/bin/privctl start'
+su -c '/data/adb/privstack/bin/privctl backend.start'
 ```
 
 Логи core:
@@ -193,7 +193,7 @@ su -c '/data/adb/privstack/bin/privctl logs {"lines":100}'
 Проверка всех nodes:
 
 ```sh
-su -c '/data/adb/privstack/bin/privctl node-test'
+su -c '/data/adb/privstack/bin/privctl diagnostics.testNodes'
 ```
 
 Если `sing-box` упал до открытия порта `10853`, ошибка в приложении должна содержать хвост `sing-box.log`.

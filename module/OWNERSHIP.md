@@ -82,5 +82,3 @@ marker, or netfilter cleanup.
   and runtime snapshots in `run/env.sh`; rule text and listener verification
   belong in `scripts/lib/privstack_iptables_rules.sh`.
 - `scripts/dns.sh` owns classic DNS nat interception.
-- `scripts/net_handler.sh` may refresh bypass/tethering hooks only when
-  `run/active` exists, `config/manual` is absent, and reset is not active.

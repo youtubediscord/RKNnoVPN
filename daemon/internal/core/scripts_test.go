@@ -126,22 +126,22 @@ func TestBuildAppRoutingEnvModes(t *testing.T) {
 	})
 
 	whitelist := BuildAppRoutingEnv("whitelist", []string{"com.example.app"}, nil)
-	if whitelist.AppMode != "whitelist" || whitelist.ProxyUIDs != "10123" || whitelist.DirectUIDs != "" || whitelist.DNSScope != "uids" || whitelist.LegacyDNSMode != "per_uid" {
+	if whitelist.AppMode != "whitelist" || whitelist.ProxyUIDs != "10123" || whitelist.DirectUIDs != "" || whitelist.DNSScope != "uids" || whitelist.DNSMode != "per_uid" {
 		t.Fatalf("unexpected whitelist env: %#v", whitelist)
 	}
 
 	blacklist := BuildAppRoutingEnv("blacklist", []string{"com.example.app"}, nil)
-	if blacklist.AppMode != "blacklist" || blacklist.DirectUIDs != "10123" || blacklist.ProxyUIDs != "" || blacklist.DNSScope != "all_except_uids" || blacklist.LegacyDNSMode != "per_uid" {
+	if blacklist.AppMode != "blacklist" || blacklist.DirectUIDs != "10123" || blacklist.ProxyUIDs != "" || blacklist.DNSScope != "all_except_uids" || blacklist.DNSMode != "per_uid" {
 		t.Fatalf("unexpected blacklist env: %#v", blacklist)
 	}
 
 	all := BuildAppRoutingEnv("all", []string{"com.example.app"}, nil)
-	if all.AppMode != "all" || all.ProxyUIDs != "" || all.DirectUIDs != "" || all.DNSScope != "all" || all.LegacyDNSMode != "all" {
+	if all.AppMode != "all" || all.ProxyUIDs != "" || all.DirectUIDs != "" || all.DNSScope != "all" || all.DNSMode != "all" {
 		t.Fatalf("unexpected all env: %#v", all)
 	}
 
 	off := BuildAppRoutingEnv("off", []string{"com.example.app"}, nil)
-	if off.AppMode != "off" || off.ProxyUIDs != "" || off.DirectUIDs != "" || off.DNSScope != "off" || off.LegacyDNSMode != "off" {
+	if off.AppMode != "off" || off.ProxyUIDs != "" || off.DirectUIDs != "" || off.DNSScope != "off" || off.DNSMode != "off" {
 		t.Fatalf("unexpected off env: %#v", off)
 	}
 }
@@ -152,10 +152,10 @@ func TestBuildRuntimeAppRoutingEnvDirectHardBypass(t *testing.T) {
 	})
 
 	env := BuildRuntimeAppRoutingEnv("whitelist", []string{"com.example.app"}, []string{"com.android.vending"}, "direct")
-	if env.AppMode != "off" || env.ProxyUIDs != "" || env.DirectUIDs != "" || env.AppUIDs != "" {
+	if env.AppMode != "off" || env.ProxyUIDs != "" || env.DirectUIDs != "" {
 		t.Fatalf("direct routing must disable app interception, got %#v", env)
 	}
-	if env.DNSScope != "off" || env.LegacyDNSMode != "off" {
+	if env.DNSScope != "off" || env.DNSMode != "off" {
 		t.Fatalf("direct routing must disable DNS interception, got %#v", env)
 	}
 	if env.BypassUIDs == "" {

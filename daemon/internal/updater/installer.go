@@ -27,6 +27,44 @@ const (
 	DefaultModuleDir = "/data/adb/modules/privstack"
 )
 
+type ModulePreflight struct {
+	Version     string
+	VersionCode string
+}
+
+func PreflightModuleUpdate(zipPath string, dataDir string) (*ModulePreflight, error) {
+	if dataDir == "" {
+		dataDir = DefaultDataDir
+	}
+	staging, err := os.MkdirTemp(dataDir, "update-preflight-*")
+	if err != nil {
+		return nil, fmt.Errorf("create preflight staging dir: %w", err)
+	}
+	defer os.RemoveAll(staging)
+
+	if err := extractZip(zipPath, staging); err != nil {
+		return nil, fmt.Errorf("preflight extract zip: %w", err)
+	}
+	stagedBinDir, err := stagedBinaryDir(staging)
+	if err != nil {
+		return nil, err
+	}
+	if stagedBinDir == "" {
+		stagedBinDir = staging
+	}
+	if err := validateModuleStaging(staging, stagedBinDir); err != nil {
+		return nil, err
+	}
+	props, err := readModuleProp(filepath.Join(staging, "module.prop"))
+	if err != nil {
+		return nil, err
+	}
+	return &ModulePreflight{
+		Version:     NormalizeVersionTag(props["version"]),
+		VersionCode: props["versionCode"],
+	}, nil
+}
+
 // --------------------------------------------------------------------------
 // InstallModuleUpdate
 // --------------------------------------------------------------------------
@@ -458,7 +496,6 @@ func validateModuleStaging(staging string, stagedBinDir string) error {
 		"customize.sh",
 		"scripts/dns.sh",
 		"scripts/iptables.sh",
-		"scripts/net_handler.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
 		"scripts/lib/privstack_env.sh",

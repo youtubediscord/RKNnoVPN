@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const CurrentSchemaVersion = 4
+const CurrentSchemaVersion = 5
 
 // Config is the canonical daemon configuration.
 type Config struct {

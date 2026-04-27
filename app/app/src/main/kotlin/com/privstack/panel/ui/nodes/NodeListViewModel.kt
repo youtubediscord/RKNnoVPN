@@ -12,6 +12,7 @@ import com.privstack.panel.model.Node
 import com.privstack.panel.model.NodeSourceType
 import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.repository.ProfileRepository
+import com.privstack.panel.repository.SubscriptionImportPreview
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.net.URI
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +39,7 @@ data class NodeListUiState(
     val importInitialText: String = "",
     /** Nodes parsed from import input, waiting for user selection. */
     val importCandidates: List<ImportCandidate> = emptyList(),
+    val pendingSubscriptionPreview: SubscriptionImportPreview? = null,
     val isLoading: Boolean = false,
     val isTestingNodes: Boolean = false,
     /** Error message from the last operation, or null. */
@@ -57,6 +59,7 @@ data class SubscriptionUiSummary(
 data class ImportCandidate(
     val node: Node,
     val selected: Boolean = true,
+    val selectable: Boolean = true,
 )
 
 @HiltViewModel
@@ -96,7 +99,7 @@ class NodeListViewModel @Inject constructor(
                     )
                 }
             } else {
-                Log.d(TAG, "Active node set to $nodeId via panel-set")
+                Log.d(TAG, "Active node set to $nodeId via profile.setActiveNode")
                 profileRepository.error.value?.let { persistedWarning ->
                     _uiState.update { it.copy(errorMessage = persistedWarning, statusMessage = null) }
                 } ?: profileRepository.notice.value?.let { notice ->
@@ -273,6 +276,7 @@ class NodeListViewModel @Inject constructor(
                 importSheetTab = ImportSheetTab.PASTE_URI,
                 importInitialText = "",
                 importCandidates = emptyList(),
+                pendingSubscriptionPreview = null,
                 errorMessage = null,
                 statusMessage = null,
             )
@@ -285,6 +289,7 @@ class NodeListViewModel @Inject constructor(
                 showImportSheet = false,
                 importInitialText = "",
                 importCandidates = emptyList(),
+                pendingSubscriptionPreview = null,
                 errorMessage = null,
                 statusMessage = null,
             )
@@ -303,6 +308,7 @@ class NodeListViewModel @Inject constructor(
                     importSheetTab = ImportSheetTab.SUBSCRIPTION,
                     importInitialText = preview.rawText.trim(),
                     importCandidates = emptyList(),
+                    pendingSubscriptionPreview = null,
                     errorMessage = null,
                     statusMessage = null,
                 )
@@ -319,6 +325,7 @@ class NodeListViewModel @Inject constructor(
                 importSheetTab = ImportSheetTab.PASTE_URI,
                 importInitialText = preview.rawText,
                 importCandidates = candidates,
+                pendingSubscriptionPreview = null,
                 errorMessage = null,
                 statusMessage = null,
             )
@@ -339,6 +346,7 @@ class NodeListViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     importCandidates = emptyList(),
+                    pendingSubscriptionPreview = null,
                     errorMessage = messages.get(
                         com.privstack.panel.R.string.node_no_valid_proxy_uris_detected
                     ),
@@ -353,6 +361,7 @@ class NodeListViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     importCandidates = emptyList(),
+                    pendingSubscriptionPreview = null,
                     errorMessage = messages.get(
                         com.privstack.panel.R.string.node_detected_uris_unparsed
                     ),
@@ -363,13 +372,20 @@ class NodeListViewModel @Inject constructor(
         }
         val candidates = parsedNodes.map { ImportCandidate(node = it, selected = true) }
 
-        _uiState.update { it.copy(importCandidates = candidates, errorMessage = null, statusMessage = null) }
+        _uiState.update {
+            it.copy(
+                importCandidates = candidates,
+                pendingSubscriptionPreview = null,
+                errorMessage = null,
+                statusMessage = null,
+            )
+        }
     }
 
     fun toggleImportCandidate(index: Int) {
         _uiState.update { state ->
             val updated = state.importCandidates.toMutableList()
-            if (index in updated.indices) {
+            if (index in updated.indices && updated[index].selectable) {
                 updated[index] = updated[index].copy(selected = !updated[index].selected)
             }
             state.copy(importCandidates = updated)
@@ -377,6 +393,11 @@ class NodeListViewModel @Inject constructor(
     }
 
     fun importSelected() {
+        _uiState.value.pendingSubscriptionPreview?.let { preview ->
+            applySubscriptionPreview(preview)
+            return
+        }
+
         val selected = _uiState.value.importCandidates
             .filter { it.selected }
             .map { it.node }
@@ -413,6 +434,7 @@ class NodeListViewModel @Inject constructor(
                         it.copy(
                             showImportSheet = persistedWarning != null,
                             importCandidates = if (persistedWarning != null) it.importCandidates else emptyList(),
+                            pendingSubscriptionPreview = null,
                             isLoading = false,
                             errorMessage = persistedWarning,
                             statusMessage = notice,
@@ -436,16 +458,14 @@ class NodeListViewModel @Inject constructor(
     }
 
     /**
-     * Parse subscription URL and add nodes.
+     * Fetch subscription URL and show a provider-scoped merge preview.
      */
     fun fetchSubscription(url: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, statusMessage = null) }
 
-            // The repository asks the daemon to fetch the URL, then merges the
-            // parsed nodes into the stored profile locally.
-            val imported = profileRepository.importNodes(url)
-            if (imported.isEmpty()) {
+            val preview = profileRepository.previewSubscription(url)
+            if (preview == null) {
                 val err = profileRepository.error.value
                 _uiState.update {
                     it.copy(
@@ -457,19 +477,62 @@ class NodeListViewModel @Inject constructor(
                     )
                 }
             } else {
-                val firstGroup = imported.firstOrNull()?.group
-                val persistedWarning = profileRepository.error.value
-                val notice = profileRepository.notice.value.takeIf { persistedWarning == null }
+                val candidates = preview.nodes.map { node ->
+                    ImportCandidate(node = node, selected = true, selectable = false)
+                }
                 _uiState.update {
                     it.copy(
-                        showImportSheet = persistedWarning != null,
-                        importCandidates = if (persistedWarning != null) it.importCandidates else emptyList(),
+                        showImportSheet = true,
+                        importSheetTab = ImportSheetTab.SUBSCRIPTION,
+                        importInitialText = preview.url,
+                        importCandidates = candidates,
+                        pendingSubscriptionPreview = preview,
                         isLoading = false,
-                        errorMessage = persistedWarning,
-                        statusMessage = notice,
-                        selectedGroup = firstGroup ?: it.selectedGroup,
+                        errorMessage = null,
+                        statusMessage = messages.get(
+                            com.privstack.panel.R.string.subscription_preview_summary,
+                            preview.addedCount,
+                            preview.updatedCount,
+                            preview.removedCount,
+                            preview.parseFailures,
+                        ),
                     )
                 }
+            }
+        }
+    }
+
+    private fun applySubscriptionPreview(preview: SubscriptionImportPreview) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, statusMessage = null) }
+            val imported = profileRepository.applySubscriptionPreview(preview)
+            if (imported.isEmpty()) {
+                val err = profileRepository.error.value
+                _uiState.update {
+                    it.copy(
+                        errorMessage = err ?: messages.get(
+                            com.privstack.panel.R.string.subscription_fetch_failed
+                        ),
+                        statusMessage = null,
+                        isLoading = false,
+                    )
+                }
+                return@launch
+            }
+
+            val firstGroup = imported.firstOrNull()?.group
+            val persistedWarning = profileRepository.error.value
+            val notice = profileRepository.notice.value.takeIf { persistedWarning == null }
+            _uiState.update {
+                it.copy(
+                    showImportSheet = persistedWarning != null,
+                    importCandidates = if (persistedWarning != null) it.importCandidates else emptyList(),
+                    pendingSubscriptionPreview = if (persistedWarning != null) preview else null,
+                    isLoading = false,
+                    errorMessage = persistedWarning,
+                    statusMessage = notice,
+                    selectedGroup = firstGroup ?: it.selectedGroup,
+                )
             }
         }
     }
@@ -566,7 +629,7 @@ class NodeListViewModel @Inject constructor(
                     }
                 },
                 activeNodeCount = providerNodes.count { !it.stale },
-                staleNodeCount = providerNodes.count { it.stale }.coerceAtLeast(subscription.staleNodeCount),
+                staleNodeCount = providerNodes.count { it.stale },
                 parseFailures = subscription.parseFailures,
             )
         }.sortedBy { it.displayName.lowercase() }

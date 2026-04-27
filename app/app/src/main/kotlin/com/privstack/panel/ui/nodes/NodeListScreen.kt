@@ -225,6 +225,7 @@ fun NodeListScreen(
             candidates = state.importCandidates,
             isLoading = state.isLoading,
             errorMessage = state.errorMessage,
+            statusMessage = state.statusMessage,
             onDetectUris = viewModel::detectUris,
             onToggleCandidate = viewModel::toggleImportCandidate,
             onImportSelected = viewModel::importSelected,

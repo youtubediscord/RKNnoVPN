@@ -382,8 +382,6 @@ class AppPickerViewModel @Inject constructor(
     /**
      * Load the set of package names currently configured for per-app proxy
      * from the daemon's profile config.
-     *
-     * Returns an empty selection if the daemon is unreachable (graceful fallback).
      */
     private suspend fun loadRoutingSelectionFromDaemon(): RoutingSelection {
         val config = profileRepository.getOrLoad()
@@ -391,12 +389,11 @@ class AppPickerViewModel @Inject constructor(
             return config.toRoutingSelection()
         }
 
-        // Fallback: daemon unreachable, keep the privacy-first empty whitelist.
         val err = profileRepository.error.value
         if (err != null) {
             Log.w(TAG, "Could not load proxied apps from daemon: $err")
         }
-        return RoutingSelection(RoutingMode.PER_APP, emptySet(), emptySet(), emptyMap(), emptyList())
+        throw IllegalStateException(err ?: messages.get(com.privstack.panel.R.string.error_no_profile_loaded))
     }
 
     private fun observeProfile() {

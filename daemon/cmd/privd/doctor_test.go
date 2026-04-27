@@ -48,18 +48,23 @@ func TestDoctorRedactsSensitiveJSON(t *testing.T) {
 	}
 }
 
-func TestSupportedRPCMethodsAdvertiseCompatibilityAliases(t *testing.T) {
+func TestSupportedRPCMethodsAdvertiseCanonicalContract(t *testing.T) {
 	methods := supportedRPCMethods()
-	for _, method := range []string{"doctor", "config.import", "network.reset", "node.test", "self-check"} {
+	for _, method := range []string{"doctor", "config-import", "backend.reset", "diagnostics.testNodes", "self-check", "profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.preview", "subscription.refresh"} {
 		if !slices.Contains(methods, method) {
 			t.Fatalf("supported methods missing %s: %#v", method, methods)
+		}
+	}
+	for _, method := range []string{"config.import", "config-get", "config-set", "config-set-many", "network.reset", "node.test", "panel-get", "panel-set", "self.check", "status", "start", "stop", "subscription-fetch", "reload", "health"} {
+		if slices.Contains(methods, method) {
+			t.Fatalf("supported methods must not advertise legacy alias %s: %#v", method, methods)
 		}
 	}
 }
 
 func TestSupportedCapabilitiesAdvertiseSchemaAndDiagnostics(t *testing.T) {
 	caps := supportedCapabilities()
-	for _, capability := range []string{"backend.reset.warnings.v1", "config.mutation.envelope.v1", "config.schema.v4", "diagnostics.bundle.v2", "ipc.envelope.v1", "netstack.runtime.verify.v1", "netstack.verify.v1", "node-test.tcp-direct", "privacy.localhost-listeners.v1", "privacy.loopback-dns.v1", "privacy.self-check.v1", "privacy.self-test-protected-apps.v1", "privacy.vpn-interface-patterns.v1", "runtime.logs"} {
+	for _, capability := range []string{"backend.reset.warnings.v1", "config.mutation.envelope.v1", "config.schema.v5", "diagnostics.bundle.v2", "diagnostics.testNodes.tcp-direct", "ipc.envelope.v1", "netstack.runtime.verify.v1", "netstack.verify.v1", "profile.apply.v2", "profile.document.v2", "profile.importNodes.v2", "profile.subscription.v2", "privacy.localhost-listeners.v1", "privacy.loopback-dns.v1", "privacy.self-check.v1", "privacy.self-test-protected-apps.v1", "privacy.vpn-interface-patterns.v1", "runtime.logs"} {
 		if !slices.Contains(caps, capability) {
 			t.Fatalf("supported capabilities missing %s: %#v", capability, caps)
 		}
@@ -104,6 +109,7 @@ func TestDoctorSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
 		map[string]string{"version": "v1.6.4"},
 		doctorCommandResult{},
 		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
+		doctorProfileSummary{},
 		doctorRoutingSummary{},
 		doctorPackageResolution{},
 	)
@@ -137,6 +143,7 @@ func TestDoctorSummaryFlagsPrivacyFailures(t *testing.T) {
 		map[string]string{"version": "v1.6.4"},
 		doctorCommandResult{},
 		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
+		doctorProfileSummary{},
 		doctorRoutingSummary{},
 		doctorPackageResolution{},
 	)
@@ -218,6 +225,7 @@ func TestDoctorSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
 			CheckedFiles: 2,
 			Mismatches:   []string{"bin/privd"},
 		},
+		doctorProfileSummary{},
 		doctorRoutingSummary{},
 		doctorPackageResolution{},
 	)
@@ -245,6 +253,7 @@ func TestDoctorSummaryFlagsRuntimeNetstackFailure(t *testing.T) {
 		map[string]string{"version": "v1.6.4"},
 		doctorCommandResult{},
 		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
+		doctorProfileSummary{},
 		doctorRoutingSummary{},
 		doctorPackageResolution{},
 	)
@@ -342,6 +351,7 @@ func TestDoctorSummaryFlagsPackageResolutionAndPortWarnings(t *testing.T) {
 		map[string]string{"version": "v1.6.4"},
 		doctorCommandResult{},
 		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
+		doctorProfileSummary{},
 		doctorRoutingSummary{},
 		doctorPackageResolution{Warnings: []string{"per-app routing is enabled but selected packages resolved to zero UIDs"}},
 	)

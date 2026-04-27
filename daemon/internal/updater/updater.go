@@ -42,9 +42,20 @@ type UpdateInfo struct {
 
 // DownloadedUpdate holds paths to verified downloaded assets.
 type DownloadedUpdate struct {
-	ModulePath string `json:"module_path"` // path to downloaded module.zip
-	ApkPath    string `json:"apk_path"`    // path to downloaded panel.apk
-	Checksums  bool   `json:"checksums"`   // SHA256 verified
+	ModulePath   string `json:"module_path"`   // path to downloaded module.zip
+	ApkPath      string `json:"apk_path"`      // path to downloaded panel.apk
+	ManifestPath string `json:"manifest_path"` // path to local verified manifest
+	Checksums    bool   `json:"checksums"`     // SHA256 verified
+}
+
+type VerifiedUpdateManifest struct {
+	ManifestVersion int    `json:"manifest_version"`
+	CurrentVersion  string `json:"current_version"`
+	LatestVersion   string `json:"latest_version"`
+	ModuleSHA256    string `json:"module_sha256"`
+	ApkSHA256       string `json:"apk_sha256"`
+	ChecksumsSHA256 string `json:"checksums_sha256"`
+	VerifiedAt      string `json:"verified_at"`
 }
 
 // --------------------------------------------------------------------------
@@ -193,6 +204,11 @@ func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, 
 	if !ok {
 		return nil, fmt.Errorf("updater: SHA256 checksum mismatch")
 	}
+	manifestPath, err := writeVerifiedUpdateManifest(info, destDir)
+	if err != nil {
+		return nil, err
+	}
+	result.ManifestPath = manifestPath
 
 	return result, nil
 }
@@ -211,24 +227,18 @@ func VerifyDownloadedUpdate(modulePath, apkPath string) error {
 	if filepath.Base(modulePath) != "module.zip" || filepath.Base(apkPath) != "panel.apk" {
 		return fmt.Errorf("update artifacts must be the verified module.zip and panel.apk files")
 	}
-	if _, err := os.Stat(modulePath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("missing module.zip")
-		}
-		return fmt.Errorf("stat module.zip: %w", err)
+	if err := requireRegularArtifact(modulePath, "module.zip"); err != nil {
+		return err
 	}
-	if _, err := os.Stat(apkPath); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("missing panel.apk")
-		}
-		return fmt.Errorf("stat panel.apk: %w", err)
+	if err := requireRegularArtifact(apkPath, "panel.apk"); err != nil {
+		return err
 	}
 	checksumPath := filepath.Join(moduleDir, "SHA256SUMS.txt")
-	if _, err := os.Stat(checksumPath); err != nil {
-		if os.IsNotExist(err) {
+	if err := requireRegularArtifact(checksumPath, "SHA256SUMS.txt"); err != nil {
+		if strings.Contains(err.Error(), "missing SHA256SUMS.txt") {
 			return fmt.Errorf("missing SHA256SUMS.txt for downloaded update")
 		}
-		return fmt.Errorf("stat SHA256SUMS.txt: %w", err)
+		return err
 	}
 	ok, err := verifyChecksums(checksumPath, moduleDir)
 	if err != nil {
@@ -236,6 +246,79 @@ func VerifyDownloadedUpdate(modulePath, apkPath string) error {
 	}
 	if !ok {
 		return fmt.Errorf("SHA256 checksum mismatch")
+	}
+	manifest, err := ReadVerifiedUpdateManifest(moduleDir)
+	if err != nil {
+		return err
+	}
+	moduleHash, err := sha256File(modulePath)
+	if err != nil {
+		return fmt.Errorf("hash module.zip: %w", err)
+	}
+	if !strings.EqualFold(moduleHash, manifest.ModuleSHA256) {
+		return fmt.Errorf("module.zip does not match verified manifest")
+	}
+	apkHash, err := sha256File(apkPath)
+	if err != nil {
+		return fmt.Errorf("hash panel.apk: %w", err)
+	}
+	if !strings.EqualFold(apkHash, manifest.ApkSHA256) {
+		return fmt.Errorf("panel.apk does not match verified manifest")
+	}
+	checksumsHash, err := sha256File(checksumPath)
+	if err != nil {
+		return fmt.Errorf("hash SHA256SUMS.txt: %w", err)
+	}
+	if !strings.EqualFold(checksumsHash, manifest.ChecksumsSHA256) {
+		return fmt.Errorf("SHA256SUMS.txt does not match verified manifest")
+	}
+	return nil
+}
+
+func ReadVerifiedUpdateManifest(updateDir string) (*VerifiedUpdateManifest, error) {
+	path := filepath.Join(updateDir, "update-manifest.json")
+	if err := requireRegularArtifact(path, "verified update manifest"); err != nil {
+		if strings.Contains(err.Error(), "missing verified update manifest") {
+			return nil, err
+		}
+		return nil, fmt.Errorf("stat verified update manifest: %w", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("missing verified update manifest")
+		}
+		return nil, fmt.Errorf("read verified update manifest: %w", err)
+	}
+	var manifest VerifiedUpdateManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("parse verified update manifest: %w", err)
+	}
+	if manifest.ManifestVersion != 1 {
+		return nil, fmt.Errorf("unsupported verified update manifest version %d", manifest.ManifestVersion)
+	}
+	if manifest.LatestVersion == "" ||
+		manifest.ModuleSHA256 == "" ||
+		manifest.ApkSHA256 == "" ||
+		manifest.ChecksumsSHA256 == "" {
+		return nil, fmt.Errorf("verified update manifest is incomplete")
+	}
+	return &manifest, nil
+}
+
+func requireRegularArtifact(path string, label string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("missing %s", label)
+		}
+		return fmt.Errorf("stat %s: %w", label, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s must not be a symlink", label)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s must be a regular file", label)
 	}
 	return nil
 }
@@ -307,7 +390,7 @@ func downloadFile(url, dest string, onProgress func(int64)) error {
 }
 
 func cleanupDownloadedArtifacts(destDir string) error {
-	for _, name := range []string{"module.zip", "panel.apk", "SHA256SUMS.txt"} {
+	for _, name := range []string{"module.zip", "panel.apk", "SHA256SUMS.txt", "update-manifest.json"} {
 		path := filepath.Join(destDir, name)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("updater: remove stale %s: %w", name, err)
@@ -318,6 +401,45 @@ func cleanupDownloadedArtifacts(destDir string) error {
 		}
 	}
 	return nil
+}
+
+func writeVerifiedUpdateManifest(info *UpdateInfo, destDir string) (string, error) {
+	moduleHash, err := sha256File(filepath.Join(destDir, "module.zip"))
+	if err != nil {
+		return "", fmt.Errorf("updater: hash module.zip: %w", err)
+	}
+	apkHash, err := sha256File(filepath.Join(destDir, "panel.apk"))
+	if err != nil {
+		return "", fmt.Errorf("updater: hash panel.apk: %w", err)
+	}
+	checksumHash, err := sha256File(filepath.Join(destDir, "SHA256SUMS.txt"))
+	if err != nil {
+		return "", fmt.Errorf("updater: hash SHA256SUMS.txt: %w", err)
+	}
+	manifest := VerifiedUpdateManifest{
+		ManifestVersion: 1,
+		CurrentVersion:  NormalizeVersionTag(info.CurrentVersion),
+		LatestVersion:   NormalizeVersionTag(info.LatestVersion),
+		ModuleSHA256:    moduleHash,
+		ApkSHA256:       apkHash,
+		ChecksumsSHA256: checksumHash,
+		VerifiedAt:      time.Now().Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("updater: marshal verified update manifest: %w", err)
+	}
+	data = append(data, '\n')
+	path := filepath.Join(destDir, "update-manifest.json")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o640); err != nil {
+		return "", fmt.Errorf("updater: write verified update manifest: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("updater: publish verified update manifest: %w", err)
+	}
+	return path, nil
 }
 
 // verifyChecksums reads SHA256SUMS.txt and verifies every downloaded update

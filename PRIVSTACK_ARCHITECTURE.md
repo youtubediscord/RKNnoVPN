@@ -68,9 +68,9 @@ CLI-клиент, который:
 Примеры:
 
 ```sh
-su -c '/data/adb/privstack/bin/privctl status'
-su -c '/data/adb/privstack/bin/privctl start'
-su -c '/data/adb/privstack/bin/privctl node-test'
+su -c '/data/adb/privstack/bin/privctl backend.status'
+su -c '/data/adb/privstack/bin/privctl backend.start'
+su -c '/data/adb/privstack/bin/privctl diagnostics.testNodes'
 ```
 
 ### privd
@@ -148,7 +148,6 @@ stdout, exit code или произвольным строкам.
     iptables.sh
     dns.sh
     routing.sh
-    net_handler.sh
     rescue_reset.sh
     lib/
       privstack_env.sh
@@ -207,8 +206,9 @@ stdout, exit code или произвольным строкам.
 Ключевые секции:
 
 - `proxy` - порты, GID core, fwmark;
-- `node` - legacy/active node;
-- `panel` - APK-facing состояние, включая список `nodes` и subscription metadata;
+- `node` - rendered active node mirror for the root runtime;
+- `panel.json` - migration sidecar for old installs; daemon converts it into
+  canonical profile state and keeps it in sync for rollback/debug visibility;
 - `routing` - routing mode и domain/IP rules;
 - `apps` - package whitelist/blacklist;
 - `dns` - remote/direct DNS;
@@ -216,42 +216,57 @@ stdout, exit code или произвольным строкам.
 - `rescue` - политика восстановления;
 - `autostart`.
 
-Частичные мутации daemon config принимают только известные mutable секции.
-`schema_version` и `panel` нельзя менять через `config-set` /
-`config-set-many`: версия схемы принадлежит daemon, а APK-facing panel state
-пишется через `panel-set`. Неизвестные ключи должны возвращать ошибку, а не
-молча исчезать при `json.Unmarshal`.
+APK-facing intent теперь принадлежит daemon `profile` contract. APK читает и
+меняет только:
 
-Config mutation response должен различать сохранение и runtime apply:
-`config_saved=true` означает, что persisted state изменился, а
-`runtime_applied=true` ставится только когда запущенный runtime действительно
-перезагружен/применён. Save-only операции возвращают `runtime_apply:
-not_requested`, а сохранение при остановленном runtime - `skipped_runtime_stopped`.
+- `profile.get`
+- `profile.apply`
+- `profile.importNodes`
+- `profile.setActiveNode`
+- `subscription.preview`
+- `subscription.refresh`
 
-Каждая мутация config/panel также возвращает typed `operation` внутри result и
+Legacy `config-get`, `config-set*`, `panel-*` и `subscription-fetch` не входят в
+supported IPC contract и не рекламируются в `version.supported_methods` или
+`privctl help`. Старые `config.json + panel.json` остаются миграционным
+источником данных, но не APK API.
+
+Profile mutation response различает сохранение desired state и runtime apply:
+`configSaved=true` означает, что persisted desired profile изменился, а
+`runtimeApplied=true` ставится только когда запущенный runtime действительно
+перезагружен/применён. Асинхронный reload/restart возвращает `runtimeApply:
+accepted`, но не выставляет `runtimeApplied=true` до фактического завершения
+operation. Save-only операции возвращают `runtimeApply: not_requested`, а
+сохранение при остановленном runtime - `skipped_runtime_stopped`.
+
+Каждая profile/subscription мутация возвращает typed `operation` внутри result и
 в IPC envelope. Это transaction summary, а не строка для UI:
 
 ```json
 {
-  "type": "config-mutation",
-  "action": "panel-set",
+  "type": "profile-apply",
+  "action": "profile.apply",
   "status": "ok",
   "configSaved": true,
-  "runtimeApplied": true,
-  "runtimeApply": "applied",
+  "runtimeApplied": false,
+  "runtimeApply": "accepted",
+  "desiredGeneration": 8,
+  "appliedGeneration": 7,
   "rollback": "not_needed",
   "stages": [
     {"name": "validate", "status": "ok"},
-    {"name": "persist", "status": "ok"},
-    {"name": "runtime-apply", "status": "applied"}
+    {"name": "render", "status": "ok"},
+    {"name": "persist-desired", "status": "ok"},
+    {"name": "runtime-apply", "status": "accepted"}
   ]
 }
 ```
 
-При ошибке после сохранения `status=failed`, `configSaved=true`,
-`runtimeApply=failed`, а `rollback` показывает, была ли выполнена cleanup/reset
-ветка. APK должен показывать пользователю именно этот typed результат, а не
-угадывать состояние по тексту ошибки.
+При ошибке после сохранения `status=saved_not_applied`, `configSaved=true`,
+`runtimeApply=failed`, `desiredGeneration != appliedGeneration`, а `rollback`
+показывает, была ли выполнена cleanup/reset ветка. APK должен показывать
+пользователю именно этот typed результат, а не угадывать состояние по тексту
+ошибки.
 
 APK projection: repository слой публикует отдельный informational notice для
 typed config transaction outcomes (`skipped_runtime_stopped`, `failed` +
@@ -262,12 +277,16 @@ typed config transaction outcomes (`skipped_runtime_stopped`, `failed` +
 ## Update/Install Safety
 
 Daemon updater устанавливает module/APK только из verified update directory:
-`module.zip`, `panel.apk` и `SHA256SUMS.txt` должны лежать рядом и проходить
-checksum verification перед install. Module hot-update обязан остановиться до
-замены бинарников, если canonical `scripts/rescue_reset.sh update-clean`
-недоступен или возвращает ошибку. Missing cleanup script не является
-совместимым fallback-сценарием: лучше отказать в update, чем заменить root
-runtime поверх неизвестных iptables/DNS/routing артефактов.
+`module.zip`, `panel.apk`, `SHA256SUMS.txt` и локальный
+`update-manifest.json` должны лежать в `<dataDir>/update` и проходить checksum
+verification перед install. `update-install` не принимает произвольные пути к
+артефактам. Module zip проходит staging/preflight validation до установки APK
+и до остановки runtime; версия `module.prop` должна совпадать с verified
+release version из manifest. Module hot-update обязан остановиться до замены
+бинарников, если canonical `scripts/rescue_reset.sh update-clean` недоступен
+или возвращает ошибку. Missing cleanup script не является совместимым
+fallback-сценарием: лучше отказать в update, чем заменить root runtime поверх
+неизвестных iptables/DNS/routing артефактов.
 
 Install operation пишет observable state в
 `<dataDir>/run/update-install-state.json`: generation, artifacts, текущий step,
@@ -299,7 +318,7 @@ APK хранит полный список nodes в `panel.nodes`. Каждый 
 Subscription refresh работает только в своём source scope: ручные nodes не
 считаются удалёнными подпиской, а stale/removed применяется только к nodes того
 же provider. Stale nodes остаются видимыми в UI, но не участвуют в выборе
-активного runtime node и массовых node-test операциях.
+активного runtime node и массовых `diagnostics.testNodes` операциях.
 
 Daemon валидирует `panel.nodes[].source`: `MANUAL` или `SUBSCRIPTION`.
 Subscription nodes обязаны иметь `providerKey`; legacy stale nodes без source
@@ -400,7 +419,7 @@ Audit превращает health и config состояние в findings, пр
 Команда:
 
 ```sh
-privctl node-test
+privctl diagnostics.testNodes
 ```
 
 Возвращает:

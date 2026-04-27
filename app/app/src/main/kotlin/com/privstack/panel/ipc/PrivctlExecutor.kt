@@ -65,7 +65,7 @@ class PrivctlExecutor @Inject constructor() {
     /**
      * Execute a single privctl JSON-RPC method.
      *
-     * @param method  The method name (e.g. "status", "config-get").
+     * @param method  The method name (e.g. "backend.status", "profile.get").
      * @param params  Optional parameter object.
      * @param timeoutMs  Maximum wall-clock time for the command.
      * @return A [PrivctlResult] that is never null.

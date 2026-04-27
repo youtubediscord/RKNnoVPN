@@ -4,7 +4,7 @@
 //
 // On Android, /data/misc/net/ contains files updated by netd whenever the
 // network configuration changes.  We use inotifyd (busybox) to watch that
-// directory and call the net_handler.sh script on each event.
+// directory and run daemon-owned reconciliation on each event.
 package watcher
 
 import (
@@ -28,7 +28,7 @@ const (
 )
 
 // NetworkWatcher monitors filesystem events under /data/misc/net/ via
-// inotifyd and dispatches the net_handler.sh script on changes.
+// inotifyd and dispatches a daemon-owned callback on changes.
 type NetworkWatcher struct {
 	dataDir string // e.g. /data/adb/privstack
 	env     map[string]string

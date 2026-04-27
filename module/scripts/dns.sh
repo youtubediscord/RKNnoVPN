@@ -21,7 +21,6 @@
 #   DNS_SCOPE      — "off" | "all" | "uids" | "all_except_uids"
 #   PROXY_UIDS     — UIDs whose DNS should be redirected in uids scope
 #   DIRECT_UIDS    — UIDs whose DNS must stay direct in all_except_uids scope
-#   APP_UIDS       — legacy selected UID set, used only as fallback
 #   BYPASS_UIDS    — space-separated list of UIDs that must never be redirected
 #   PRIVSTACK_DIR  — base directory, e.g. /data/adb/privstack
 # ============================================================================
@@ -42,7 +41,6 @@ CORE_GID="${CORE_GID:-23333}"
 APP_MODE="${APP_MODE:-whitelist}"
 DNS_MODE="${DNS_MODE:-uid}"
 DNS_SCOPE="${DNS_SCOPE:-}"
-APP_UIDS="${APP_UIDS:-}"
 PROXY_UIDS="${PROXY_UIDS:-}"
 DIRECT_UIDS="${DIRECT_UIDS:-}"
 BYPASS_UIDS="${BYPASS_UIDS:-}"
@@ -59,13 +57,6 @@ log() { /system/bin/log -t "$TAG" -p i "$*"; }
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 normalize_scope() {
-    if [ -z "$PROXY_UIDS" ] && [ -z "$DIRECT_UIDS" ] && [ -n "$APP_UIDS" ]; then
-        case "$APP_MODE" in
-            whitelist) PROXY_UIDS="$APP_UIDS" ;;
-            blacklist) DIRECT_UIDS="$APP_UIDS" ;;
-        esac
-    fi
-
     if [ -n "$DNS_SCOPE" ]; then
         return
     fi

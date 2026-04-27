@@ -2,16 +2,13 @@ package com.privstack.panel.repository
 
 import android.util.Log
 import com.privstack.panel.`import`.LinkParser
-import com.privstack.panel.`import`.SubscriptionHandler
 import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.ipc.ConfigMutationInfo
 import com.privstack.panel.ipc.PollingStatusSource
 import com.privstack.panel.model.Node
-import com.privstack.panel.model.NodeSourceType
 import com.privstack.panel.model.ProfileConfig
-import com.privstack.panel.model.Subscription
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +22,19 @@ import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 import javax.inject.Singleton
 
+data class SubscriptionImportPreview(
+    val url: String,
+    val nodes: List<Node>,
+    val parseFailures: Int,
+    val added: Int,
+    val updated: Int,
+    val stale: Int,
+) {
+    val addedCount: Int get() = added
+    val updatedCount: Int get() = updated
+    val removedCount: Int get() = stale
+}
+
 /**
  * Cache-backed profile CRUD via [DaemonClient].
  *
@@ -34,7 +44,7 @@ import javax.inject.Singleton
  * - On explicit [refresh] (typically called from Activity.onResume)
  * - After every mutating operation (add/remove/update node, change routing, etc.)
  *
- * All writes go through the daemon (`config-set`) and then re-read to keep
+ * All writes go through the daemon profile RPCs and then re-read to keep
  * the cache consistent. If a write fails the cache is NOT updated, so the UI
  * always reflects the actual daemon state.
  */
@@ -79,7 +89,7 @@ class ProfileRepository @Inject constructor(
         _error.value = null
         _notice.value = null
         try {
-            when (val result = client.configGet()) {
+            when (val result = client.profileGet()) {
                 is DaemonClientResult.Ok -> {
                     _profile.value = result.data
                     result.data
@@ -144,14 +154,14 @@ class ProfileRepository @Inject constructor(
             if (!ensureRuntimeIdle("setActiveNode")) {
                 return@withLock false
             }
-            when (val result = client.panelSet(current.copy(activeNodeId = nodeId))) {
+            when (val result = client.profileSetActiveNode(nodeId)) {
                 is DaemonClientResult.Ok -> {
                     publishRuntimeStatus(result.data)
                     refreshUnlockedWithStatus("setActiveNode")
                 }
                 else -> {
                     val msg = describeFailure(result)
-                    Log.w(TAG, "setActiveNode panel update failed: $msg")
+                    Log.w(TAG, "setActiveNode profile update failed: $msg")
                     if (result.configWasSaved()) {
                         return@withLock refreshAfterSavedFailure("setActiveNode", msg)
                     }
@@ -184,15 +194,54 @@ class ProfileRepository @Inject constructor(
                 }
 
                 if (LinkParser.isSubscriptionUrl(input.trim())) {
-                    importSubscriptionUnlocked(current, input.trim())
+                    importSubscriptionUnlocked(input.trim())
                 } else {
-                    importDirectLinksUnlocked(current, input)
+                    importDirectLinksUnlocked(input)
                 }
             } finally {
                 _loading.value = false
             }
         }
     }
+
+    suspend fun previewSubscription(url: String): SubscriptionImportPreview? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            _loading.value = true
+            _error.value = null
+            _notice.value = null
+            try {
+                val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                    if (_error.value.isNullOrBlank()) {
+                        _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                    }
+                    return@withLock null
+                }
+                buildSubscriptionPreviewUnlocked(url.trim())
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
+
+    suspend fun applySubscriptionPreview(preview: SubscriptionImportPreview): List<Node> =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                _loading.value = true
+                _error.value = null
+                _notice.value = null
+                try {
+                    val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
+                        if (_error.value.isNullOrBlank()) {
+                            _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                        }
+                        return@withLock emptyList()
+                    }
+                    applySubscriptionPreviewUnlocked(preview)
+                } finally {
+                    _loading.value = false
+                }
+            }
+        }
 
     // ---- Profile-level mutations ----
 
@@ -205,22 +254,10 @@ class ProfileRepository @Inject constructor(
             if (!ensureRuntimeIdle("setProfile")) {
                 return@withLock false
             }
-            when (val result = client.configSet(config, reload = false)) {
+            when (val result = client.profileApply(config, reload = true)) {
                 is DaemonClientResult.Ok -> {
                     publishRuntimeStatus(result.data)
-                    when (val panelResult = client.panelSet(config, reload = true)) {
-                        is DaemonClientResult.Ok -> {
-                            publishRuntimeStatus(panelResult.data)
-                            refreshUnlockedWithStatus("setProfile")
-                        }
-                        else -> {
-                            val msg = describeFailure(panelResult)
-                            Log.w(TAG, "setProfile panel update failed: $msg")
-                            _error.value = msg
-                            refreshUnlockedWithStatus("setProfile")
-                            false
-                        }
-                    }
+                    refreshUnlockedWithStatus("setProfile")
                 }
                 else -> {
                     val msg = describeFailure(result)
@@ -264,7 +301,7 @@ class ProfileRepository @Inject constructor(
                 return@withLock false
             }
             val updated = transform(current)
-            when (val result = client.configSet(updated)) {
+            when (val result = client.profileApply(updated)) {
                 is DaemonClientResult.Ok -> {
                     publishRuntimeStatus(result.data)
                     refreshUnlockedWithStatus(tag)
@@ -302,14 +339,14 @@ class ProfileRepository @Inject constructor(
                 return@withLock false
             }
             val updated = transform(current)
-            when (val result = client.panelSet(updated)) {
+            when (val result = client.profileApply(updated)) {
                 is DaemonClientResult.Ok -> {
                     publishRuntimeStatus(result.data)
                     refreshUnlockedWithStatus(tag)
                 }
                 else -> {
                     val msg = describeFailure(result)
-                    Log.w(TAG, "$tag panel update failed: $msg")
+                Log.w(TAG, "$tag profile update failed: $msg")
                     if (result.configWasSaved()) {
                         return refreshAfterSavedFailure(tag, msg)
                     }
@@ -324,7 +361,7 @@ class ProfileRepository @Inject constructor(
 
     /** Refresh without acquiring the mutex (caller already holds it). */
     private suspend fun refreshUnlocked() {
-        when (val result = client.configGet()) {
+        when (val result = client.profileGet()) {
             is DaemonClientResult.Ok -> {
                 _profile.value = result.data
             }
@@ -336,7 +373,7 @@ class ProfileRepository @Inject constructor(
     }
 
     private suspend fun refreshUnlockedWithStatus(tag: String): Boolean {
-        return when (val result = client.configGet()) {
+        return when (val result = client.profileGet()) {
             is DaemonClientResult.Ok -> {
                 _profile.value = result.data
                 true
@@ -358,7 +395,7 @@ class ProfileRepository @Inject constructor(
     }
 
     private suspend fun refreshUnlockedOrNull(): ProfileConfig? {
-        return when (val result = client.configGet()) {
+        return when (val result = client.profileGet()) {
             is DaemonClientResult.Ok -> {
                 _profile.value = result.data
                 result.data
@@ -374,7 +411,6 @@ class ProfileRepository @Inject constructor(
     }
 
     private suspend fun importDirectLinksUnlocked(
-        current: ProfileConfig,
         rawInput: String
     ): List<Node> {
         val detectedUris = LinkParser.detectUris(rawInput)
@@ -389,139 +425,87 @@ class ProfileRepository @Inject constructor(
             return emptyList()
         }
 
-        val merged = mergeNodes(current, parsedNodes)
-        return if (persistPanelUnlocked(merged.updatedConfig)) {
-            merged.importedNodes
-        } else {
-            emptyList()
+        return when (val result = client.profileImportNodes(parsedNodes)) {
+            is DaemonClientResult.Ok -> {
+                publishRuntimeStatus(result.data)
+                refreshUnlockedWithStatus("importDirectLinks")
+                parsedNodes
+            }
+            else -> {
+                val msg = describeFailure(result)
+                Log.w(TAG, "importDirectLinks failed: $msg")
+                if (result.configWasSaved()) {
+                    refreshAfterSavedFailure("importDirectLinks", msg)
+                    return emptyList()
+                }
+                _error.value = msg
+                emptyList()
+            }
         }
     }
 
     private suspend fun importSubscriptionUnlocked(
-        current: ProfileConfig,
         url: String
     ): List<Node> {
-        val fetched = when (val result = client.subscriptionFetch(url)) {
+        val preview = buildSubscriptionPreviewUnlocked(url) ?: return emptyList()
+        return applySubscriptionPreviewUnlocked(preview)
+    }
+
+    private suspend fun buildSubscriptionPreviewUnlocked(
+        url: String,
+    ): SubscriptionImportPreview? {
+        val preview = when (val result = client.subscriptionPreview(url)) {
             is DaemonClientResult.Ok -> result.data
             else -> {
                 val msg = messages.formatDaemonFailure(result)
-                Log.w(TAG, "daemon subscription fetch failed: $msg")
+                Log.w(TAG, "daemon subscription preview failed: $msg")
                 _error.value = msg
-                return emptyList()
+                return null
             }
         }
-
-        val parsed = SubscriptionHandler.parseResponse(fetched.body, fetched.headers)
-        val subscriptionNodes = SubscriptionHandler.stampSubscriptionSource(parsed.nodes, url)
-        if (subscriptionNodes.isEmpty()) {
-            _error.value = if (parsed.parseFailures > 0) {
+        if (preview.nodes.isEmpty()) {
+            _error.value = if (preview.parseFailures > 0) {
                 messages.get(com.privstack.panel.R.string.subscription_no_supported_links)
             } else {
                 messages.get(com.privstack.panel.R.string.subscription_empty)
             }
-            return emptyList()
+            return null
         }
 
-        val merged = mergeNodes(current, subscriptionNodes, markRemovedStale = true)
-        val updatedConfig = merged.updatedConfig.withSubscriptionMetadata(
+        return SubscriptionImportPreview(
             url = url,
-            info = parsed.info,
-            parseFailures = parsed.parseFailures,
-            refreshedNodes = subscriptionNodes,
+            nodes = preview.nodes,
+            parseFailures = preview.parseFailures,
+            added = preview.added,
+            updated = preview.updated,
+            stale = preview.stale,
         )
-        return if (persistPanelUnlocked(updatedConfig)) {
-            _notice.value = messages.formatSubscriptionRefresh(
-                importedNodes = subscriptionNodes.size,
-                parseFailures = parsed.parseFailures,
-            )
-            subscriptionNodes
-        } else {
-            emptyList()
-        }
     }
 
-    private suspend fun persistPanelUnlocked(config: ProfileConfig): Boolean {
-        if (!ensureRuntimeIdle("persistPanelUnlocked")) {
-            return false
-        }
-        return when (val result = client.panelSet(config)) {
+    private suspend fun applySubscriptionPreviewUnlocked(
+        preview: SubscriptionImportPreview,
+    ): List<Node> {
+        return when (val result = client.subscriptionRefresh(preview.url)) {
             is DaemonClientResult.Ok -> {
                 publishRuntimeStatus(result.data)
-                refreshUnlockedWithStatus("persistPanelUnlocked")
+                refreshUnlockedWithStatus("subscriptionRefresh")
+                _notice.value = messages.formatSubscriptionRefresh(
+                    importedNodes = preview.nodes.size,
+                    parseFailures = preview.parseFailures,
+                )
+                preview.nodes
             }
             else -> {
                 val msg = describeFailure(result)
-                Log.w(TAG, "persistPanelUnlocked failed: $msg")
+                Log.w(TAG, "subscriptionRefresh failed: $msg")
                 if (result.configWasSaved()) {
-                    return refreshAfterSavedFailure("persistPanelUnlocked", msg)
+                    refreshAfterSavedFailure("subscriptionRefresh", msg)
+                    return emptyList()
                 }
                 _error.value = msg
-                false
+                emptyList()
             }
         }
-    }
-
-    private fun mergeNodes(
-        current: ProfileConfig,
-        incoming: List<Node>,
-        dropRemoved: Boolean = false,
-        markRemovedStale: Boolean = false,
-    ): MergeResult {
-        val preview = SubscriptionHandler.previewMerge(current.nodes, incoming)
-        val mergedNodes = SubscriptionHandler.applyMerge(
-            preview,
-            dropRemoved = dropRemoved,
-            markRemovedStale = markRemovedStale
-        )
-        val selectableNodes = mergedNodes.filterNot { it.stale }
-        val nextActiveId = current.activeNodeId
-            ?.takeIf { activeId -> selectableNodes.any { it.id == activeId } }
-            ?: preview.added.firstOrNull()?.id
-            ?: preview.updated.firstOrNull()?.id
-            ?: selectableNodes.firstOrNull()?.id
-
-        return MergeResult(
-            importedNodes = incoming,
-            updatedConfig = current.copy(
-                nodes = mergedNodes,
-                activeNodeId = nextActiveId,
-            )
-        )
-    }
-
-    private data class MergeResult(
-        val importedNodes: List<Node>,
-        val updatedConfig: ProfileConfig,
-    )
-
-    private fun ProfileConfig.withSubscriptionMetadata(
-        url: String,
-        info: SubscriptionHandler.SubscriptionInfo?,
-        parseFailures: Int,
-        refreshedNodes: List<Node>,
-        nowMillis: Long = System.currentTimeMillis(),
-    ): ProfileConfig {
-        val providerKey = SubscriptionHandler.providerKeyFor(url)
-        val previous = subscriptions.firstOrNull { it.providerKey == providerKey }
-        val staleNodeCount = nodes.count {
-            it.source.type == NodeSourceType.SUBSCRIPTION &&
-                it.source.providerKey == providerKey &&
-                it.stale
-        }
-        val updated = Subscription(
-            providerKey = providerKey,
-            url = url,
-            name = previous?.name.orEmpty(),
-            lastFetchedAt = nowMillis,
-            lastSeenNodeCount = refreshedNodes.size,
-            staleNodeCount = staleNodeCount,
-            uploadBytes = info?.uploadBytes ?: previous?.uploadBytes ?: 0L,
-            downloadBytes = info?.downloadBytes ?: previous?.downloadBytes ?: 0L,
-            totalBytes = info?.totalBytes ?: previous?.totalBytes ?: 0L,
-            expireTimestamp = info?.expireTimestamp ?: previous?.expireTimestamp ?: 0L,
-            parseFailures = parseFailures,
-        )
-        return copy(subscriptions = subscriptions.filterNot { it.providerKey == providerKey } + updated)
     }
 
     private fun <T> describeFailure(result: DaemonClientResult<T>): String =

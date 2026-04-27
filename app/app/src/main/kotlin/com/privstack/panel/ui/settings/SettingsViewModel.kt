@@ -28,21 +28,6 @@ import javax.inject.Inject
 
 private const val TAG = "SettingsViewModel"
 
-/** JSON-RPC standard error code for "method not found" (-32601). */
-private const val METHOD_NOT_FOUND_CODE = -32601
-
-/**
- * Returns true if the daemon error indicates the method doesn't exist.
- * This covers two cases:
- *  - New privctl + old daemon: daemon returns JSON-RPC -32601 "method not found"
- *  - Old privctl (doesn't know command): privctl exits with code 1 and
- *    stderr contains "unknown command" -- parsed as DaemonError(code=1, ...)
- */
-private fun isMethodNotFound(result: DaemonClientResult.DaemonError): Boolean =
-    result.code == METHOD_NOT_FOUND_CODE ||
-    result.message.contains("unknown command", ignoreCase = true) ||
-    result.message.contains("method not found", ignoreCase = true)
-
 enum class RoutingMode { GLOBAL, WHITELIST, BYPASS, DIRECT }
 
 enum class DnsPreset(
@@ -648,15 +633,11 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
                 is DaemonClientResult.DaemonError -> {
-                    if (isMethodNotFound(result)) {
-                        _updateState.update { it.copy(status = UpdateStatus.MODULE_TOO_OLD) }
-                    } else {
-                        _updateState.update {
-                            it.copy(
-                                status = UpdateStatus.ERROR,
-                                errorMessage = formatUpdateError(result),
-                            )
-                        }
+                    _updateState.update {
+                        it.copy(
+                            status = UpdateStatus.ERROR,
+                            errorMessage = formatUpdateError(result),
+                        )
                     }
                 }
                 is DaemonClientResult.DaemonNotFound -> {

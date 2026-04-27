@@ -111,6 +111,7 @@
     <string name="fetch">Fetch</string>
     <string name="importing">Importing…</string>
     <string name="import_selected">Import selected (%d)</string>
+    <string name="apply_subscription_preview">Apply subscription</string>
     <string name="no_nodes_detected">No valid nodes detected</string>
     <string name="nodes_detected">%d nodes detected</string>
 
@@ -281,6 +282,7 @@
     <string name="subscription_fetch_failed">Subscription fetch failed</string>
     <string name="subscription_no_supported_links">Subscription did not contain any supported proxy links</string>
     <string name="subscription_empty">Subscription was empty</string>
+    <string name="subscription_preview_summary">Preview: %1$d new, %2$d updated, %3$d removed, %4$d parse errors</string>
     <string name="subscription_refresh_summary">Subscription refreshed: %1$d nodes</string>
     <string name="subscription_refresh_summary_with_errors">Subscription refreshed: %1$d nodes, %2$d parse errors</string>
     <string name="subscription_provider_fallback">Subscription</string>

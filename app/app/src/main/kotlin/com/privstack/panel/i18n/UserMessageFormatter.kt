@@ -87,6 +87,7 @@ class UserMessageFormatter @Inject constructor(
 
     fun formatConfigMutationNotice(info: ConfigMutationInfo): String? {
         val base = when (info.runtimeApply) {
+            "accepted" -> get(R.string.operation_accepted)
             "skipped_runtime_stopped" -> get(R.string.operation_saved_runtime_stopped)
             "failed" -> get(R.string.operation_saved_runtime_not_applied)
             else -> null

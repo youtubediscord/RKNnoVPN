@@ -308,15 +308,14 @@ func BuildPackageRoutingResolution(packages []string, alwaysDirectPackages []str
 }
 
 // AppRoutingEnv is the explicit UID/scope contract passed to the shell
-// firewall and DNS scripts. APP_UIDS is kept only as a legacy mirror.
+// firewall and DNS scripts.
 type AppRoutingEnv struct {
-	AppMode       string
-	AppUIDs       string
-	ProxyUIDs     string
-	DirectUIDs    string
-	BypassUIDs    string
-	DNSScope      string
-	LegacyDNSMode string
+	AppMode    string
+	ProxyUIDs  string
+	DirectUIDs string
+	BypassUIDs string
+	DNSScope   string
+	DNSMode    string
 }
 
 // BuildAppRoutingEnv resolves package names into unambiguous UID sets for
@@ -332,21 +331,19 @@ func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []s
 	switch appMode {
 	case "whitelist":
 		env.ProxyUIDs = selectedUIDs
-		env.AppUIDs = selectedUIDs
 		env.DNSScope = "uids"
-		env.LegacyDNSMode = "per_uid"
+		env.DNSMode = "per_uid"
 	case "blacklist":
 		env.DirectUIDs = selectedUIDs
-		env.AppUIDs = selectedUIDs
 		env.DNSScope = "all_except_uids"
-		env.LegacyDNSMode = "per_uid"
+		env.DNSMode = "per_uid"
 	case "off":
 		env.DNSScope = "off"
-		env.LegacyDNSMode = "off"
+		env.DNSMode = "off"
 	default:
 		env.AppMode = "all"
 		env.DNSScope = "all"
-		env.LegacyDNSMode = "all"
+		env.DNSMode = "all"
 	}
 
 	return env
@@ -358,10 +355,10 @@ func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []s
 func BuildRuntimeAppRoutingEnv(appMode string, packages []string, alwaysDirectPackages []string, routingMode string) AppRoutingEnv {
 	if strings.EqualFold(strings.TrimSpace(routingMode), "direct") {
 		return AppRoutingEnv{
-			AppMode:       "off",
-			BypassUIDs:    BuildBypassUIDs(alwaysDirectPackages),
-			DNSScope:      "off",
-			LegacyDNSMode: "off",
+			AppMode:    "off",
+			BypassUIDs: BuildBypassUIDs(alwaysDirectPackages),
+			DNSScope:   "off",
+			DNSMode:    "off",
 		}
 	}
 	return BuildAppRoutingEnv(appMode, packages, alwaysDirectPackages)

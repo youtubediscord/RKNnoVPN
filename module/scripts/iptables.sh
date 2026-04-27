@@ -95,7 +95,6 @@ validate_env() {
     fi
 
     PROXY_MODE="${PROXY_MODE:-tproxy}"
-    APP_UIDS="${APP_UIDS:-}"
     PROXY_UIDS="${PROXY_UIDS:-}"
     DIRECT_UIDS="${DIRECT_UIDS:-}"
     BYPASS_UIDS="${BYPASS_UIDS:-}"
@@ -105,13 +104,6 @@ validate_env() {
     CHAIN_PROXY_UIDS="${CHAIN_PROXY_UIDS:-}"
     DNS_MODE="${DNS_MODE:-per_uid}"
     DNS_SCOPE="${DNS_SCOPE:-}"
-
-    if [ -z "$PROXY_UIDS" ] && [ -z "$DIRECT_UIDS" ] && [ -n "$APP_UIDS" ]; then
-        case "$APP_MODE" in
-            whitelist) PROXY_UIDS="$APP_UIDS" ;;
-            blacklist) DIRECT_UIDS="$APP_UIDS" ;;
-        esac
-    fi
 
     if [ -z "$DNS_SCOPE" ]; then
         case "$DNS_MODE:$APP_MODE" in
@@ -170,7 +162,6 @@ ROUTE_TABLE=${ROUTE_TABLE}
 ROUTE_TABLE_V6=${ROUTE_TABLE_V6}
 CORE_GID=${CORE_GID}
 APP_MODE=${APP_MODE}
-APP_UIDS="${APP_UIDS}"
 PROXY_UIDS="${PROXY_UIDS}"
 DIRECT_UIDS="${DIRECT_UIDS}"
 BYPASS_UIDS="${BYPASS_UIDS}"

@@ -450,30 +450,19 @@ func (d *daemon) registerHandlers() {
 	d.ipcServer.Register("backend.applyDesiredState", d.handleBackendApplyDesiredState)
 	d.ipcServer.Register("diagnostics.health", d.handleDiagnosticsHealth)
 	d.ipcServer.Register("diagnostics.testNodes", d.handleDiagnosticsTestNodes)
-	d.ipcServer.Register("status", d.handleStatus)
-	d.ipcServer.Register("start", d.handleStart)
-	d.ipcServer.Register("stop", d.handleStop)
-	d.ipcServer.Register("reload", d.handleReload)
-	d.ipcServer.Register("network-reset", d.handleNetworkReset)
-	d.ipcServer.Register("network.reset", d.handleNetworkReset)
-	d.ipcServer.Register("health", d.handleHealth)
+	d.ipcServer.Register("profile.get", d.handleProfileGet)
+	d.ipcServer.Register("profile.apply", d.handleProfileApply)
+	d.ipcServer.Register("profile.importNodes", d.handleProfileImportNodes)
+	d.ipcServer.Register("profile.setActiveNode", d.handleProfileSetActiveNode)
+	d.ipcServer.Register("subscription.preview", d.handleSubscriptionPreview)
+	d.ipcServer.Register("subscription.refresh", d.handleSubscriptionRefresh)
 	d.ipcServer.Register("audit", d.handleAudit)
 	d.ipcServer.Register("app.list", d.handleAppList)
 	d.ipcServer.Register("app.resolveUid", d.handleResolveUID)
-	d.ipcServer.Register("panel-get", d.handlePanelGet)
-	d.ipcServer.Register("panel-set", d.handlePanelSet)
-	d.ipcServer.Register("config-get", d.handleConfigGet)
-	d.ipcServer.Register("config-set", d.handleConfigSet)
-	d.ipcServer.Register("config-set-many", d.handleConfigSetMany)
 	d.ipcServer.Register("config-list", d.handleConfigList)
 	d.ipcServer.Register("config-import", d.handleConfigImport)
-	d.ipcServer.Register("config.import", d.handleConfigImport)
-	d.ipcServer.Register("subscription-fetch", d.handleSubscriptionFetch)
-	d.ipcServer.Register("node-test", d.handleNodeTest)
-	d.ipcServer.Register("node.test", d.handleNodeTest)
 	d.ipcServer.Register("doctor", d.handleDoctor)
 	d.ipcServer.Register("self-check", d.handleSelfCheck)
-	d.ipcServer.Register("self.check", d.handleSelfCheck)
 	d.ipcServer.Register("logs", d.handleLogs)
 	d.ipcServer.Register("version", d.handleVersion)
 	d.ipcServer.Register("update-check", d.handleUpdateCheck)
@@ -484,73 +473,6 @@ func (d *daemon) registerHandlers() {
 // --------------------------------------------------------------------------
 // IPC handlers
 // --------------------------------------------------------------------------
-
-func (d *daemon) handleStatus(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	status := d.coreMgr.Status()
-	healthResult := d.healthMon.LastResult()
-	state := d.coreMgr.GetState()
-	if state == core.StateRunning || state == core.StateDegraded {
-		if d.shouldKickAsyncHealth(state, healthResult) {
-			go d.healthMon.RunOnce()
-		}
-	}
-	return d.buildStatusPayload(status, healthResult), nil
-}
-
-func (d *daemon) shouldKickAsyncHealth(state core.State, healthResult *health.HealthResult) bool {
-	if state != core.StateRunning && state != core.StateDegraded {
-		return false
-	}
-	now := time.Now()
-	d.metricsMu.Lock()
-	defer d.metricsMu.Unlock()
-
-	if healthResult != nil && now.Sub(healthResult.Timestamp) <= 10*time.Second {
-		return false
-	}
-	if !d.healthKick.IsZero() && now.Sub(d.healthKick) < 10*time.Second {
-		return false
-	}
-	d.healthKick = now
-	return true
-}
-
-func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	if err := d.syncRuntimeV2DesiredState(); err != nil {
-		return nil, d.rpcErrorFromRuntimeError(err)
-	}
-	status, err := d.runtimeV2.Start()
-	if err != nil {
-		return nil, d.rpcErrorFromRuntimeError(err)
-	}
-	return status, nil
-}
-
-func (d *daemon) handleStop(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	status, err := d.runtimeV2.Stop()
-	if err != nil {
-		return nil, d.rpcErrorFromRuntimeError(err)
-	}
-	return status, nil
-}
-
-func (d *daemon) handleReload(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	if err := d.reloadConfig(); err != nil {
-		return nil, d.rpcErrorFromRuntimeError(err)
-	}
-	return d.runtimeV2.Status(), nil
-}
-
-func (d *daemon) handleNetworkReset(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	if d.runtimeV2 == nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "v2 runtime is not initialized"}
-	}
-	status, err := d.runtimeV2.Reset()
-	if err != nil {
-		return nil, d.rpcErrorFromRuntimeError(err)
-	}
-	return status, nil
-}
 
 func (d *daemon) rpcErrorFromRuntimeError(err error) *ipc.RPCError {
 	var busy *runtimev2.OperationBusyError
@@ -565,13 +487,6 @@ func (d *daemon) rpcErrorFromRuntimeError(err error) *ipc.RPCError {
 		return &ipc.RPCError{Code: ipc.CodeConfigError, Message: err.Error()}
 	}
 	return &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
-}
-
-func (d *daemon) handleHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	// Run a one-shot health check via the real HealthMonitor.
-	healthResult := d.healthMon.RunOnce()
-	status := d.coreMgr.Status()
-	return d.buildStatusPayload(status, healthResult), nil
 }
 
 func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -943,203 +858,6 @@ func (d *daemon) handleResolveUID(params *json.RawMessage) (interface{}, *ipc.RP
 	}
 }
 
-func (d *daemon) handlePanelGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	d.mu.Lock()
-	panel := d.cfg.Panel
-	d.mu.Unlock()
-	return panel, nil
-}
-
-func (d *daemon) handlePanelSet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	if params == nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "params required: {\"panel\": {...}, \"reload\": true|false}",
-		}
-	}
-
-	var p struct {
-		Panel  config.PanelConfig `json:"panel"`
-		Reload bool               `json:"reload"`
-	}
-	if err := json.Unmarshal(*params, &p); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "invalid params: " + err.Error(),
-		}
-	}
-	if err := config.ValidatePanelConfig(p.Panel); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeConfigError,
-			Message: "validation failed: " + err.Error(),
-		}
-	}
-
-	runtimeWasRunning := d.runtimeIsRunning()
-	if err := d.applyPanelConfig(p.Panel, p.Reload); err != nil {
-		return nil, d.configApplyRPCError("panel-set", err)
-	}
-
-	return d.configMutationSuccess("panel-set", "ok", p.Reload, runtimeWasRunning && p.Reload, -1), nil
-}
-
-func (d *daemon) handleConfigGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	if params == nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "params required: {\"key\": \"...\"}",
-		}
-	}
-
-	var p struct {
-		Key string `json:"key"`
-	}
-	if err := json.Unmarshal(*params, &p); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "invalid params: " + err.Error(),
-		}
-	}
-	if p.Key == "panel" {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "panel storage moved to panel-get/panel-set",
-		}
-	}
-
-	d.mu.Lock()
-	data, err := json.Marshal(d.cfg)
-	d.mu.Unlock()
-	if err != nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
-	}
-
-	var full map[string]interface{}
-	json.Unmarshal(data, &full)
-
-	val, ok := full[p.Key]
-	if !ok {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: fmt.Sprintf("unknown config key: %s", p.Key),
-		}
-	}
-
-	return map[string]interface{}{"key": p.Key, "value": val}, nil
-}
-
-func (d *daemon) handleConfigSet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	if params == nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "params required: {\"key\": \"...\", \"value\": ...}",
-		}
-	}
-
-	var p struct {
-		Key   string          `json:"key"`
-		Value json.RawMessage `json:"value"`
-	}
-	if err := json.Unmarshal(*params, &p); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "invalid params: " + err.Error(),
-		}
-	}
-	if p.Key == "panel" {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "panel storage moved to panel-set",
-		}
-	}
-	if !isMutableConfigKey(p.Key) {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: fmt.Sprintf("unknown or immutable config key: %s", p.Key),
-		}
-	}
-
-	d.mu.Lock()
-	data, _ := json.Marshal(d.cfg)
-	d.mu.Unlock()
-	var full map[string]json.RawMessage
-	json.Unmarshal(data, &full)
-
-	full[p.Key] = p.Value
-
-	newCfg, rpcErr := d.buildPatchedConfig(full)
-	if rpcErr != nil {
-		return nil, rpcErr
-	}
-
-	if err := d.applyConfig(newCfg, false); err != nil {
-		return nil, d.configApplyRPCError("config-set", err)
-	}
-	return d.configMutationSuccess("config-set", "ok", false, false, 1), nil
-}
-
-func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	if params == nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "params required: {\"values\": {...}, \"reload\": true|false}",
-		}
-	}
-
-	var p struct {
-		Values map[string]json.RawMessage `json:"values"`
-		Reload bool                       `json:"reload"`
-	}
-	if err := json.Unmarshal(*params, &p); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "invalid params: " + err.Error(),
-		}
-	}
-	if len(p.Values) == 0 {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "values must not be empty",
-		}
-	}
-	if _, ok := p.Values["panel"]; ok {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "panel storage moved to panel-set",
-		}
-	}
-	for key := range p.Values {
-		if !isMutableConfigKey(key) {
-			return nil, &ipc.RPCError{
-				Code:    ipc.CodeInvalidParams,
-				Message: fmt.Sprintf("unknown or immutable config key: %s", key),
-			}
-		}
-	}
-
-	d.mu.Lock()
-	data, _ := json.Marshal(d.cfg)
-	d.mu.Unlock()
-	var full map[string]json.RawMessage
-	json.Unmarshal(data, &full)
-
-	for key, value := range p.Values {
-		full[key] = value
-	}
-
-	newCfg, rpcErr := d.buildPatchedConfig(full)
-	if rpcErr != nil {
-		return nil, rpcErr
-	}
-
-	runtimeWasRunning := d.runtimeIsRunning()
-	if err := d.applyConfig(newCfg, p.Reload); err != nil {
-		return nil, d.configApplyRPCError("config-set-many", err)
-	}
-
-	return d.configMutationSuccess("config-set-many", "ok", p.Reload, runtimeWasRunning && p.Reload, len(p.Values)), nil
-}
-
 func (d *daemon) handleConfigList(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	d.mu.Lock()
 	data, err := json.Marshal(d.cfg)
@@ -1190,7 +908,7 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 	if _, ok := raw["schema_version"]; !ok {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
-			Message: "schema_version is required for full config import; use config-set/config-set-many for partial updates",
+			Message: "schema_version is required for full config import; use profile.apply for user intent updates",
 		}
 	}
 
@@ -1269,50 +987,6 @@ func isFullConfigImportKey(key string) bool {
 	}
 }
 
-func isMutableConfigKey(key string) bool {
-	if key == "schema_version" || key == "panel" {
-		return false
-	}
-	return isFullConfigImportKey(key)
-}
-
-func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Config, *ipc.RPCError) {
-	for key := range full {
-		if !isFullConfigImportKey(key) {
-			return nil, &ipc.RPCError{
-				Code:    ipc.CodeInvalidParams,
-				Message: fmt.Sprintf("unknown config key: %s", key),
-			}
-		}
-	}
-	full["schema_version"] = json.RawMessage(strconv.Itoa(config.CurrentSchemaVersion))
-	patched, err := json.Marshal(full)
-	if err != nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
-	}
-
-	newCfg := config.DefaultConfig()
-	if err := json.Unmarshal(patched, newCfg); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeConfigError,
-			Message: "invalid value: " + err.Error(),
-		}
-	}
-	newCfg.Migrate()
-	d.mu.Lock()
-	newCfg.Panel = d.cfg.Panel
-	d.mu.Unlock()
-
-	if err := newCfg.Validate(); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeConfigError,
-			Message: "validation failed: " + err.Error(),
-		}
-	}
-
-	return newCfg, nil
-}
-
 func (d *daemon) configApplyRPCError(action string, err error) *ipc.RPCError {
 	var busy *runtimev2.OperationBusyError
 	if errors.As(err, &busy) {
@@ -1335,17 +1009,24 @@ func (d *daemon) runtimeIsRunning() bool {
 	return state == core.StateRunning || state == core.StateDegraded
 }
 
-func (d *daemon) configMutationSuccess(action string, status string, reload bool, runtimeApplied bool, updated int) map[string]interface{} {
-	runtimeApply := configRuntimeApplyStatus(reload, runtimeApplied)
+func (d *daemon) configMutationSuccess(action string, status string, reload bool, runtimeWasRunning bool, updated int) map[string]interface{} {
+	runtimeApply := configRuntimeApplyStatus(reload, runtimeWasRunning)
+	runtimeApplied := runtimeApply == "applied"
+	accepted := runtimeApply == "accepted"
+	if accepted {
+		status = "accepted"
+	}
 	operation := configMutationOperation(action, status, true, reload, runtimeApplied, runtimeApply, updated, "", "", nil)
 	result := map[string]interface{}{
-		"ok":              true,
-		"status":          status,
-		"reload":          reload,
-		"config_saved":    true,
-		"runtime_applied": runtimeApplied,
-		"runtime_apply":   runtimeApply,
-		"operation":       operation,
+		"ok":               true,
+		"status":           status,
+		"reload":           reload,
+		"config_saved":     true,
+		"runtime_applied":  runtimeApplied,
+		"runtime_apply":    runtimeApply,
+		"accepted":         accepted,
+		"operation_active": accepted,
+		"operation":        operation,
 	}
 	if updated >= 0 {
 		result["updated"] = updated
@@ -1356,10 +1037,10 @@ func (d *daemon) configMutationSuccess(action string, status string, reload bool
 	return result
 }
 
-func configRuntimeApplyStatus(reload bool, runtimeApplied bool) string {
+func configRuntimeApplyStatus(reload bool, runtimeWasRunning bool) string {
 	switch {
-	case runtimeApplied:
-		return "applied"
+	case reload && runtimeWasRunning:
+		return "accepted"
 	case reload:
 		return "skipped_runtime_stopped"
 	default:
@@ -1441,14 +1122,16 @@ func configMutationOperation(action string, status string, saved bool, reload bo
 		})
 	}
 	operation := map[string]interface{}{
-		"type":           "config-mutation",
-		"action":         action,
-		"status":         status,
-		"configSaved":    saved,
-		"runtimeApplied": runtimeApplied,
-		"runtimeApply":   runtimeApply,
-		"rollback":       rollback,
-		"stages":         stages,
+		"type":            "config-mutation",
+		"action":          action,
+		"status":          status,
+		"configSaved":     saved,
+		"runtimeApplied":  runtimeApplied,
+		"runtimeApply":    runtimeApply,
+		"accepted":        runtimeApply == "accepted",
+		"operationActive": runtimeApply == "accepted",
+		"rollback":        rollback,
+		"stages":          stages,
 	}
 	if updated >= 0 {
 		operation["updated"] = updated
@@ -1787,12 +1470,11 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"ROUTE_TABLE":       "2023",
 		"ROUTE_TABLE_V6":    "2024",
 		"APP_MODE":          appRouting.AppMode,
-		"APP_UIDS":          appRouting.AppUIDs,
 		"PROXY_UIDS":        appRouting.ProxyUIDs,
 		"DIRECT_UIDS":       appRouting.DirectUIDs,
 		"BYPASS_UIDS":       appRouting.BypassUIDs,
 		"DNS_SCOPE":         appRouting.DNSScope,
-		"DNS_MODE":          appRouting.LegacyDNSMode,
+		"DNS_MODE":          appRouting.DNSMode,
 		"PROXY_MODE":        "tproxy",
 		"SHARING_MODE":      cfg.SharingModeEnv(),
 		"SHARING_IFACES":    cfg.SharingInterfacesEnv(),
@@ -1818,7 +1500,6 @@ func runtimeReloadNeedsFullRestart(oldCfg *config.Config, newCfg *config.Config,
 		"ROUTE_TABLE",
 		"ROUTE_TABLE_V6",
 		"APP_MODE",
-		"APP_UIDS",
 		"PROXY_UIDS",
 		"DIRECT_UIDS",
 		"BYPASS_UIDS",
@@ -1933,70 +1614,43 @@ func portProtectionOutputContains(output string, protocol string, port int) bool
 	return false
 }
 
-func (d *daemon) handleSubscriptionFetch(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	if params == nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "params required: {\"url\": \"https://...\"}",
-		}
+type subscriptionHTTPResult struct {
+	Status  int
+	Body    string
+	Headers map[string]string
+}
+
+func fetchSubscriptionURL(rawURL string) (subscriptionHTTPResult, error) {
+	var result subscriptionHTTPResult
+	if rawURL == "" {
+		return result, fmt.Errorf("url is required")
+	}
+	if err := validateSubscriptionFetchURL(rawURL); err != nil {
+		return result, err
 	}
 
-	var p struct {
-		URL string `json:"url"`
-	}
-	if err := json.Unmarshal(*params, &p); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "invalid params: " + err.Error(),
-		}
-	}
-	if p.URL == "" {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "url is required",
-		}
-	}
-	if err := validateSubscriptionFetchURL(p.URL); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: err.Error(),
-		}
-	}
-
-	req, err := http.NewRequest(http.MethodGet, p.URL, nil)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "invalid URL: " + err.Error(),
-		}
+		return result, fmt.Errorf("invalid URL: %w", err)
 	}
-	req.Header.Set("User-Agent", "RKNnoVPN-subscription-fetch/1.0")
+	req.Header.Set("User-Agent", "RKNnoVPN-subscription/2.0")
 
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = subscriptionFetchDialContext
 	client := &http.Client{Timeout: 30 * time.Second, Transport: transport}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInternalError,
-			Message: "subscription fetch failed: " + err.Error(),
-		}
+		return result, fmt.Errorf("subscription fetch failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	const maxSubscriptionBody = 4 * 1024 * 1024
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubscriptionBody+1))
 	if err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInternalError,
-			Message: "subscription read failed: " + err.Error(),
-		}
+		return result, fmt.Errorf("subscription read failed: %w", err)
 	}
 	if len(body) > maxSubscriptionBody {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "subscription response is too large",
-		}
+		return result, fmt.Errorf("subscription response is too large")
 	}
 
 	headers := make(map[string]string, len(resp.Header))
@@ -2007,20 +1661,13 @@ func (d *daemon) handleSubscriptionFetch(params *json.RawMessage) (interface{}, 
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInternalError,
-			Message: fmt.Sprintf("subscription fetch returned HTTP %d", resp.StatusCode),
-			Data: map[string]interface{}{
-				"status":  resp.StatusCode,
-				"headers": headers,
-			},
-		}
+		return subscriptionHTTPResult{Status: resp.StatusCode, Headers: headers}, fmt.Errorf("subscription fetch returned HTTP %d", resp.StatusCode)
 	}
 
-	return map[string]interface{}{
-		"status":  resp.StatusCode,
-		"body":    string(body),
-		"headers": headers,
+	return subscriptionHTTPResult{
+		Status:  resp.StatusCode,
+		Body:    string(body),
+		Headers: headers,
 	}, nil
 }
 
@@ -2101,123 +1748,6 @@ func isDisallowedSubscriptionIP(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() ||
 		ip.IsInterfaceLocalMulticast() ||
 		ip.IsMulticast()
-}
-
-func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	var p struct {
-		NodeIDs   []string `json:"node_ids"`
-		URL       string   `json:"url"`
-		TimeoutMS int      `json:"timeout_ms"`
-	}
-	if params != nil {
-		if err := json.Unmarshal(*params, &p); err != nil {
-			return nil, &ipc.RPCError{
-				Code:    ipc.CodeInvalidParams,
-				Message: "invalid params: " + err.Error(),
-			}
-		}
-	}
-	if p.TimeoutMS <= 0 {
-		p.TimeoutMS = 5000
-	}
-	timeout := time.Duration(p.TimeoutMS) * time.Millisecond
-	requested := make(map[string]bool, len(p.NodeIDs))
-	for _, id := range p.NodeIDs {
-		requested[id] = true
-	}
-
-	d.mu.Lock()
-	cfg := d.cfg
-	profiles := config.ProfilesFromPanelNodes(cfg)
-	if len(profiles) == 0 {
-		profile := cfg.ResolveProfile()
-		if profile.Address != "" {
-			profile.Tag = "proxy"
-			profiles = []*config.NodeProfile{profile}
-		}
-	}
-	apiPort := cfg.Proxy.APIPort
-	testURL := strings.TrimSpace(p.URL)
-	if testURL == "" {
-		testURL = strings.TrimSpace(cfg.Health.URL)
-	}
-	d.mu.Unlock()
-	if testURL == "" {
-		testURL = "https://www.gstatic.com/generate_204"
-	}
-
-	results := make([]map[string]interface{}, 0, len(profiles))
-	for _, profile := range profiles {
-		if len(requested) > 0 && !requested[profile.ID] {
-			continue
-		}
-		result := map[string]interface{}{
-			"id":         profile.ID,
-			"name":       firstNonEmpty(profile.Name, profile.Tag, profile.Address),
-			"tag":        profile.Tag,
-			"server":     profile.Address,
-			"port":       profile.Port,
-			"protocol":   profile.Protocol,
-			"url_status": "not_run",
-			"verdict":    "unknown",
-		}
-
-		tcpMS, tcpErr := testTCPConnect(profile.Address, profile.Port, timeout)
-		if tcpErr != nil {
-			result["tcp_status"] = "fail"
-			result["tcp_error"] = tcpErr.Error()
-		} else {
-			result["tcp_status"] = "ok"
-			result["tcp_ms"] = tcpMS
-		}
-
-		var urlMS int64
-		var statusCode int
-		var urlErr error
-		if apiPort > 0 {
-			urlMS, statusCode, urlErr = testClashDelay(apiPort, profile.Tag, testURL, p.TimeoutMS)
-			result["throughput_status"] = "latency_only"
-		} else if len(profiles) == 1 {
-			var metrics urlProbeMetrics
-			metrics, urlErr = testTransparentURLProbe(cfg, testURL, p.TimeoutMS)
-			urlMS = metrics.LatencyMS
-			statusCode = metrics.StatusCode
-			if metrics.ResponseBytes > 0 {
-				result["response_bytes"] = metrics.ResponseBytes
-			}
-			if metrics.ThroughputBps > 0 {
-				result["throughput_bps"] = metrics.ThroughputBps
-				result["throughput_status"] = "ok"
-			} else {
-				result["throughput_status"] = "latency_only"
-			}
-		} else {
-			urlErr = fmt.Errorf("api_disabled")
-			result["throughput_status"] = "unavailable"
-		}
-		if urlErr != nil {
-			result["url_status"] = "fail"
-			result["verdict"] = "unusable"
-			result["url_error"] = urlErr.Error()
-			if errorClass := classifyURLTestError(urlErr); errorClass != "" {
-				result["url_error_class"] = errorClass
-			}
-		} else {
-			result["url_status"] = "ok"
-			result["verdict"] = "usable"
-			result["url_ms"] = urlMS
-			result["status"] = statusCode
-		}
-		if result["tcp_status"] == "fail" && result["url_status"] != "ok" {
-			result["verdict"] = "unusable"
-		}
-		results = append(results, result)
-	}
-
-	return map[string]interface{}{
-		"url":     testURL,
-		"results": results,
-	}, nil
 }
 
 func testTCPConnect(host string, port int, timeout time.Duration) (int64, error) {
@@ -2633,9 +2163,6 @@ func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCEr
 		"panel_min_version":        Version,
 		"capabilities":             supportedCapabilities(),
 		"supported_methods":        supportedRPCMethods(),
-		// Keep legacy keys for backward compatibility.
-		"version": Version,
-		"go":      "1.22+",
 	}, nil
 }
 
@@ -2697,11 +2224,21 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 
 	// Default paths if not specified.
 	updateDir := filepath.Join(d.dataDir, "update")
+	expectedModulePath := filepath.Join(updateDir, "module.zip")
+	expectedApkPath := filepath.Join(updateDir, "panel.apk")
 	if p.ModulePath == "" {
-		p.ModulePath = filepath.Join(updateDir, "module.zip")
+		p.ModulePath = expectedModulePath
 	}
 	if p.ApkPath == "" {
-		p.ApkPath = filepath.Join(updateDir, "panel.apk")
+		p.ApkPath = expectedApkPath
+	}
+	p.ModulePath = filepath.Clean(p.ModulePath)
+	p.ApkPath = filepath.Clean(p.ApkPath)
+	if p.ModulePath != filepath.Clean(expectedModulePath) || p.ApkPath != filepath.Clean(expectedApkPath) {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "update-install only accepts verified artifacts from the canonical update directory",
+		}
 	}
 
 	moduleExists := false
@@ -2728,6 +2265,30 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
 			Message: "update artifacts are not checksum-verified: " + err.Error(),
+		}
+	}
+	verifiedManifest, err := updater.ReadVerifiedUpdateManifest(updateDir)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "update artifacts are not manifest-verified: " + err.Error(),
+		}
+	}
+	modulePreflight, err := updater.PreflightModuleUpdate(p.ModulePath, d.dataDir)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "module update preflight failed: " + err.Error(),
+		}
+	}
+	if modulePreflight.Version != updater.NormalizeVersionTag(verifiedManifest.LatestVersion) {
+		return nil, &ipc.RPCError{
+			Code: ipc.CodeInvalidParams,
+			Message: fmt.Sprintf(
+				"module version %s does not match verified update version %s",
+				modulePreflight.Version,
+				updater.NormalizeVersionTag(verifiedManifest.LatestVersion),
+			),
 		}
 	}
 
@@ -2841,96 +2402,6 @@ func (d *daemon) restoreCurrentRuntimeAfterFailedUpdate() {
 	}
 	d.rescueMgr.Reset()
 	d.startSubsystems()
-}
-
-func (d *daemon) buildStatusPayload(status *core.StatusInfo, healthResult *health.HealthResult) map[string]interface{} {
-	activeNodeID, activeNodeName, activeNodeProtocol, activeNodeMode := d.activePanelNode()
-	if status == nil {
-		status = &core.StatusInfo{}
-	}
-	state := d.coreMgr.GetState()
-	d.mu.Lock()
-	cfg := d.cfg
-	d.mu.Unlock()
-	apiPort := cfg.Proxy.APIPort
-	panelInbounds := cfg.ResolvePanelInbounds()
-	traffic := d.buildTrafficPayload(state, apiPort)
-	latencyMs, outboundURLCheck := d.refreshOutboundURLProbe(state, cfg, apiPort, 2500)
-	if healthResult != nil && (state == core.StateRunning || state == core.StateDegraded) && healthResult.Overall {
-		if healthResult.Checks == nil {
-			healthResult.Checks = make(map[string]health.CheckResult)
-		}
-		healthResult.Checks["outbound_url"] = outboundURLCheck
-	}
-	egressIP := d.cachedEgressIP(state, panelInbounds.HTTPPort)
-	healthPayload := buildHealthPayload(state, healthResult, outboundURLCheck.Pass || d.hasRecentEgress())
-	connectionState := mapCoreStateToConnectionState(status.State)
-	if connectionState == "CONNECTED" {
-		if healthResult == nil {
-			connectionState = "CONNECTING"
-		} else if operational, _ := healthPayload["operationalHealthy"].(bool); !operational {
-			connectionState = "ERROR"
-		}
-	}
-
-	return map[string]interface{}{
-		"state":                connectionState,
-		"active_node_id":       activeNodeID,
-		"active_node_name":     activeNodeName,
-		"active_node_protocol": activeNodeProtocol,
-		"active_node_mode":     activeNodeMode,
-		"egress_ip":            egressIP,
-		"country_flag":         nil,
-		"uptime":               uptimeSeconds(status.StartedAt),
-		"traffic":              traffic,
-		"latency_ms":           latencyMs,
-		"health":               healthPayload,
-
-		// Keep the legacy fields for older clients and debugging tools.
-		"pid":             status.PID,
-		"active_profile":  status.ActiveProfile,
-		"started_at":      status.StartedAt,
-		"uptime_legacy":   status.Uptime,
-		"health_fails":    d.healthMon.Failures(),
-		"rescue_attempts": d.rescueMgr.Attempts(),
-	}
-}
-
-func (d *daemon) activePanelNode() (string, string, string, string) {
-	d.mu.Lock()
-	panel := d.cfg.Panel
-	d.mu.Unlock()
-
-	activeID := panel.ActiveNodeID
-	type nodeMeta struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Protocol string `json:"protocol"`
-	}
-	for _, raw := range panel.Nodes {
-		var node nodeMeta
-		if err := json.Unmarshal(raw, &node); err != nil {
-			continue
-		}
-		if node.ID == activeID {
-			return node.ID, node.Name, node.Protocol, "manual"
-		}
-	}
-
-	if len(panel.Nodes) > 0 {
-		if activeID == "" && len(panel.Nodes) > 1 {
-			return "", "Auto", "selector", "auto_selector"
-		}
-		var first nodeMeta
-		if err := json.Unmarshal(panel.Nodes[0], &first); err == nil {
-			return first.ID, first.Name, first.Protocol, "single_node"
-		}
-	}
-
-	if activeID != "" {
-		return activeID, "", "", "manual_missing"
-	}
-	return "", "", "", "none"
 }
 
 func (d *daemon) buildTrafficPayload(state core.State, apiPort int) map[string]interface{} {
@@ -3203,28 +2674,6 @@ func fetchIPFromEndpoint(client *http.Client, endpoint string) (string, error) {
 		return text, nil
 	}
 	return "", fmt.Errorf("%s returned invalid ip %q", endpoint, text)
-}
-
-func mapCoreStateToConnectionState(state string) string {
-	switch state {
-	case "running":
-		return "CONNECTED"
-	case "starting", "stopping":
-		return "CONNECTING"
-	case "degraded", "rescue":
-		return "ERROR"
-	case "stopped":
-		return "DISCONNECTED"
-	default:
-		return "UNKNOWN"
-	}
-}
-
-func uptimeSeconds(startedAt time.Time) int64 {
-	if startedAt.IsZero() {
-		return 0
-	}
-	return int64(time.Since(startedAt).Seconds())
 }
 
 func buildHealthPayload(state core.State, result *health.HealthResult, egressReady bool) map[string]interface{} {

@@ -24,30 +24,19 @@ var commands = map[string]string{
 	"backend.applyDesiredState": "Apply persisted v2 desired backend state",
 	"diagnostics.health":        "Run v2 health diagnostics",
 	"diagnostics.testNodes":     "Run v2 node probes (TCP direct, tunnel delay, DNS bootstrap)",
-	"status":                    "Get proxy status",
-	"start":                     "Start proxy",
-	"stop":                      "Stop proxy",
-	"reload":                    "Reload config and restart proxy",
-	"network-reset":             "Force-remove PrivStack iptables/DNS/routing rules",
-	"network.reset":             "Alias for network-reset",
-	"health":                    "Get health check status",
 	"audit":                     "Run privacy/security audit",
 	"doctor":                    "Collect redacted diagnostics for support",
 	"self-check":                "Return concise health/privacy/compatibility summary",
-	"self.check":                "Alias for self-check",
 	"app.list":                  "List installed apps known to the daemon",
 	"app.resolveUid":            "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
-	"panel-get":                 "Get APK-facing panel state",
-	"panel-set":                 "Set APK-facing panel state atomically (use PRIVSTACK_STDIN_PARAMS=1 for stdin payloads)",
-	"config-get":                "Get config value: privctl config-get '{\"key\":\"proxy\"}'",
-	"config-set":                "Set config value: privctl config-set '{\"key\":\"proxy\",\"value\":{...}}'",
-	"config-set-many":           "Set multiple config values atomically: privctl config-set-many '{\"values\":{...},\"reload\":true}'",
+	"profile.get":               "Get daemon-owned profile document",
+	"profile.apply":             "Validate, persist, and apply a profile document",
+	"profile.importNodes":       "Import already-parsed nodes into the daemon profile",
+	"profile.setActiveNode":     "Select a live profile node: privctl profile.setActiveNode '{\"nodeId\":\"...\"}'",
+	"subscription.preview":      "Fetch and preview subscription merge without writing",
+	"subscription.refresh":      "Fetch subscription and apply merge through profile.apply",
 	"config-list":               "List config sections",
 	"config-import":             "Import full config: privctl config-import '{...}'",
-	"config.import":             "Alias for config-import",
-	"subscription-fetch":        "Fetch subscription URL via daemon network access",
-	"node-test":                 "Test saved nodes: TCP connect + URL delay via sing-box",
-	"node.test":                 "Alias for node-test",
 	"logs":                      "Get recent log lines: privctl logs '{\"lines\":100}'",
 	"version":                   "Get daemon version",
 	"update-check":              "Check for updates from GitHub Releases",
@@ -198,10 +187,11 @@ func printUsage() {
 	order := []string{
 		"backend.status", "backend.start", "backend.stop", "backend.restart", "backend.reset", "backend.applyDesiredState",
 		"diagnostics.health", "diagnostics.testNodes",
-		"status", "start", "stop", "reload", "network-reset", "network.reset", "health", "audit", "doctor", "self-check", "self.check",
+		"audit", "doctor", "self-check",
 		"app.list", "app.resolveUid",
-		"panel-get", "panel-set",
-		"config-get", "config-set", "config-set-many", "config-list", "config-import", "config.import", "subscription-fetch", "node-test", "node.test",
+		"profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode",
+		"subscription.preview", "subscription.refresh",
+		"config-list", "config-import",
 		"logs", "version",
 		"update-check", "update-download", "update-install",
 	}
@@ -215,16 +205,16 @@ func printUsage() {
 	fmt.Printf("  PRIVSTACK_SOCKET  daemon socket path (default: %s)\n", defaultSocket)
 	fmt.Println()
 	fmt.Println("Examples:")
-	fmt.Println("  privctl status")
-	fmt.Println("  privctl start")
+	fmt.Println("  privctl backend.status")
+	fmt.Println("  privctl backend.start")
 	fmt.Println("  privctl audit")
 	fmt.Println("  privctl doctor")
 	fmt.Println("  privctl self-check")
-	fmt.Println("  printf '{\"panel\":{\"id\":\"default\",\"name\":\"Default\"},\"reload\":false}\\n' | PRIVSTACK_STDIN_PARAMS=1 privctl panel-set")
+	fmt.Println("  privctl profile.get")
+	fmt.Println("  privctl profile.setActiveNode '{\"nodeId\":\"node-1\"}'")
+	fmt.Println("  privctl subscription.preview '{\"url\":\"https://example.com/sub\"}'")
 	fmt.Println("  privctl app.resolveUid '{\"uid\":10123}'")
-	fmt.Println("  privctl config-get '{\"key\":\"proxy\"}'")
-	fmt.Println("  privctl config-set '{\"key\":\"autostart\",\"value\":false}'")
-	fmt.Println("  privctl node-test '{\"url\":\"https://www.gstatic.com/generate_204\"}'")
+	fmt.Println("  privctl diagnostics.testNodes '{\"url\":\"https://www.gstatic.com/generate_204\"}'")
 	fmt.Println("  privctl logs '{\"lines\":100}'")
 }
 

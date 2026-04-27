@@ -32,7 +32,7 @@ func TestNewResponseWrapsResultEnvelope(t *testing.T) {
 
 func TestNewResponsePrefersExplicitOperationEnvelope(t *testing.T) {
 	activeOperation := map[string]interface{}{"kind": "start"}
-	configOperation := map[string]interface{}{"type": "config-mutation", "action": "panel-set"}
+	configOperation := map[string]interface{}{"type": "profile-apply", "action": "profile.apply"}
 	resp := NewResponse(8, map[string]interface{}{
 		"activeOperation": activeOperation,
 		"operation":       configOperation,

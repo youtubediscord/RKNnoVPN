@@ -354,7 +354,6 @@ write_install_manifest() {
         module/customize.sh \
         module/scripts/dns.sh \
         module/scripts/iptables.sh \
-        module/scripts/net_handler.sh \
         module/scripts/rescue_reset.sh \
         module/scripts/routing.sh \
         module/scripts/lib/privstack_env.sh \

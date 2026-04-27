@@ -111,6 +111,7 @@
     <string name="fetch">Загрузить</string>
     <string name="importing">Импорт…</string>
     <string name="import_selected">Импорт выбранных (%d)</string>
+    <string name="apply_subscription_preview">Применить подписку</string>
     <string name="no_nodes_detected">Серверы не найдены</string>
     <string name="nodes_detected">Найдено серверов: %d</string>
 
@@ -281,6 +282,7 @@
     <string name="subscription_fetch_failed">Не удалось загрузить подписку</string>
     <string name="subscription_no_supported_links">В подписке нет поддерживаемых proxy-ссылок</string>
     <string name="subscription_empty">Подписка оказалась пустой</string>
+    <string name="subscription_preview_summary">Предпросмотр: новых %1$d, обновлённых %2$d, удалённых %3$d, ошибок разбора %4$d</string>
     <string name="subscription_refresh_summary">Подписка обновлена: узлов %1$d</string>
     <string name="subscription_refresh_summary_with_errors">Подписка обновлена: узлов %1$d, ошибок разбора %2$d</string>
     <string name="subscription_provider_fallback">Подписка</string>

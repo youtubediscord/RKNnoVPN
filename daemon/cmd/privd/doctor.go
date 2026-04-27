@@ -17,10 +17,11 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
+	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
-const controlProtocolVersion = 4
+const controlProtocolVersion = 5
 
 type doctorCommandResult struct {
 	Command string   `json:"command"`
@@ -88,6 +89,7 @@ type doctorSummary struct {
 	PrivacyIssues       []string                `json:"privacyIssues,omitempty"`
 	Compatibility       doctorCompatSummary     `json:"compatibility"`
 	Runtime             doctorRuntimeSummary    `json:"runtime"`
+	Profile             doctorProfileSummary    `json:"profile"`
 	Routing             doctorRoutingSummary    `json:"routing"`
 	NodeTests           doctorNodeTestSummary   `json:"nodeTests"`
 	PackageResolution   doctorPackageResolution `json:"packageResolution"`
@@ -111,6 +113,21 @@ type doctorRuntimeSummary struct {
 	LastCode         string `json:"lastCode,omitempty"`
 	RollbackApplied  bool   `json:"rollbackApplied,omitempty"`
 	RuntimeReportAge string `json:"runtimeReportAge,omitempty"`
+}
+
+type doctorProfileSummary struct {
+	SchemaVersion          int    `json:"schemaVersion"`
+	DesiredGeneration      int64  `json:"desiredGeneration"`
+	AppliedGeneration      int64  `json:"appliedGeneration"`
+	ActiveNodeMode         string `json:"activeNodeMode"`
+	ActiveNodeID           string `json:"activeNodeId,omitempty"`
+	NodeCount              int    `json:"nodeCount"`
+	LiveNodeCount          int    `json:"liveNodeCount"`
+	StaleNodeCount         int    `json:"staleNodeCount"`
+	SubscriptionCount      int    `json:"subscriptionCount"`
+	StaleSubscriptionNodes int    `json:"staleSubscriptionNodes"`
+	LastOperation          string `json:"lastOperation,omitempty"`
+	LastOperationStatus    string `json:"lastOperationStatus,omitempty"`
 }
 
 type doctorNodeTestSummary struct {
@@ -180,8 +197,10 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	healthResult := d.healthMon.RunOnce()
 	healthSnapshot := d.buildRuntimeV2HealthSnapshot(healthResult, true)
 	var backendStatus interface{}
+	var runtimeStatus runtimev2.Status
 	if d.runtimeV2 != nil {
-		backendStatus = d.runtimeV2.Status()
+		runtimeStatus = d.runtimeV2.Status()
+		backendStatus = runtimeStatus
 	}
 	moduleVersion := readModuleVersion()
 	ports := doctorPortStatuses(cfg)
@@ -197,6 +216,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	singBoxCheck := d.singBoxCheck(singBoxPath, renderedConfigPath, lines)
 	releaseIntegrity := doctorReleaseIntegrityReport(dataDir)
 	routingSummary := doctorRoutingSummaryFromConfig(cfg)
+	profileSummary := doctorProfileSummaryFromConfig(cfg, runtimeStatus)
 	packageResolution := doctorPackageResolutionFromConfig(cfg)
 	versions := map[string]interface{}{
 		"daemon":                   Version,
@@ -213,7 +233,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 
 	report := map[string]interface{}{
 		"generated_at": time.Now().Format(time.RFC3339),
-		"summary":      buildDoctorSummary(healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, routingSummary, packageResolution),
+		"summary":      buildDoctorSummary(healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, profileSummary, routingSummary, packageResolution),
 		"versions":     versions,
 		"device":       d.doctorDevice(lines),
 		"paths": map[string]doctorFileStatus{
@@ -240,6 +260,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 		"ports":               ports,
 		"port_conflicts":      portConflicts,
 		"routing":             routingSummary,
+		"profile":             profileSummary,
 		"package_resolution":  packageResolution,
 		"netstack":            netstackReport,
 		"netstack_runtime":    netstackRuntimeReport,
@@ -289,6 +310,10 @@ func (d *daemon) buildSelfCheckSummary(lines int) (doctorSummary, error) {
 	if cfg != nil {
 		nodeResults = d.testNodeProbesV2(cfg.Health.URL, 2500, nil)
 	}
+	var runtimeStatus runtimev2.Status
+	if d.runtimeV2 != nil {
+		runtimeStatus = d.runtimeV2.Status()
+	}
 	return buildDoctorSummary(
 		healthSnapshot,
 		netstackReport.Leftovers,
@@ -299,6 +324,7 @@ func (d *daemon) buildSelfCheckSummary(lines int) (doctorSummary, error) {
 		readModuleVersion(),
 		d.singBoxCheck(singBoxPath, renderedConfigPath, lines),
 		doctorReleaseIntegrityReport(dataDir),
+		doctorProfileSummaryFromConfig(cfg, runtimeStatus),
 		doctorRoutingSummaryFromConfig(cfg),
 		doctorPackageResolutionFromConfig(cfg),
 	), nil
@@ -371,6 +397,7 @@ func buildDoctorSummary(
 	moduleVersion map[string]string,
 	singBoxCheck doctorCommandResult,
 	releaseIntegrity doctorReleaseIntegrity,
+	profileSummary doctorProfileSummary,
 	routingSummary doctorRoutingSummary,
 	packageResolution doctorPackageResolution,
 ) doctorSummary {
@@ -390,6 +417,7 @@ func buildDoctorSummary(
 			SingBoxCheckOK:         singBoxCheck.Error == "",
 		},
 		Runtime:           summarizeDoctorRuntime(healthSnapshot),
+		Profile:           profileSummary,
 		Routing:           routingSummary,
 		NodeTests:         summarizeDoctorNodeTests(nodeResults),
 		PackageResolution: packageResolution,
@@ -594,6 +622,50 @@ func doctorRoutingSummaryFromConfig(cfg *config.Config) doctorRoutingSummary {
 	return summary
 }
 
+func doctorProfileSummaryFromConfig(cfg *config.Config, status runtimev2.Status) doctorProfileSummary {
+	if cfg == nil {
+		return doctorProfileSummary{ActiveNodeMode: "config_unavailable"}
+	}
+	doc := profiledoc.FromConfig(cfg)
+	summary := doctorProfileSummary{
+		SchemaVersion:     doc.SchemaVersion,
+		DesiredGeneration: status.AppliedState.Generation,
+		AppliedGeneration: status.AppliedState.Generation,
+		ActiveNodeMode:    "auto",
+		ActiveNodeID:      doc.ActiveNodeID,
+		NodeCount:         len(doc.Nodes),
+		SubscriptionCount: len(doc.Subscriptions),
+	}
+	if status.ActiveOperation != nil {
+		summary.DesiredGeneration = status.ActiveOperation.Generation
+	}
+	if status.DesiredState.ActiveProfileID != "" {
+		summary.ActiveNodeID = status.DesiredState.ActiveProfileID
+	}
+	if doc.ActiveNodeID != "" {
+		summary.ActiveNodeMode = "manual"
+	}
+	for _, node := range doc.Nodes {
+		if node.Stale {
+			summary.StaleNodeCount++
+			if node.Source.Type == "SUBSCRIPTION" {
+				summary.StaleSubscriptionNodes++
+			}
+		} else {
+			summary.LiveNodeCount++
+		}
+	}
+	if status.LastOperation != nil {
+		summary.LastOperation = string(status.LastOperation.Kind)
+		if status.LastOperation.Succeeded {
+			summary.LastOperationStatus = "ok"
+		} else {
+			summary.LastOperationStatus = "failed"
+		}
+	}
+	return summary
+}
+
 func doctorPackageResolutionFromConfig(cfg *config.Config) doctorPackageResolution {
 	if cfg == nil {
 		return doctorPackageResolution{Mode: "config_unavailable"}
@@ -766,7 +838,7 @@ func supportedCapabilities() []string {
 		"backend.reset.warnings.v1",
 		"config.import.v2",
 		"config.mutation.envelope.v1",
-		"config.schema.v4",
+		"config.schema.v5",
 		"diagnostics.bundle.v2",
 		"diagnostics.health.v2",
 		"diagnostics.testNodes.v2",
@@ -774,9 +846,12 @@ func supportedCapabilities() []string {
 		"netstack.report.v1",
 		"netstack.runtime.verify.v1",
 		"netstack.verify.v1",
-		"node-test.tcp-direct",
-		"node-test.url",
-		"panel.nodes",
+		"diagnostics.testNodes.tcp-direct",
+		"diagnostics.testNodes.url",
+		"profile.apply.v2",
+		"profile.document.v2",
+		"profile.importNodes.v2",
+		"profile.subscription.v2",
 		"privacy.audit.v2",
 		"privacy.localhost-listeners.v1",
 		"privacy.loopback-dns.v1",
@@ -799,30 +874,19 @@ func supportedRPCMethods() []string {
 		"backend.start",
 		"backend.status",
 		"backend.stop",
-		"config-get",
 		"config-import",
 		"config-list",
-		"config-set",
-		"config-set-many",
-		"config.import",
 		"diagnostics.health",
 		"diagnostics.testNodes",
 		"doctor",
-		"health",
 		"logs",
-		"network-reset",
-		"network.reset",
-		"node-test",
-		"node.test",
-		"panel-get",
-		"panel-set",
+		"profile.apply",
+		"profile.get",
+		"profile.importNodes",
+		"profile.setActiveNode",
 		"self-check",
-		"self.check",
-		"reload",
-		"start",
-		"status",
-		"stop",
-		"subscription-fetch",
+		"subscription.preview",
+		"subscription.refresh",
 		"update-check",
 		"update-download",
 		"update-install",
