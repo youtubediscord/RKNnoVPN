@@ -454,8 +454,8 @@ func (c *Config) Save(path string) error {
 	}
 	data = append(data, '\n')
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("config: write %s: %w", path, err)
+	if err := writeFileAtomic(path, data, 0600, "config"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -478,15 +478,49 @@ func SavePanel(path string, panel PanelConfig) error {
 	}
 	data = append(data, '\n')
 
+	return writeFileAtomic(path, data, 0600, "panel")
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode, label string) error {
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
-		return fmt.Errorf("panel: write %s: %w", tmpPath, err)
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return fmt.Errorf("%s: open %s: %w", label, tmpPath, err)
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("%s: write %s: %w", label, tmpPath, err)
+	}
+	if err := f.Chmod(perm); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("%s: chmod %s: %w", label, tmpPath, err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("%s: sync %s: %w", label, tmpPath, err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("%s: close %s: %w", label, tmpPath, err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("panel: rename %s: %w", path, err)
+		return fmt.Errorf("%s: rename %s: %w", label, path, err)
 	}
+	syncDirBestEffort(filepath.Dir(path))
 	return nil
+}
+
+func syncDirBestEffort(dir string) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_ = f.Sync()
 }
 
 // Validate checks the Config for obvious misconfigurations.

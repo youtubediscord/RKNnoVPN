@@ -447,6 +447,7 @@ func TestLegacyReloadReturnsRuntimeStatus(t *testing.T) {
 	if !statusHasOperation(status, runtimev2.OperationReload) {
 		t.Fatalf("reload response should expose reload operation, got %#v", status)
 	}
+	waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationReload)
 }
 
 func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
@@ -478,6 +479,26 @@ func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 	}
 	if !statusHasOperation(status, runtimev2.OperationReload) {
 		t.Fatalf("config import should expose reload operation, got %#v", status)
+	}
+	waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationReload)
+}
+
+func TestConfigImportRejectsLinkPayload(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.panelPath = config.PanelPath(d.cfgPath)
+	d.initRuntimeV2()
+
+	params := json.RawMessage(`{"links":"vless://example"}`)
+	_, rpcErr := d.handleConfigImport(&params)
+	if rpcErr == nil {
+		t.Fatal("link payload must not be treated as a full config import")
+	}
+	if rpcErr.Code != ipc.CodeInvalidParams {
+		t.Fatalf("unexpected error code: %#v", rpcErr)
+	}
+	if !strings.Contains(rpcErr.Message, "unknown config import field") {
+		t.Fatalf("unexpected error message: %q", rpcErr.Message)
 	}
 }
 

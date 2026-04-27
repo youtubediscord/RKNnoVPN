@@ -475,21 +475,14 @@ class DaemonClient @Inject constructor(
      * The repository now performs imports itself, so callers should prefer that.
      */
     suspend fun configImport(links: String): DaemonClientResult<List<Node>> {
-        requireCompatible("config-import")?.let { return it.asFailure() }
-        val params = buildJsonObject { put("links", links) }
-        return when (val result = call("config-import", params) {
-            json.decodeFromJsonElement(ListSerializer(Node.serializer()), it)
-        }) {
-            is DaemonClientResult.DaemonError ->
-                if (isMethodNotFound(result)) legacyConfigImport(params) else result
-            else -> result
+        links.ifBlank {
+            return DaemonClientResult.Ok(emptyList())
         }
+        return DaemonClientResult.DaemonError(
+            code = COMPATIBILITY_ERROR_CODE,
+            message = "Link import is handled locally by ProfileRepository; daemon config-import expects a full config object.",
+        )
     }
-
-    private suspend fun legacyConfigImport(params: JsonObject): DaemonClientResult<List<Node>> =
-        call("config.import", params) {
-            json.decodeFromJsonElement(ListSerializer(Node.serializer()), it)
-        }
 
     /** Fetch a subscription URL via the daemon's network access. */
     suspend fun subscriptionFetch(url: String): DaemonClientResult<SubscriptionFetchInfo> {

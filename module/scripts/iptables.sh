@@ -79,7 +79,7 @@ require_rule_renderer() {
 }
 
 validate_env() {
-    local missing=""
+    missing=""
 
     for var in TPROXY_PORT DNS_PORT API_PORT FWMARK ROUTE_TABLE \
                ROUTE_TABLE_V6 CORE_GID APP_MODE PRIVSTACK_DIR; do
@@ -179,7 +179,7 @@ teardown_policy_routing() {
 }
 
 flush_chains() {
-    local ipt="$1"
+    ipt="$1"
 
     log_info "Flushing ${ipt} chains..."
 
@@ -285,7 +285,7 @@ do_stop() {
 }
 
 do_status() {
-    local missing=0
+    missing=0
 
     if ! iptables ${IPT_WAIT} -t mangle -L "${CHAIN_OUT}" -n >/dev/null 2>&1; then
         log_error "missing IPv4 mangle chain ${CHAIN_OUT}"

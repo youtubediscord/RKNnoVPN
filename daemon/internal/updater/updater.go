@@ -239,12 +239,25 @@ func downloadFile(url, dest string, onProgress func(int64)) error {
 	return nil
 }
 
-// verifyChecksums reads SHA256SUMS.txt and verifies every file that exists
-// in dir against the recorded hash.
+// verifyChecksums reads SHA256SUMS.txt and verifies every downloaded update
+// artifact in dir against an explicit recorded hash. Missing checksum entries
+// are failures; otherwise the UI could report unverified artifacts as verified.
 func verifyChecksums(sumFile, dir string) (bool, error) {
 	data, err := os.ReadFile(sumFile)
 	if err != nil {
 		return false, err
+	}
+
+	required := map[string]bool{}
+	for _, name := range []string{"module.zip", "panel.apk"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			required[name] = false
+		} else if err != nil && !os.IsNotExist(err) {
+			return false, fmt.Errorf("stat %s: %w", name, err)
+		}
+	}
+	if len(required) == 0 {
+		return false, fmt.Errorf("no downloaded update artifacts to verify")
 	}
 
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
@@ -259,7 +272,13 @@ func verifyChecksums(sumFile, dir string) (bool, error) {
 			continue
 		}
 		expectedHash := strings.TrimSpace(parts[0])
-		fileName := strings.TrimLeft(parts[1], " *")
+		if len(expectedHash) != sha256.Size*2 {
+			continue
+		}
+		if _, err := hex.DecodeString(expectedHash); err != nil {
+			continue
+		}
+		fileName := filepath.Base(strings.TrimLeft(parts[1], " *"))
 
 		// Map release asset names to our local filenames.
 		localName := ""
@@ -278,6 +297,10 @@ func verifyChecksums(sumFile, dir string) (bool, error) {
 			continue
 		}
 
+		if matched, ok := required[localName]; ok && matched {
+			return false, fmt.Errorf("%s: duplicate checksum entry", localName)
+		}
+
 		actualHash, err := sha256File(localPath)
 		if err != nil {
 			return false, fmt.Errorf("hash %s: %w", localName, err)
@@ -286,6 +309,19 @@ func verifyChecksums(sumFile, dir string) (bool, error) {
 		if !strings.EqualFold(actualHash, expectedHash) {
 			return false, fmt.Errorf("%s: expected %s, got %s", localName, expectedHash, actualHash)
 		}
+		if _, ok := required[localName]; ok {
+			required[localName] = true
+		}
+	}
+
+	var missing []string
+	for name, matched := range required {
+		if !matched {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return false, fmt.Errorf("missing checksum entries for %s", strings.Join(missing, ", "))
 	}
 
 	return true, nil

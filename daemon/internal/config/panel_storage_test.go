@@ -186,6 +186,35 @@ func TestLoadUsesAuthoritativeEmptySidecarToClearNode(t *testing.T) {
 	}
 }
 
+func TestWriteFileAtomicReplacesFileWithoutLeavingTemp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeFileAtomic(path, []byte("new\n"), 0600, "config"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new\n" {
+		t.Fatalf("atomic replacement wrote %q", string(data))
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary file should be gone after atomic write, stat err=%v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("atomic replacement mode = %o, want 0600", info.Mode().Perm())
+	}
+}
+
 func containsPanelKey(data []byte) bool {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {

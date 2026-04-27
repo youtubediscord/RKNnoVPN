@@ -35,6 +35,54 @@ func TestCompareSemverAcceptsBareCurrentVersion(t *testing.T) {
 	}
 }
 
+func TestVerifyChecksumsRequiresEveryDownloadedArtifact(t *testing.T) {
+	dir := t.TempDir()
+	modulePath := filepath.Join(dir, "module.zip")
+	apkPath := filepath.Join(dir, "panel.apk")
+	writeTestFile(t, modulePath, 0644, "module")
+	writeTestFile(t, apkPath, 0644, "apk")
+	moduleHash, err := sha256File(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sumPath := filepath.Join(dir, "SHA256SUMS.txt")
+	if err := os.WriteFile(sumPath, []byte(moduleHash+"  RKNnoVPN-module.zip\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := verifyChecksums(sumPath, dir)
+	if err == nil || ok {
+		t.Fatalf("expected missing panel.apk checksum to fail, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestVerifyChecksumsAcceptsAllDownloadedArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	modulePath := filepath.Join(dir, "module.zip")
+	apkPath := filepath.Join(dir, "panel.apk")
+	writeTestFile(t, modulePath, 0644, "module")
+	writeTestFile(t, apkPath, 0644, "apk")
+	moduleHash, err := sha256File(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apkHash, err := sha256File(apkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sumPath := filepath.Join(dir, "SHA256SUMS.txt")
+	sums := moduleHash + "  RKNnoVPN-module.zip\n" +
+		apkHash + "  RKNnoVPN-panel.apk\n"
+	if err := os.WriteFile(sumPath, []byte(sums), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := verifyChecksums(sumPath, dir)
+	if err != nil || !ok {
+		t.Fatalf("expected checksum verification to pass, ok=%v err=%v", ok, err)
+	}
+}
+
 func TestValidateModuleStagingRejectsIncompleteBundle(t *testing.T) {
 	staging := t.TempDir()
 	binDir := filepath.Join(staging, "binaries", runtimeBinaryArch())

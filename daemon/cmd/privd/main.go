@@ -1165,6 +1165,26 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 			Message: "invalid config: " + err.Error(),
 		}
 	}
+	if len(raw) == 0 {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "params required: non-empty full config JSON object",
+		}
+	}
+	for key := range raw {
+		if !isFullConfigImportKey(key) {
+			return nil, &ipc.RPCError{
+				Code:    ipc.CodeInvalidParams,
+				Message: fmt.Sprintf("unknown config import field %q; config-import expects a full daemon config object", key),
+			}
+		}
+	}
+	if _, ok := raw["schema_version"]; !ok {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "schema_version is required for full config import; use config-set/config-set-many for partial updates",
+		}
+	}
 
 	newCfg := config.DefaultConfig()
 	if err := json.Unmarshal(*params, newCfg); err != nil {
@@ -1209,6 +1229,28 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		"reload":        true,
 		"runtimeStatus": d.runtimeV2.Status(),
 	}, nil
+}
+
+func isFullConfigImportKey(key string) bool {
+	switch key {
+	case "schema_version",
+		"proxy",
+		"transport",
+		"node",
+		"panel",
+		"runtime_v2",
+		"routing",
+		"apps",
+		"dns",
+		"ipv6",
+		"sharing",
+		"health",
+		"rescue",
+		"autostart":
+		return true
+	default:
+		return false
+	}
 }
 
 func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Config, *ipc.RPCError) {
@@ -2363,6 +2405,19 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 				go updater.ScheduleSelfExit(updater.SelfExitDelay)
 			}
 		}()
+		// Install the APK before replacing module binaries. If the APK is
+		// invalid or incompatible, we must fail before the module install can
+		// fork a new daemon and schedule the old daemon's self-exit.
+		if apkExists {
+			markStep("update-install-apk", "running", "APK_INSTALLING", filepath.Base(p.ApkPath))
+			if err := updater.InstallApkUpdate(p.ApkPath); err != nil {
+				log.Printf("[updater] APK install failed: %v", err)
+				markStep("update-install-apk", "failed", "APK_INSTALL_FAILED", err.Error())
+				return fmt.Errorf("apk install failed: %w", err)
+			}
+			markStep("update-install-apk", "ok", "", "")
+		}
+
 		if moduleExists {
 			markStep("update-stop-runtime", "running", "UPDATE_STOP_RUNTIME", "stopping runtime before module install")
 			if err := d.failIfResetInProgress(); err != nil {
@@ -2391,17 +2446,6 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 			}
 			moduleUpdated = true
 			markStep("update-install-module", "ok", "", "")
-		}
-
-		// Install APK.
-		if apkExists {
-			markStep("update-install-apk", "running", "APK_INSTALLING", filepath.Base(p.ApkPath))
-			if err := updater.InstallApkUpdate(p.ApkPath); err != nil {
-				log.Printf("[updater] APK install failed: %v", err)
-				markStep("update-install-apk", "failed", "APK_INSTALL_FAILED", err.Error())
-				return fmt.Errorf("apk install failed: %w", err)
-			}
-			markStep("update-install-apk", "ok", "", "")
 		}
 
 		// Clean up downloaded files.

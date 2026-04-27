@@ -15,34 +15,34 @@ api_port_enabled() {
 }
 
 emit_api_port_protection() {
-    local chain="$1"
+    ps_emit_chain="$1"
     if api_port_enabled; then
-        echo "-A ${chain} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
-        echo "-A ${chain} -p tcp --dport ${API_PORT} -j RETURN"
+        echo "-A ${ps_emit_chain} -p tcp --dport ${API_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${ps_emit_chain} -p tcp --dport ${API_PORT} -j RETURN"
     fi
 }
 
 emit_http_port_protection() {
-    local chain="$1"
+    ps_emit_chain="$1"
     if http_port_enabled; then
-        echo "-A ${chain} -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
-        echo "-A ${chain} -p tcp --dport ${HTTP_PORT} -j RETURN"
+        echo "-A ${ps_emit_chain} -p tcp --dport ${HTTP_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${ps_emit_chain} -p tcp --dport ${HTTP_PORT} -j RETURN"
     fi
 }
 
 emit_socks_port_protection() {
-    local chain="$1"
+    ps_emit_chain="$1"
     if socks_port_enabled; then
-        echo "-A ${chain} -p tcp --dport ${SOCKS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
-        echo "-A ${chain} -p tcp --dport ${SOCKS_PORT} -j RETURN"
+        echo "-A ${ps_emit_chain} -p tcp --dport ${SOCKS_PORT} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${ps_emit_chain} -p tcp --dport ${SOCKS_PORT} -j RETURN"
     fi
 }
 
 chain_proxy_port_reserved() {
-    local port="$1"
-    local reserved
-    for reserved in "${TPROXY_PORT}" "${DNS_PORT}" "${API_PORT}" "${SOCKS_PORT}" "${HTTP_PORT}"; do
-        if [ -n "${reserved}" ] && [ "${reserved}" -gt 0 ] 2>/dev/null && [ "${port}" = "${reserved}" ]; then
+    ps_reserved_port="$1"
+    ps_reserved_value=""
+    for ps_reserved_value in "${TPROXY_PORT}" "${DNS_PORT}" "${API_PORT}" "${SOCKS_PORT}" "${HTTP_PORT}"; do
+        if [ -n "${ps_reserved_value}" ] && [ "${ps_reserved_value}" -gt 0 ] 2>/dev/null && [ "${ps_reserved_port}" = "${ps_reserved_value}" ]; then
             return 0
         fi
     done
@@ -50,71 +50,72 @@ chain_proxy_port_reserved() {
 }
 
 emit_chain_proxy_port_protection() {
-    local chain="$1"
-    local port uid
+    ps_emit_chain="$1"
+    ps_proxy_port=""
+    ps_proxy_uid=""
     if [ -z "${CHAIN_PROXY_PORTS}" ] || [ -z "${CHAIN_PROXY_UIDS}" ]; then
         return 0
     fi
-    for port in ${CHAIN_PROXY_PORTS}; do
-        case "${port}" in
+    for ps_proxy_port in ${CHAIN_PROXY_PORTS}; do
+        case "${ps_proxy_port}" in
             ''|*[!0-9]*) continue ;;
         esac
-        if [ "${port}" -le 0 ] 2>/dev/null || chain_proxy_port_reserved "${port}"; then
+        if [ "${ps_proxy_port}" -le 0 ] 2>/dev/null || chain_proxy_port_reserved "${ps_proxy_port}"; then
             continue
         fi
-        for uid in ${CHAIN_PROXY_UIDS}; do
-            case "${uid}" in
+        for ps_proxy_uid in ${CHAIN_PROXY_UIDS}; do
+            case "${ps_proxy_uid}" in
                 ''|*[!0-9]*) continue ;;
             esac
-            echo "-A ${chain} -p tcp --dport ${port} -m owner --uid-owner ${uid} -j RETURN"
+            echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -m owner --uid-owner ${ps_proxy_uid} -j RETURN"
         done
-        echo "-A ${chain} -p tcp --dport ${port} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
-        echo "-A ${chain} -p tcp --dport ${port} -j RETURN"
+        echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
+        echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -j RETURN"
     done
 }
 
 check_listener_protection() {
-    local ipt="$1"
-    local proto="$2"
-    local port="$3"
-    local label="$4"
+    ps_check_ipt="$1"
+    ps_check_proto="$2"
+    ps_check_port="$3"
+    ps_check_label="$4"
 
-    if ! ${ipt} ${IPT_WAIT} -t mangle -C "${CHAIN_OUT}" -p "${proto}" --dport "${port}" -m owner ! --uid-owner 0 ! --gid-owner "${CORE_GID}" -j DROP >/dev/null 2>&1; then
-        log_error "missing ${ipt} ${label} ${proto}/${port} local listener protection"
+    if ! ${ps_check_ipt} ${IPT_WAIT} -t mangle -C "${CHAIN_OUT}" -p "${ps_check_proto}" --dport "${ps_check_port}" -m owner ! --uid-owner 0 ! --gid-owner "${CORE_GID}" -j DROP >/dev/null 2>&1; then
+        log_error "missing ${ps_check_ipt} ${ps_check_label} ${ps_check_proto}/${ps_check_port} local listener protection"
         return 1
     fi
     return 0
 }
 
 check_local_listener_protection() {
-    local ipt="$1"
-    local missing=0
+    ps_check_ipt="$1"
+    ps_listener_missing=0
 
-    check_listener_protection "${ipt}" tcp "${TPROXY_PORT}" "TPROXY" || missing=1
-    check_listener_protection "${ipt}" udp "${TPROXY_PORT}" "TPROXY" || missing=1
-    check_listener_protection "${ipt}" tcp "${DNS_PORT}" "DNS" || missing=1
-    check_listener_protection "${ipt}" udp "${DNS_PORT}" "DNS" || missing=1
+    check_listener_protection "${ps_check_ipt}" tcp "${TPROXY_PORT}" "TPROXY" || ps_listener_missing=1
+    check_listener_protection "${ps_check_ipt}" udp "${TPROXY_PORT}" "TPROXY" || ps_listener_missing=1
+    check_listener_protection "${ps_check_ipt}" tcp "${DNS_PORT}" "DNS" || ps_listener_missing=1
+    check_listener_protection "${ps_check_ipt}" udp "${DNS_PORT}" "DNS" || ps_listener_missing=1
     if api_port_enabled; then
-        check_listener_protection "${ipt}" tcp "${API_PORT}" "API" || missing=1
+        check_listener_protection "${ps_check_ipt}" tcp "${API_PORT}" "API" || ps_listener_missing=1
     fi
     if socks_port_enabled; then
-        check_listener_protection "${ipt}" tcp "${SOCKS_PORT}" "SOCKS" || missing=1
+        check_listener_protection "${ps_check_ipt}" tcp "${SOCKS_PORT}" "SOCKS" || ps_listener_missing=1
     fi
     if http_port_enabled; then
-        check_listener_protection "${ipt}" tcp "${HTTP_PORT}" "HTTP" || missing=1
+        check_listener_protection "${ps_check_ipt}" tcp "${HTTP_PORT}" "HTTP" || ps_listener_missing=1
     fi
     if [ -n "${CHAIN_PROXY_UIDS}" ]; then
-        for port in ${CHAIN_PROXY_PORTS}; do
-            case "${port}" in
+        for ps_proxy_port in ${CHAIN_PROXY_PORTS}; do
+            case "${ps_proxy_port}" in
                 ''|*[!0-9]*) continue ;;
             esac
-            if [ "${port}" -le 0 ] 2>/dev/null || chain_proxy_port_reserved "${port}"; then
+            if [ "${ps_proxy_port}" -le 0 ] 2>/dev/null || chain_proxy_port_reserved "${ps_proxy_port}"; then
                 continue
             fi
-            check_listener_protection "${ipt}" tcp "${port}" "CHAIN_PROXY" || missing=1
+            check_listener_protection "${ps_check_ipt}" tcp "${ps_proxy_port}" "CHAIN_PROXY" || ps_listener_missing=1
         done
     fi
-    return "${missing}"
+    return "${ps_listener_missing}"
 }
 
 gen_mangle_v4() {

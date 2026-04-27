@@ -199,7 +199,7 @@ status() {
         return
     fi
 
-    local missing=0
+    missing=0
     if ! iptables $IPT_WAIT -t nat -L "$NAT4_CHAIN" -n >/dev/null 2>&1; then
         log "missing IPv4 DNS nat chain $NAT4_CHAIN"
         missing=1

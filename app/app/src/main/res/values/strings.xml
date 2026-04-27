@@ -327,6 +327,7 @@
     <string name="update_error_no_artifacts">Update download finished without any artifacts</string>
     <string name="update_error_pair_required">This update requires both module and APK artifacts.</string>
     <string name="update_error_install_without_artifacts">Update install completed without installing module or APK</string>
+    <string name="update_error_install_failed">Update install failed</string>
     <string name="update_error_check_failed">Update check failed</string>
     <string name="update_error_download_failed">Update download failed</string>
     <string name="reset_summary_all_done">All backend cleanup steps completed</string>

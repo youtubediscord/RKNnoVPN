@@ -3,8 +3,10 @@ package core
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -95,6 +97,27 @@ func TestSuccessfulStartReportUpdatesRuntimeReport(t *testing.T) {
 	}
 	if manager.LastStartReport().Status != "ok" {
 		t.Fatalf("successful start should leave start report finished: %#v", manager.LastStartReport())
+	}
+}
+
+func TestKillProcessWaitsOnTrackedExitChannel(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "trap 'exit 0' TERM; while :; do sleep 1; done")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewCoreManager(config.DefaultConfig(), t.TempDir(), nil)
+	manager.process = cmd.Process
+	manager.pid = cmd.Process.Pid
+	manager.exitCh = watchCommand(cmd)
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+	})
+
+	if err := manager.killProcess(); err != nil {
+		t.Fatalf("killProcess failed: %v", err)
+	}
+	if err := syscall.Kill(cmd.Process.Pid, 0); err == nil {
+		t.Fatalf("pid %d still exists after killProcess returned", cmd.Process.Pid)
 	}
 }
 

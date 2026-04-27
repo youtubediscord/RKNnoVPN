@@ -695,13 +695,34 @@ class SettingsViewModel @Inject constructor(
             statusRepository.status
                 .filterNotNull()
                 .collect { status ->
+                    val completedUpdateInstall = status.lastOperation
+                        ?.takeIf { operation -> operation.kind == "update-install" && status.activeOperation == null }
+                    if (completedUpdateInstall != null) {
+                        _updateState.update { current ->
+                            if (current.status != UpdateStatus.INSTALLING) {
+                                current
+                            } else if (completedUpdateInstall.succeeded) {
+                                current.copy(
+                                    status = UpdateStatus.INSTALLED,
+                                    errorMessage = "",
+                                )
+                            } else {
+                                current.copy(
+                                    status = UpdateStatus.ERROR,
+                                    errorMessage = completedUpdateInstall.errorMessage.ifBlank {
+                                        messages.get(com.privstack.panel.R.string.update_error_install_failed)
+                                    },
+                                )
+                            }
+                        }
+                    }
                     _uiState.update {
                         val resetResult = status.lastOperation
                             ?.takeIf { operation -> it.isResetting && operation.kind == "reset" && status.activeOperation == null }
                         if (resetResult != null) {
                             val report = resetResult.resetReport
-                        it.copy(
-                            daemonStatusText = if (resetResult.succeeded) {
+                            it.copy(
+                                daemonStatusText = if (resetResult.succeeded) {
                                     messages.get(com.privstack.panel.R.string.daemon_status_stopped)
                                 } else {
                                     messages.get(com.privstack.panel.R.string.daemon_status_partial_reset)

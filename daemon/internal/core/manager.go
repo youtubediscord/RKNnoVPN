@@ -282,6 +282,7 @@ const singBoxCheckTimeout = 20 * time.Second
 type CoreManager struct {
 	config  *config.Config
 	process *os.Process
+	exitCh  <-chan error
 	pid     int
 	state   State
 	dataDir string
@@ -339,6 +340,7 @@ func (m *CoreManager) ResetState() {
 	defer m.mu.Unlock()
 
 	m.process = nil
+	m.exitCh = nil
 	m.pid = 0
 	m.activeProfile = ""
 	m.startedAt = time.Time{}
@@ -419,6 +421,8 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	logFile.Close()
 	m.process = cmd.Process
 	m.pid = cmd.Process.Pid
+	exitCh := watchCommand(cmd)
+	m.exitCh = exitCh
 	recordStage("spawn-core", "ok", "", fmt.Sprintf("pid=%d", m.pid), false)
 
 	// Write PID file.
@@ -430,8 +434,13 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		}
 		if m.process != nil {
 			_ = m.process.Signal(signal)
+			select {
+			case <-m.exitCh:
+			case <-time.After(2 * time.Second):
+			}
 		}
 		m.process = nil
+		m.exitCh = nil
 		m.pid = 0
 		m.activeProfile = ""
 		m.startedAt = time.Time{}
@@ -440,12 +449,6 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	}
 
 	m.logger.Printf("sing-box spawned, pid=%d", m.pid)
-
-	// 3. Start a goroutine to reap the child so we don't leak zombies.
-	exitCh := make(chan error, 1)
-	go func() {
-		exitCh <- cmd.Wait()
-	}()
 
 	// 4. Wait for runtime listeners.
 	if spec, err := m.waitRuntimeListeners(exitCh, logPath, recordStage); err != nil {
@@ -552,6 +555,7 @@ func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 	_ = os.Remove(pidPath)
 
 	m.process = nil
+	m.exitCh = nil
 	m.pid = 0
 	m.activeProfile = ""
 	m.startedAt = time.Time{}
@@ -640,20 +644,22 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	logFile.Close()
 	m.process = cmd.Process
 	m.pid = cmd.Process.Pid
+	exitCh := watchCommand(cmd)
+	m.exitCh = exitCh
 	recordStage("spawn-core", "ok", "", fmt.Sprintf("pid=%d", m.pid), false)
 
 	pidPath := filepath.Join(m.dataDir, "run", "singbox.pid")
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
 
-	exitCh := make(chan error, 1)
-	go func() {
-		exitCh <- cmd.Wait()
-	}()
-
 	// 4. Wait for runtime listeners.
 	if spec, err := m.waitRuntimeListeners(exitCh, logPath, recordStage); err != nil {
 		_ = m.process.Signal(syscall.SIGKILL)
+		select {
+		case <-exitCh:
+		case <-time.After(2 * time.Second):
+		}
 		m.process = nil
+		m.exitCh = nil
 		m.pid = 0
 		m.activeProfile = ""
 		m.startedAt = time.Time{}
@@ -871,19 +877,26 @@ func (m *CoreManager) killProcess() error {
 		return nil
 	}
 
-	waitCh := make(chan error, 1)
-	go func(proc *os.Process) {
-		_, err := proc.Wait()
-		waitCh <- err
-	}(m.process)
+	proc := m.process
+	pid := m.pid
+	waitCh := m.exitCh
+	if waitCh == nil {
+		return fmt.Errorf("pid %d has no tracked process wait channel", pid)
+	}
 
-	m.logger.Printf("sending SIGTERM to pid %d", m.pid)
-	if err := m.process.Signal(syscall.SIGTERM); err != nil {
+	m.logger.Printf("sending SIGTERM to pid %d", pid)
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
 		// Process may have already exited — not fatal.
 		m.logger.Printf("SIGTERM failed (may be already dead): %v", err)
 		select {
-		case <-waitCh:
-		default:
+		case err := <-waitCh:
+			if err != nil {
+				m.logger.Printf("tracked wait after SIGTERM failure returned: %v", err)
+			}
+		case <-time.After(500 * time.Millisecond):
+			if proc.Signal(syscall.Signal(0)) == nil {
+				return fmt.Errorf("pid %d still appears alive after SIGTERM failed: %w", pid, err)
+			}
 		}
 		return nil
 	}
@@ -893,16 +906,16 @@ func (m *CoreManager) killProcess() error {
 		if err != nil {
 			m.logger.Printf("wait after SIGTERM returned: %v", err)
 		} else {
-			m.logger.Printf("pid %d exited after SIGTERM", m.pid)
+			m.logger.Printf("pid %d exited after SIGTERM", pid)
 		}
 		return nil
 	case <-time.After(5 * time.Second):
 	}
 
 	// Still alive — escalate.
-	m.logger.Printf("pid %d did not exit, sending SIGKILL", m.pid)
-	if err := m.process.Signal(syscall.SIGKILL); err != nil {
-		return fmt.Errorf("SIGKILL pid %d: %w", m.pid, err)
+	m.logger.Printf("pid %d did not exit, sending SIGKILL", pid)
+	if err := proc.Signal(syscall.SIGKILL); err != nil {
+		return fmt.Errorf("SIGKILL pid %d: %w", pid, err)
 	}
 	select {
 	case err := <-waitCh:
@@ -910,9 +923,17 @@ func (m *CoreManager) killProcess() error {
 			m.logger.Printf("wait after SIGKILL returned: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		return fmt.Errorf("pid %d did not exit after SIGKILL", m.pid)
+		return fmt.Errorf("pid %d did not exit after SIGKILL", pid)
 	}
 	return nil
+}
+
+func watchCommand(cmd *exec.Cmd) <-chan error {
+	exitCh := make(chan error, 1)
+	go func() {
+		exitCh <- cmd.Wait()
+	}()
+	return exitCh
 }
 
 func (m *CoreManager) killTrackedSingBox() error {
