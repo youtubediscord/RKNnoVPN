@@ -12,7 +12,7 @@ import (
 
 func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	n := 50
-	requestedFiles := []string{"privd"}
+	requestedFiles := []string{"daemon"}
 	if params != nil {
 		var p struct {
 			Lines int      `json:"lines"`
@@ -87,8 +87,8 @@ func (d *daemon) resolveLogFileSpecs(requested []string) []logFileSpec {
 		key := strings.ToLower(strings.TrimSpace(raw))
 		var spec logFileSpec
 		switch key {
-		case "privd", "daemon":
-			spec = logFileSpec{Name: "privd", Path: filepath.Join(d.dataDir, "logs", "privd.log")}
+		case "daemon":
+			spec = logFileSpec{Name: "daemon", Path: filepath.Join(d.dataDir, "logs", "daemon.log")}
 		case "sing-box", "singbox":
 			spec = logFileSpec{Name: "sing-box", Path: filepath.Join(d.dataDir, "logs", "sing-box.log")}
 		default:
@@ -100,7 +100,7 @@ func (d *daemon) resolveLogFileSpecs(requested []string) []logFileSpec {
 		}
 	}
 	if len(specs) == 0 {
-		specs = append(specs, logFileSpec{Name: "privd", Path: filepath.Join(d.dataDir, "logs", "privd.log")})
+		specs = append(specs, logFileSpec{Name: "daemon", Path: filepath.Join(d.dataDir, "logs", "daemon.log")})
 	}
 	return specs
 }

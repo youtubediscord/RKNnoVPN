@@ -12,6 +12,7 @@ import com.rknnovpn.panel.model.NodeProbeResultV2
 import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.model.RuntimeCompatibilityStatus
 import com.rknnovpn.panel.model.Subscription
+import com.rknnovpn.panel.model.SubscriptionSource
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.add
@@ -46,7 +47,7 @@ private const val CONFIG_APPLY_ERROR_CODE = -32003
  */
 @Singleton
 class DaemonClient @Inject constructor(
-    private val executor: PrivctlExecutor
+    private val executor: DaemonctlExecutor
 ) {
     companion object {
         const val MIN_CONTROL_PROTOCOL_VERSION = 5
@@ -64,10 +65,9 @@ class DaemonClient @Inject constructor(
             "profile.apply",
             "profile.importNodes",
             "profile.setActiveNode",
-            "config-import",
             "subscription.preview",
             "subscription.refresh",
-            "doctor",
+            "diagnostics.report",
             "self-check",
             "logs",
             "update-check",
@@ -393,7 +393,7 @@ class DaemonClient @Inject constructor(
         val params = buildJsonObject {
             put("lines", lines)
             putJsonArray("files") {
-                add("privd")
+                add("daemon")
                 add("sing-box")
             }
         }
@@ -417,7 +417,7 @@ class DaemonClient @Inject constructor(
         val params = buildJsonObject {
             put("lines", lines)
         }
-        return call("doctor", params, timeoutMs = 30_000L) { element ->
+        return call("diagnostics.report", params, timeoutMs = 30_000L) { element ->
             prettyJson.encodeToString(JsonElement.serializer(), element)
         }
     }
@@ -504,7 +504,7 @@ class DaemonClient @Inject constructor(
             VersionInfo(
                 daemonVersion = obj["daemon"]?.jsonPrimitive?.content ?: "unknown",
                 coreVersion = obj["core"]?.jsonPrimitive?.content ?: "unknown",
-                privctlVersion = obj["privctl"]?.jsonPrimitive?.content ?: "unknown",
+                daemonctlVersion = obj["daemonctl"]?.jsonPrimitive?.content ?: "unknown",
                 moduleVersion = obj["module"]?.jsonObject?.get("version")?.jsonPrimitive?.content ?: "unknown",
                 moduleVersionCode = obj["module"]?.jsonObject?.get("versionCode")?.jsonPrimitive?.content ?: "",
                 modulePath = obj["module"]?.jsonObject?.get("path")?.jsonPrimitive?.content ?: "",
@@ -517,6 +517,7 @@ class DaemonClient @Inject constructor(
                     ?: obj["control_protocol"]?.jsonPrimitive?.intOrNull
                     ?: 0,
                 schemaVersion = obj["schema_version"]?.jsonPrimitive?.intOrNull ?: 0,
+                ipcContractVersion = obj["ipc_contract_version"]?.jsonPrimitive?.intOrNull ?: 0,
                 panelMinVersion = obj["panel_min_version"]?.jsonPrimitive?.contentOrNull ?: "",
                 capabilities = obj["capabilities"]?.jsonArray?.mapNotNull {
                     it.jsonPrimitive.contentOrNull
@@ -536,16 +537,16 @@ class DaemonClient @Inject constructor(
         transform: (JsonElement) -> T
     ): DaemonClientResult<T> {
         return when (val raw = executor.execute(method, params, timeoutMs)) {
-            is PrivctlResult.Success -> try {
+            is DaemonctlResult.Success -> try {
                 DaemonClientResult.Ok(transform(raw.data))
             } catch (e: Exception) {
                 DaemonClientResult.ParseError(raw.data.toString(), e)
             }
-            is PrivctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details, raw.envelope)
-            is PrivctlResult.RootDenied -> DaemonClientResult.RootDenied(raw.reason)
-            is PrivctlResult.Timeout -> DaemonClientResult.Timeout(raw.method)
-            is PrivctlResult.DaemonNotFound -> DaemonClientResult.DaemonNotFound(raw.path)
-            is PrivctlResult.UnexpectedError -> DaemonClientResult.Failure(raw.throwable)
+            is DaemonctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details, raw.envelope)
+            is DaemonctlResult.RootDenied -> DaemonClientResult.RootDenied(raw.reason)
+            is DaemonctlResult.Timeout -> DaemonClientResult.Timeout(raw.method)
+            is DaemonctlResult.DaemonNotFound -> DaemonClientResult.DaemonNotFound(raw.path)
+            is DaemonctlResult.UnexpectedError -> DaemonClientResult.Failure(raw.throwable)
         }
     }
 
@@ -554,7 +555,7 @@ class DaemonClient @Inject constructor(
         params: JsonObject,
     ): DaemonClientResult<ConfigMutationInfo> {
         return when (val raw = executor.execute(method, params, timeoutMs = 60_000L)) {
-            is PrivctlResult.Success -> try {
+            is DaemonctlResult.Success -> try {
                 val info = parseConfigMutationInfo(raw.data)
                 if (!info.ok) {
                     DaemonClientResult.DaemonError(
@@ -568,11 +569,11 @@ class DaemonClient @Inject constructor(
             } catch (e: Exception) {
                 DaemonClientResult.ParseError(raw.data.toString(), e)
             }
-            is PrivctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details, raw.envelope)
-            is PrivctlResult.RootDenied -> DaemonClientResult.RootDenied(raw.reason)
-            is PrivctlResult.Timeout -> DaemonClientResult.Timeout(raw.method)
-            is PrivctlResult.DaemonNotFound -> DaemonClientResult.DaemonNotFound(raw.path)
-            is PrivctlResult.UnexpectedError -> DaemonClientResult.Failure(raw.throwable)
+            is DaemonctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details, raw.envelope)
+            is DaemonctlResult.RootDenied -> DaemonClientResult.RootDenied(raw.reason)
+            is DaemonctlResult.Timeout -> DaemonClientResult.Timeout(raw.method)
+            is DaemonctlResult.DaemonNotFound -> DaemonClientResult.DaemonNotFound(raw.path)
+            is DaemonctlResult.UnexpectedError -> DaemonClientResult.Failure(raw.throwable)
         }
     }
 
@@ -598,6 +599,14 @@ class DaemonClient @Inject constructor(
             runtimeStatus = obj["runtimeStatus"]?.let {
                 json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
             },
+            source = obj["source"]?.let {
+                json.decodeFromJsonElement(SubscriptionSource.serializer(), it)
+            },
+            subscription = obj["subscription"]?.let {
+                json.decodeFromJsonElement(Subscription.serializer(), it)
+            },
+            imported = obj["imported"]?.jsonPrimitive?.intOrNull,
+            parseFailures = obj["parseFailures"]?.jsonPrimitive?.intOrNull,
         )
     }
 
@@ -609,30 +618,39 @@ class DaemonClient @Inject constructor(
                 val enforceReleaseMatch = required.none { it in REPAIR_METHODS }
                 val requiresSingBox = required.any { it in SING_BOX_METHODS }
                 val requiresSchemaV4 = enforceReleaseMatch && required.any { it in SCHEMA_V4_METHODS }
-                val contract = if ("ipc.contract" in info.supportedMethods) {
-                    when (val contractResult = ipcContract()) {
-                        is DaemonClientResult.Ok -> contractResult.data
-                        is DaemonClientResult.DaemonError -> return DaemonClientResult.DaemonError(
-                            COMPATIBILITY_ERROR_CODE,
-                            "APK и модуль несовместимы: daemon не отдал IPC contract (${contractResult.message})",
-                            contractResult.details,
-                        )
-                        is DaemonClientResult.ParseError -> return DaemonClientResult.DaemonError(
-                            COMPATIBILITY_ERROR_CODE,
-                            "APK и модуль несовместимы: некорректный IPC contract",
-                        )
-                        is DaemonClientResult.RootDenied -> return contractResult
-                        is DaemonClientResult.Timeout -> return contractResult
-                        is DaemonClientResult.DaemonNotFound -> return contractResult
-                        is DaemonClientResult.Failure -> return contractResult
-                    }
-                } else {
-                    null
+                if ("ipc.contract" !in info.supportedMethods) {
+                    return DaemonClientResult.DaemonError(
+                        COMPATIBILITY_ERROR_CODE,
+                        "APK и модуль несовместимы: daemon не рекламирует IPC contract",
+                    )
                 }
-                val missingCapabilities = contract?.missingCapabilities(requiredMethods.toList())
-                    ?: info.missingCapabilities(requiredMethods.toList())
-                val missingMethods = contract?.missingRequiredMethods(requiredMethods.toList() + "version")
-                    ?: info.missingRequiredMethods(requiredMethods.toList() + "version")
+                val contract = when (val contractResult = ipcContract()) {
+                    is DaemonClientResult.Ok -> contractResult.data
+                    is DaemonClientResult.DaemonError -> return DaemonClientResult.DaemonError(
+                        COMPATIBILITY_ERROR_CODE,
+                        "APK и модуль несовместимы: daemon не отдал IPC contract (${contractResult.message})",
+                        contractResult.details,
+                    )
+                    is DaemonClientResult.ParseError -> return DaemonClientResult.DaemonError(
+                        COMPATIBILITY_ERROR_CODE,
+                        "APK и модуль несовместимы: некорректный IPC contract",
+                    )
+                    is DaemonClientResult.RootDenied -> return contractResult
+                    is DaemonClientResult.Timeout -> return contractResult
+                    is DaemonClientResult.DaemonNotFound -> return contractResult
+                    is DaemonClientResult.Failure -> return contractResult
+                }
+                val missingCapabilities = contract.missingCapabilities(requiredMethods.toList())
+                val missingMethods = contract.missingRequiredMethods(requiredMethods.toList() + "version")
+                val invalidContractMethods = contract.methods.filter {
+                    it.method.isBlank() || (it.method in requiredMethods && it.capability.isBlank())
+                }
+                if (invalidContractMethods.isNotEmpty()) {
+                    return DaemonClientResult.DaemonError(
+                        COMPATIBILITY_ERROR_CODE,
+                        "APK и модуль несовместимы: IPC contract неполный для ${invalidContractMethods.joinToString(", ") { it.method.ifBlank { "unknown" } }}",
+                    )
+                }
                 when {
                     enforceReleaseMatch && info.releaseMismatch(BuildConfig.VERSION_NAME) != null ->
                         DaemonClientResult.DaemonError(
@@ -712,12 +730,12 @@ sealed class DaemonClientResult<out T> {
 
     fun dataOrThrow(): T = when (this) {
         is Ok -> data
-        is DaemonError -> throw PrivctlException("Daemon error $code: $message")
-        is RootDenied -> throw PrivctlException("Root denied: $reason")
-        is Timeout -> throw PrivctlException("Timeout on method: $method")
-        is DaemonNotFound -> throw PrivctlException("Daemon not found at: $path")
-        is ParseError -> throw PrivctlException("Parse error on: ${raw.take(100)}", cause)
-        is Failure -> throw PrivctlException("Unexpected failure", throwable)
+        is DaemonError -> throw DaemonctlException("Daemon error $code: $message")
+        is RootDenied -> throw DaemonctlException("Root denied: $reason")
+        is Timeout -> throw DaemonctlException("Timeout on method: $method")
+        is DaemonNotFound -> throw DaemonctlException("Daemon not found at: $path")
+        is ParseError -> throw DaemonctlException("Parse error on: ${raw.take(100)}", cause)
+        is Failure -> throw DaemonctlException("Unexpected failure", throwable)
     }
 }
 
@@ -747,10 +765,7 @@ data class IpcContractInfo(
         if (capabilities.isEmpty()) return listOf("capabilities")
         val byMethod = methods.associateBy { it.method }
         return requiredMethods
-            .mapNotNull { method ->
-                byMethod[method]?.capability?.takeIf { it.isNotBlank() }
-                    ?: capabilityForMethod(method)
-            }
+            .mapNotNull { method -> byMethod[method]?.capability?.takeIf { it.isNotBlank() } }
             .distinct()
             .filterNot { it in capabilities }
     }
@@ -779,7 +794,7 @@ data class IpcOperationContractInfo(
 data class VersionInfo(
     val daemonVersion: String,
     val coreVersion: String,
-    val privctlVersion: String,
+    val daemonctlVersion: String,
     val moduleVersion: String = "unknown",
     val moduleVersionCode: String = "",
     val modulePath: String = "",
@@ -790,6 +805,7 @@ data class VersionInfo(
     val singBoxError: String = "",
     val controlProtocolVersion: Int = 0,
     val schemaVersion: Int = 0,
+    val ipcContractVersion: Int = 0,
     val panelMinVersion: String = "",
     val capabilities: List<String> = emptyList(),
     val supportedMethods: List<String> = emptyList(),
@@ -797,14 +813,6 @@ data class VersionInfo(
     fun missingRequiredMethods(required: Collection<String>): List<String> {
         if (supportedMethods.isEmpty()) return required.toList()
         return required.filterNot { it in supportedMethods }
-    }
-
-    fun missingCapabilities(requiredMethods: Collection<String>): List<String> {
-        if (capabilities.isEmpty()) return listOf("capabilities")
-        return requiredMethods
-            .mapNotNull(::capabilityForMethod)
-            .distinct()
-            .filterNot { it in capabilities }
     }
 
     fun releaseMismatch(apkVersion: String): String? {
@@ -844,30 +852,11 @@ private val SCHEMA_V4_METHODS = setOf(
     "backend.applyDesiredState",
     "backend.start",
     "backend.restart",
-    "config-import",
     "profile.apply",
     "profile.importNodes",
     "profile.setActiveNode",
     "subscription.refresh",
 )
-
-private fun capabilityForMethod(method: String): String? = when (method) {
-    "backend.status", "backend.start", "backend.stop", "backend.restart",
-    "backend.applyDesiredState" -> "backend.root-tproxy"
-    "backend.reset" -> "backend.reset.structured"
-    "config-import" -> "config.import.v2"
-    "profile.get" -> "profile.document.v2"
-    "profile.apply" -> "profile.apply.v2"
-    "profile.importNodes", "profile.setActiveNode" -> "profile.importNodes.v2"
-    "subscription.preview", "subscription.refresh" -> "profile.subscription.v2"
-    "diagnostics.health" -> "diagnostics.health.v2"
-    "diagnostics.testNodes" -> "diagnostics.testNodes.v2"
-    "ipc.contract", "version" -> "ipc.contract.v1"
-    "self-check" -> "privacy.self-check.v1"
-    "logs", "doctor" -> "runtime.logs"
-    "update-install" -> "update.install.v1"
-    else -> null
-}
 
 data class UpdateCheckInfo(
     val currentVersion: String,
@@ -903,10 +892,15 @@ data class ConfigMutationInfo(
     val message: String = "",
     val operation: JsonElement? = null,
     val runtimeStatus: BackendStatusV2? = null,
+    val source: SubscriptionSource? = null,
+    val subscription: Subscription? = null,
+    val imported: Int? = null,
+    val parseFailures: Int? = null,
 )
 
 @Serializable
 data class SubscriptionPreviewInfo(
+    val source: SubscriptionSource = SubscriptionSource(),
     val subscription: Subscription = Subscription(providerKey = "", url = ""),
     val nodes: List<Node> = emptyList(),
     val added: Int = 0,
@@ -1127,8 +1121,9 @@ private fun RuntimeCompatibilityStatus.missingRequiredMethods(required: Collecti
 
 private fun RuntimeCompatibilityStatus.missingCapabilities(requiredMethods: Collection<String>): List<String> {
     if (capabilities.isEmpty()) return listOf("capabilities")
+    val byMethod = methods.associateBy { it.method }
     return requiredMethods
-        .mapNotNull(::capabilityForMethod)
+        .mapNotNull { method -> byMethod[method]?.capability?.takeIf { it.isNotBlank() } }
         .distinct()
         .filterNot { it in capabilities }
 }

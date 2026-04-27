@@ -42,43 +42,43 @@ done
 
 ensure_single_device
 ensure_root_shell
-ensure_privctl
+ensure_daemonctl
 RUN_DIR="$(make_run_dir)"
 FAILED=0
 
 note "running safe RKNnoVPN smoke checks into $RUN_DIR"
 
-capture_su privctl_version "'$PRIVCTL_PATH' version" || FAILED=1
-capture_su status_before "'$PRIVCTL_PATH' status" || FAILED=1
-capture_su self_check_before "'$PRIVCTL_PATH' self-check" || FAILED=1
-capture_su_raw doctor_before.json "'$PRIVCTL_PATH' doctor '{\"lines\":160}'" || FAILED=1
+capture_su daemonctl_version "'$DAEMONCTL_PATH' version" || FAILED=1
+capture_su status_before "'$DAEMONCTL_PATH' status" || FAILED=1
+capture_su self_check_before "'$DAEMONCTL_PATH' self-check" || FAILED=1
+capture_su_raw diagnostics_report_before.json "'$DAEMONCTL_PATH' diagnostics.report '{\"lines\":160}'" || FAILED=1
 
 if command -v python3 >/dev/null 2>&1; then
-	python3 "$SCRIPT_DIR/check_doctor.py" "$RUN_DIR/doctor_before.json" --strict-package-resolution >"$RUN_DIR/doctor_before_check.txt" 2>&1 || FAILED=1
+	python3 "$SCRIPT_DIR/check_diagnostics_report.py" "$RUN_DIR/diagnostics_report_before.json" --strict-package-resolution >"$RUN_DIR/diagnostics_report_before_check.txt" 2>&1 || FAILED=1
 else
-	printf '%s\n' "python3 not found; skipped doctor JSON validation" >"$RUN_DIR/doctor_before_check.txt"
+	printf '%s\n' "python3 not found; skipped diagnostics.report JSON validation" >"$RUN_DIR/diagnostics_report_before_check.txt"
 fi
 
 if [ "$ALLOW_RESET" = "1" ]; then
 	note "running explicit reset smoke step"
-	capture_su network_reset "'$PRIVCTL_PATH' backend.reset" || FAILED=1
-	capture_su_raw doctor_after_reset.json "'$PRIVCTL_PATH' doctor '{\"lines\":160}'" || FAILED=1
+	capture_su network_reset "'$DAEMONCTL_PATH' backend.reset" || FAILED=1
+	capture_su_raw diagnostics_report_after_reset.json "'$DAEMONCTL_PATH' diagnostics.report '{\"lines\":160}'" || FAILED=1
 	if command -v python3 >/dev/null 2>&1; then
-		python3 "$SCRIPT_DIR/check_doctor.py" "$RUN_DIR/doctor_after_reset.json" --strict-package-resolution >"$RUN_DIR/doctor_after_reset_check.txt" 2>&1 || FAILED=1
+		python3 "$SCRIPT_DIR/check_diagnostics_report.py" "$RUN_DIR/diagnostics_report_after_reset.json" --strict-package-resolution >"$RUN_DIR/diagnostics_report_after_reset_check.txt" 2>&1 || FAILED=1
 	fi
 fi
 
 if [ "$ALLOW_START" = "1" ]; then
 	note "running explicit start smoke step"
-	capture_su start "'$PRIVCTL_PATH' start" || FAILED=1
-	capture_su_raw doctor_after_start.json "'$PRIVCTL_PATH' doctor '{\"lines\":160}'" || FAILED=1
+	capture_su start "'$DAEMONCTL_PATH' start" || FAILED=1
+	capture_su_raw diagnostics_report_after_start.json "'$DAEMONCTL_PATH' diagnostics.report '{\"lines\":160}'" || FAILED=1
 	if command -v python3 >/dev/null 2>&1; then
-		python3 "$SCRIPT_DIR/check_doctor.py" "$RUN_DIR/doctor_after_start.json" --strict-package-resolution >"$RUN_DIR/doctor_after_start_check.txt" 2>&1 || FAILED=1
+		python3 "$SCRIPT_DIR/check_diagnostics_report.py" "$RUN_DIR/diagnostics_report_after_start.json" --strict-package-resolution >"$RUN_DIR/diagnostics_report_after_start_check.txt" 2>&1 || FAILED=1
 	fi
 	if [ "$STOP_AFTER_START" = "1" ]; then
 		note "stopping after explicit start smoke step"
-		capture_su stop_after_start "'$PRIVCTL_PATH' stop" || FAILED=1
-		capture_su_raw doctor_after_stop.json "'$PRIVCTL_PATH' doctor '{\"lines\":160}'" || FAILED=1
+		capture_su stop_after_start "'$DAEMONCTL_PATH' stop" || FAILED=1
+		capture_su_raw diagnostics_report_after_stop.json "'$DAEMONCTL_PATH' diagnostics.report '{\"lines\":160}'" || FAILED=1
 	fi
 fi
 

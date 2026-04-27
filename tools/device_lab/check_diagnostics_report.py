@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate a RKNnoVPN doctor JSON bundle.")
+    parser = argparse.ArgumentParser(description="Validate a RKNnoVPN diagnostics report JSON bundle.")
     parser.add_argument("path", type=Path)
     parser.add_argument("--strict-package-resolution", action="store_true")
     args = parser.parse_args()
@@ -14,7 +14,7 @@ def main() -> int:
     try:
         data = json.loads(args.path.read_text(encoding="utf-8"))
     except Exception as exc:
-        print(f"doctor JSON is not parseable: {exc}", file=sys.stderr)
+        print(f"diagnostics report JSON is not parseable: {exc}", file=sys.stderr)
         return 1
 
     errors = []
@@ -34,7 +34,7 @@ def main() -> int:
         errors.append("missing versions object")
     else:
         methods = versions.get("supported_methods") or []
-        for method in ("doctor", "self-check", "backend.reset", "profile.get", "profile.apply"):
+        for method in ("diagnostics.report", "self-check", "backend.reset", "profile.get", "profile.apply"):
             if method not in methods:
                 warnings.append(f"supported_methods does not advertise {method}")
 

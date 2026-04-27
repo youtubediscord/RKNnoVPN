@@ -23,7 +23,7 @@ const SelfExitDelay = 3 * time.Second
 
 // Default filesystem paths used by the Magisk module layout.
 const (
-	DefaultDataDir   = "/data/adb/rknnovpn"
+	DefaultDataDir   = "/data/adb/modules/rknnovpn"
 	DefaultModuleDir = "/data/adb/modules/rknnovpn"
 )
 
@@ -80,9 +80,9 @@ func PreflightModuleUpdate(zipPath string, dataDir string) (*ModulePreflight, er
 //  6. Copy new scripts to <dataDir>/scripts/
 //  7. Update module files in <moduleDir>/
 //  8. Set correct permissions
-//  9. Verify the new privd binary can at least print its version
+//  9. Verify the new daemon binary can at least print its version
 //
-// 10. Fork the new privd daemon
+// 10. Fork the new daemon process
 // 11. Schedule self-termination of the old daemon (after IPC response)
 //
 // If any step before the fork fails, binaries are rolled back from backup
@@ -148,7 +148,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		return fmt.Errorf("mkdir backup: %w", err)
 	}
 
-	binaries := []string{"sing-box", "privd", "privctl"}
+	binaries := []string{"sing-box", "daemon", "daemonctl"}
 	for _, name := range binaries {
 		src := filepath.Join(binDir, name)
 		if _, err := os.Stat(src); err == nil {
@@ -273,20 +273,20 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		return fmt.Errorf("update current release symlink: %w", err)
 	}
 
-	// --- 9. Verify new privd binary ---
-	newPrivd := filepath.Join(binDir, "privd")
-	if _, err := os.Stat(newPrivd); err == nil {
-		logger.Println("verifying new privd binary")
-		if err := verifyBinary(newPrivd); err != nil {
-			logger.Printf("new privd binary verification failed: %v — rolling back", err)
+	// --- 9. Verify new daemon binary ---
+	newDaemon := filepath.Join(binDir, "daemon")
+	if _, err := os.Stat(newDaemon); err == nil {
+		logger.Println("verifying new daemon binary")
+		if err := verifyBinary(newDaemon); err != nil {
+			logger.Printf("new daemon binary verification failed: %v — rolling back", err)
 			rollbackBinaries()
-			return fmt.Errorf("new privd verification failed: %w", err)
+			return fmt.Errorf("new daemon verification failed: %w", err)
 		}
-		logger.Println("new privd binary verified OK")
+		logger.Println("new daemon binary verified OK")
 	}
 
 	// --- 10. Fork the new daemon ---
-	logger.Println("forking new privd")
+	logger.Println("forking new daemon")
 	if err := relaunchDaemon(dataDir); err != nil {
 		rollbackBinaries()
 		// Removing the old socket path is required before relaunch, but if the
@@ -337,7 +337,7 @@ func InstallApkUpdate(apkPath string) error {
 // --------------------------------------------------------------------------
 
 // stopCurrentProxy invokes the canonical root runtime cleanup script.
-// It does NOT kill the current privd -- that happens via ScheduleSelfExit
+// It does NOT kill the current daemon -- that happens via ScheduleSelfExit
 // after the IPC response is sent.
 func stopCurrentProxy(dataDir string) error {
 	// Build a minimal environment so scripts work even if the old daemon
@@ -350,32 +350,24 @@ func stopCurrentProxy(dataDir string) error {
 	return execScriptWithEnv(filepath.Join(dataDir, "scripts", "rescue_reset.sh"), "update-clean", scriptEnv)
 }
 
-// relaunchDaemon starts the new privd binary and waits for it to become
+// relaunchDaemon starts the new daemon binary and waits for it to become
 // responsive on the IPC socket. It does NOT kill the old daemon -- the
 // caller is responsible for scheduling self-exit after IPC response.
 func relaunchDaemon(dataDir string) error {
-	privdBin := filepath.Join(dataDir, "bin", "privd")
+	daemonBin := filepath.Join(dataDir, "bin", "daemon")
 
-	// Try multiple config path conventions -- old daemons used config.json
-	// in the data root, newer ones may use config/config.json.
 	configPath := filepath.Join(dataDir, "config", "config.json")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		configPath = filepath.Join(dataDir, "config.json")
-	}
 
 	logDir := filepath.Join(dataDir, "logs")
-	if _, err := os.Stat(logDir); os.IsNotExist(err) {
-		logDir = filepath.Join(dataDir, "log")
-	}
 	os.MkdirAll(logDir, 0700)
-	logFile := filepath.Join(logDir, "privd.log")
+	logFile := filepath.Join(logDir, "daemon.log")
 	if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err == nil {
 		_ = f.Close()
 	}
 
 	runDir := filepath.Join(dataDir, "run")
 	os.MkdirAll(runDir, 0750)
-	pidFile := filepath.Join(runDir, "privd.pid")
+	pidFile := filepath.Join(runDir, "daemon.pid")
 
 	// Remove old socket so the new daemon can bind.
 	sockPath := filepath.Join(runDir, "daemon.sock")
@@ -383,7 +375,7 @@ func relaunchDaemon(dataDir string) error {
 
 	// Fork a new daemon process. The old daemon stays alive until
 	// ScheduleSelfExit is called (after IPC response).
-	cmd := exec.Command(privdBin,
+	cmd := exec.Command(daemonBin,
 		"-config", configPath,
 		"-data-dir", dataDir,
 		"-log-file", logFile,
@@ -396,7 +388,7 @@ func relaunchDaemon(dataDir string) error {
 	cmd.Stderr = nil
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("spawn new privd: %w", err)
+		return fmt.Errorf("spawn new daemon: %w", err)
 	}
 
 	// Release the child so it doesn't become a zombie when we exit.
@@ -413,7 +405,7 @@ func relaunchDaemon(dataDir string) error {
 		}
 	}
 
-	return fmt.Errorf("new privd did not start listening on %s within 10s", sockPath)
+	return fmt.Errorf("new daemon did not start listening on %s within 10s", sockPath)
 }
 
 // execScriptWithEnv runs a shell script with an action argument and explicit
@@ -470,7 +462,7 @@ func validateModuleStaging(staging string, stagedBinDir string) error {
 		stagedBinDir = staging
 	}
 
-	for _, name := range []string{"sing-box", "privd", "privctl"} {
+	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
 		path := filepath.Join(stagedBinDir, name)
 		info, err := os.Stat(path)
 		if err != nil {
@@ -582,7 +574,7 @@ func prepareVersionedRelease(staging string, stagedBinDir string, dataDir string
 	if err := os.MkdirAll(binDir, 0750); err != nil {
 		return "", fmt.Errorf("mkdir release bin: %w", err)
 	}
-	for _, name := range []string{"sing-box", "privd", "privctl"} {
+	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
 		if err := copyFile(filepath.Join(stagedBinDir, name), filepath.Join(binDir, name), 0750); err != nil {
 			return "", fmt.Errorf("copy release binary %s: %w", name, err)
 		}

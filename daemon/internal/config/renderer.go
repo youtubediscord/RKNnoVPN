@@ -13,15 +13,16 @@ import (
 )
 
 type storedProfileNode struct {
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	Group    string          `json:"group"`
-	Protocol string          `json:"protocol"`
-	Server   string          `json:"server"`
-	Port     int             `json:"port"`
-	Link     string          `json:"link"`
-	Outbound json.RawMessage `json:"outbound"`
-	Stale    bool            `json:"stale"`
+	ID           string          `json:"id"`
+	Name         string          `json:"name"`
+	Group        string          `json:"group"`
+	Protocol     string          `json:"protocol"`
+	Server       string          `json:"server"`
+	Port         int             `json:"port"`
+	Link         string          `json:"link"`
+	Outbound     json.RawMessage `json:"outbound"`
+	OwnerPackage string          `json:"ownerPackage"`
+	Stale        bool            `json:"stale"`
 }
 
 // RenderSingboxConfig generates a complete sing-box configuration JSON
@@ -684,17 +685,18 @@ func profileFromStoredNode(raw json.RawMessage, index int) (*NodeProfile, error)
 		protocol = normalizeProtocol(value)
 	}
 	profile := &NodeProfile{
-		ID:          node.ID,
-		Name:        node.Name,
-		Group:       strings.TrimSpace(node.Group),
-		Tag:         profileOutboundTag(node, index),
-		Protocol:    protocol,
-		Address:     node.Server,
-		Port:        node.Port,
-		Transport:   "tcp",
-		Fingerprint: "chrome",
-		Extra:       map[string]string{},
-		Stale:       node.Stale,
+		ID:           node.ID,
+		Name:         node.Name,
+		Group:        strings.TrimSpace(node.Group),
+		Tag:          profileOutboundTag(node, index),
+		Protocol:     protocol,
+		Address:      node.Server,
+		Port:         node.Port,
+		OwnerPackage: strings.TrimSpace(node.OwnerPackage),
+		Transport:    "tcp",
+		Fingerprint:  "chrome",
+		Extra:        map[string]string{},
+		Stale:        node.Stale,
 	}
 
 	settings := mapFromMap(outbound, "settings")

@@ -31,7 +31,7 @@ CHAIN_BYPASS="${CHAIN_PREFIX}_BYPASS"
 CHAIN_DNS="${CHAIN_PREFIX}_DNS"
 CHAIN_DIVERT="${CHAIN_PREFIX}_DIVERT"
 
-SNAPSHOT_DIR="${RUN_DIR:-${RKNNOVPN_DIR:-/data/adb/rknnovpn}/run}"
+SNAPSHOT_DIR="${RUN_DIR:-${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}/run}"
 IPT_WAIT="${IPT_WAIT:--w 100}"
 
 RESERVED_IPV4="
@@ -102,6 +102,7 @@ validate_env() {
     HTTP_PORT="${HTTP_PORT:-0}"
     CHAIN_PROXY_PORTS="${CHAIN_PROXY_PORTS:-}"
     CHAIN_PROXY_UIDS="${CHAIN_PROXY_UIDS:-}"
+    CHAIN_PROXY_RULES="${CHAIN_PROXY_RULES:-}"
     DNS_MODE="${DNS_MODE:-per_uid}"
     DNS_SCOPE="${DNS_SCOPE:-}"
 
@@ -157,6 +158,7 @@ SOCKS_PORT=${SOCKS_PORT}
 HTTP_PORT=${HTTP_PORT}
 CHAIN_PROXY_PORTS="${CHAIN_PROXY_PORTS}"
 CHAIN_PROXY_UIDS="${CHAIN_PROXY_UIDS}"
+CHAIN_PROXY_RULES="${CHAIN_PROXY_RULES}"
 FWMARK=${FWMARK}
 ROUTE_TABLE=${ROUTE_TABLE}
 ROUTE_TABLE_V6=${ROUTE_TABLE_V6}
@@ -228,6 +230,7 @@ do_start() {
     log_info "  HTTP_PORT=${HTTP_PORT}"
     log_info "  CHAIN_PROXY_PORTS=${CHAIN_PROXY_PORTS:-<none>}"
     log_info "  CHAIN_PROXY_UIDS=${CHAIN_PROXY_UIDS:-<none>}"
+    log_info "  CHAIN_PROXY_RULES=${CHAIN_PROXY_RULES:-<none>}"
     log_info "  FWMARK=${FWMARK}"
     log_info "  CORE_GID=${CORE_GID}"
     log_info "  PROXY_UIDS=${PROXY_UIDS:-<none>}"
@@ -390,7 +393,7 @@ case "${1:-}" in
         do_start
         ;;
     stop)
-        SNAPSHOT_DIR="${RUN_DIR:-${RKNNOVPN_DIR:-/data/adb/rknnovpn}/run}"
+        SNAPSHOT_DIR="${RUN_DIR:-${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}/run}"
         if [ -f "${SNAPSHOT_DIR}/env.sh" ]; then
             load_snapshot
         fi
@@ -407,7 +410,7 @@ case "${1:-}" in
     *)
         echo "Usage: $0 {start|stop|status}"
         echo ""
-        echo "Environment variables must be set by the caller (privd)."
+        echo "Environment variables must be set by the caller (daemon)."
         exit 1
         ;;
 esac

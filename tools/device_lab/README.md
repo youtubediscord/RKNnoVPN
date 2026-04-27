@@ -23,7 +23,7 @@ make lab-smoke ADB_SERIAL=0123456789abcdef
 ```
 
 Artifacts are written under `lab-artifacts/device_lab/` and are ignored by git.
-Treat them as private: doctor output is redacted by the daemon, but device
+Treat them as private: diagnostics report output is redacted by the daemon, but device
 properties, installed module paths, package counts, and logs can still identify
 the test phone.
 
@@ -77,7 +77,7 @@ It also verifies that `adb shell` works, not just that `adb devices` reports
 `device`. If the transport is online but shell closes, run:
 
 ```sh
-tools/device_lab/lineage_emulator.sh doctor --serial localhost:5555
+tools/device_lab/lineage_emulator.sh diagnostics-report --serial localhost:5555
 ```
 
 An emulator with a broken shell service is not useful for RKNnoVPN smoke tests,

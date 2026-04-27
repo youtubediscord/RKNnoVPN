@@ -187,6 +187,13 @@ data class RuntimeCompatibilityStatus(
     val panelMinVersion: String = "",
     val capabilities: List<String> = emptyList(),
     val supportedMethods: List<String> = emptyList(),
+    val methods: List<RuntimeMethodCapability> = emptyList(),
+)
+
+@Serializable
+data class RuntimeMethodCapability(
+    val method: String = "",
+    val capability: String = "",
 )
 
 @Serializable

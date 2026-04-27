@@ -2,7 +2,7 @@
 # RKNnoVPN — Magisk/KSU/APatch installation entrypoint
 # POSIX sh compatible (busybox ash)
 
-RKNNOVPN_DIR="/data/adb/rknnovpn"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-${MODPATH:-/data/adb/modules/rknnovpn}}"
 RKNNOVPN_GID=23333
 MODULE_ID="rknnovpn"
 SUBDIRS="bin config config/rendered scripts run logs backup profiles releases"

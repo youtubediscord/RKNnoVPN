@@ -3,7 +3,7 @@
 # POSIX sh compatible; safe for rescue, uninstall, and iptables teardown paths.
 
 if [ -z "${RKNNOVPN_DIR:-}" ]; then
-    RKNNOVPN_DIR="/data/adb/rknnovpn"
+    RKNNOVPN_DIR="/data/adb/modules/rknnovpn"
 fi
 
 FWMARK="${FWMARK:-0x2023}"

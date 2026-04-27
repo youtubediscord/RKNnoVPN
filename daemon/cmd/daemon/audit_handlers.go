@@ -186,7 +186,7 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	}
 
 	if connectivityOut, err := core.ExecCommand("dumpsys", "connectivity"); err == nil {
-		if line := doctorFirstLoopbackDNSLine(splitLines(connectivityOut)); line != "" {
+		if line := diagnosticFirstLoopbackDNSLine(splitLines(connectivityOut)); line != "" {
 			appendFinding(
 				"LOOPBACK_DNS_VISIBLE",
 				"System LinkProperties показывает loopback DNS",
@@ -214,7 +214,7 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	for _, path := range []string{
 		d.cfgPath,
 		filepath.Join(d.dataDir, "config", "rendered", "singbox.json"),
-		filepath.Join(d.dataDir, "logs", "privd.log"),
+		filepath.Join(d.dataDir, "logs", "daemon.log"),
 		filepath.Join(d.dataDir, "logs", "sing-box.log"),
 	} {
 		if pathHasGroupOrWorldBits(path) {

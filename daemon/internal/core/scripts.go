@@ -288,7 +288,7 @@ func ResolveAlwaysDirectUIDsDetailed(packages []string) PackageUIDResolution {
 }
 
 // BuildPackageRoutingResolution resolves both app-routing package sets from a
-// shared source probe for doctor diagnostics.
+// shared source probe for diagnostics report.
 func BuildPackageRoutingResolution(packages []string, alwaysDirectPackages []string) PackageRoutingResolution {
 	catalogs := loadPackageUIDCatalogs(true)
 	selectedWanted := packageSet(packages)

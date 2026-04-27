@@ -261,8 +261,8 @@ fun NodeListScreen(
         EditNodeDialog(
             node = node,
             onDismiss = { nodeToEdit = null },
-            onSave = { name, group ->
-                viewModel.updateNodeMetadata(node.id, name, group)
+            onSave = { name, group, ownerPackage ->
+                viewModel.updateNodeMetadata(node.id, name, group, ownerPackage)
                 nodeToEdit = null
             },
         )
@@ -597,10 +597,11 @@ private fun Node.sourceLabel(): String = when {
 private fun EditNodeDialog(
     node: Node,
     onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit,
+    onSave: (String, String, String) -> Unit,
 ) {
     var name by remember(node.id) { mutableStateOf(node.name) }
     var group by remember(node.id) { mutableStateOf(node.group) }
+    var ownerPackage by remember(node.id) { mutableStateOf(node.ownerPackage) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -621,11 +622,21 @@ private fun EditNodeDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (node.isLoopbackNode()) {
+                    OutlinedTextField(
+                        value = ownerPackage,
+                        onValueChange = { ownerPackage = it },
+                        label = { Text(stringResource(R.string.node_owner_package_label)) },
+                        placeholder = { Text("com.example.proxy") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(name, group) },
+                onClick = { onSave(name, group, ownerPackage) },
                 enabled = name.isNotBlank(),
             ) {
                 Text(stringResource(R.string.save))
@@ -692,6 +703,16 @@ private fun countryFlagForNode(name: String): String {
             lower.startsWith("sg-") -> "\uD83C\uDDF8\uD83C\uDDEC"
         else -> "\uD83C\uDF10" // globe
     }
+}
+
+private fun Node.isLoopbackNode(): Boolean {
+    val host = server.trim().removePrefix("[").removeSuffix("]").lowercase()
+    return host == "localhost" ||
+        host == "ip6-localhost" ||
+        host == "127.0.0.1" ||
+        host == "::1" ||
+        host == "0.0.0.0" ||
+        host == "::"
 }
 
 private fun formatBytes(bytes: Long): String {

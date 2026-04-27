@@ -19,35 +19,35 @@ ANDROID_NDK_TOOLCHAIN := $(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/$(ANDROID_
 ANDROID_CC_ARM64 := $(ANDROID_NDK_TOOLCHAIN)/aarch64-linux-android$(ANDROID_API)-clang
 ANDROID_CC_ARMV7 := $(ANDROID_NDK_TOOLCHAIN)/armv7a-linux-androideabi$(ANDROID_API)-clang
 
-.PHONY: all daemon daemon-arm64 daemon-armv7 singbox singbox-src singbox-arm64 singbox-armv7 apk module clean lab-collect lab-smoke lab-smoke-reset lab-emulator-prepare-insecure-adb lab-emulator-connect lab-emulator-doctor lab-emulator-collect lab-emulator-smoke lab-emulator-smoke-start lab-emulator-install
+.PHONY: all daemon daemon-arm64 daemon-armv7 singbox singbox-src singbox-arm64 singbox-armv7 apk module clean lab-collect lab-smoke lab-smoke-reset lab-emulator-prepare-insecure-adb lab-emulator-connect lab-emulator-diagnostics-report lab-emulator-collect lab-emulator-smoke lab-emulator-smoke-start lab-emulator-install
 
 all: daemon singbox module apk
 	@echo "Build complete. Artifacts in $(OUT_DIR)/"
 
 # === Go Daemon (Android ABIs) ===
 daemon: daemon-arm64 daemon-armv7
-	@echo "  -> $(OUT_DIR)/arm64/privd, $(OUT_DIR)/arm64/privctl"
-	@echo "  -> $(OUT_DIR)/armv7/privd, $(OUT_DIR)/armv7/privctl"
+	@echo "  -> $(OUT_DIR)/arm64/daemon, $(OUT_DIR)/arm64/daemonctl"
+	@echo "  -> $(OUT_DIR)/armv7/daemon, $(OUT_DIR)/armv7/daemonctl"
 
 daemon-arm64:
 	@echo "=== Building daemon (arm64) ==="
 	@mkdir -p $(OUT_DIR)/arm64
 	cd daemon && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
 		-ldflags="-s -w -X main.Version=$(VERSION)" \
-		-o ../$(OUT_DIR)/arm64/privd ./cmd/privd
+		-o ../$(OUT_DIR)/arm64/daemon ./cmd/daemon
 	cd daemon && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
 		-ldflags="-s -w -X main.Version=$(VERSION)" \
-		-o ../$(OUT_DIR)/arm64/privctl ./cmd/privctl
+		-o ../$(OUT_DIR)/arm64/daemonctl ./cmd/daemonctl
 
 daemon-armv7:
 	@echo "=== Building daemon (armv7 / armeabi-v7a) ==="
 	@mkdir -p $(OUT_DIR)/armv7
 	cd daemon && CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build \
 		-ldflags="-s -w -X main.Version=$(VERSION)" \
-		-o ../$(OUT_DIR)/armv7/privd ./cmd/privd
+		-o ../$(OUT_DIR)/armv7/daemon ./cmd/daemon
 	cd daemon && CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build \
 		-ldflags="-s -w -X main.Version=$(VERSION)" \
-		-o ../$(OUT_DIR)/armv7/privctl ./cmd/privctl
+		-o ../$(OUT_DIR)/armv7/daemonctl ./cmd/daemonctl
 
 # === Build Android sing-box ===
 singbox: singbox-arm64 singbox-armv7
@@ -99,8 +99,8 @@ singbox-armv7: singbox-src
 module: daemon singbox
 	@echo "=== Building Magisk module ZIP ==="
 	@mkdir -p $(MODULE_DIR)/binaries/arm64 $(MODULE_DIR)/binaries/armv7
-	cp $(OUT_DIR)/arm64/privd $(OUT_DIR)/arm64/privctl $(OUT_DIR)/arm64/sing-box $(MODULE_DIR)/binaries/arm64/
-	cp $(OUT_DIR)/armv7/privd $(OUT_DIR)/armv7/privctl $(OUT_DIR)/armv7/sing-box $(MODULE_DIR)/binaries/armv7/
+	cp $(OUT_DIR)/arm64/daemon $(OUT_DIR)/arm64/daemonctl $(OUT_DIR)/arm64/sing-box $(MODULE_DIR)/binaries/arm64/
+	cp $(OUT_DIR)/armv7/daemon $(OUT_DIR)/armv7/daemonctl $(OUT_DIR)/armv7/sing-box $(MODULE_DIR)/binaries/armv7/
 	chmod 755 $(MODULE_DIR)/binaries/arm64/*
 	chmod 755 $(MODULE_DIR)/binaries/armv7/*
 	sed -i "s/^version=.*/version=$(VERSION)/" $(MODULE_DIR)/module.prop
@@ -119,8 +119,8 @@ apk:
 # === Test daemon (host arch, for development) ===
 daemon-host:
 	@echo "=== Building daemon (host arch, for testing) ==="
-	cd daemon && go build -o ../$(OUT_DIR)/privd-host ./cmd/privd
-	cd daemon && go build -o ../$(OUT_DIR)/privctl-host ./cmd/privctl
+	cd daemon && go build -o ../$(OUT_DIR)/daemon-host ./cmd/daemon
+	cd daemon && go build -o ../$(OUT_DIR)/daemonctl-host ./cmd/daemonctl
 
 # === Go tests ===
 test:
@@ -142,8 +142,8 @@ lab-emulator-prepare-insecure-adb:
 lab-emulator-connect:
 	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh connect
 
-lab-emulator-doctor:
-	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh doctor
+lab-emulator-diagnostics-report:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh diagnostics-report
 
 lab-emulator-collect:
 	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh collect

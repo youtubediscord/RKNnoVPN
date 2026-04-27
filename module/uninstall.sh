@@ -1,11 +1,11 @@
 #!/system/bin/sh
 # RKNnoVPN — module removal entrypoint.
 # Runtime cleanup is owned by scripts/rescue_reset.sh; this file only
-# orchestrates uninstall-specific cleanup and preserves config/logs.
+# orchestrates uninstall-specific cleanup.
 
 set +e
 
-RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/rknnovpn}"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}"
 TAG="rknnovpn:uninstall"
 
 if [ -f "${RKNNOVPN_DIR}/scripts/lib/rknnovpn_env.sh" ]; then
@@ -60,7 +60,6 @@ clean_runtime_files
 
 log_msg "========================================="
 log_msg "RKNnoVPN module removal complete"
-log_msg "Data directory preserved at: ${RKNNOVPN_DIR}/"
-log_msg "Remove manually if no longer needed:"
-log_msg "  rm -rf ${RKNNOVPN_DIR}"
+log_msg "Runtime data lives under the module directory: ${RKNNOVPN_DIR}/"
+log_msg "Root manager removal may delete this directory with the module."
 log_msg "========================================="

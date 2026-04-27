@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # RKNnoVPN — service.sh
 # Runs at boot after data is decrypted (non-blocking).
-# Launches the privd daemon that manages sing-box + iptables.
+# Launches the RKNnoVPN daemon that manages sing-box + iptables.
 # POSIX sh compatible (busybox ash).
 
 # ============================================================================
@@ -9,11 +9,11 @@
 # ============================================================================
 
 MODDIR="${0%/*}"
-RKNNOVPN_DIR="/data/adb/rknnovpn"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-${MODDIR:-/data/adb/modules/rknnovpn}}"
 RKNNOVPN_GID=23333
 
-PRIVD_BIN="${RKNNOVPN_DIR}/bin/privd"
-PRIVD_PID_FILE="${RKNNOVPN_DIR}/run/privd.pid"
+DAEMON_BIN="${RKNNOVPN_DIR}/bin/daemon"
+DAEMON_PID_FILE="${RKNNOVPN_DIR}/run/daemon.pid"
 CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
 MANUAL_FLAG="${RKNNOVPN_DIR}/config/manual"
 LOG_FILE="${RKNNOVPN_DIR}/logs/service.log"
@@ -83,7 +83,7 @@ rotate_logs_if_version_changed() {
     ARCHIVE_DIR="${LOG_ARCHIVE_DIR}/${FROM_VERSION}_to_${CURRENT_VERSION}_${STAMP}"
     MOVED=0
 
-    for name in privd.log sing-box.log service.log rescue_reset.log net_change.log; do
+    for name in daemon.log sing-box.log service.log rescue_reset.log net_change.log; do
         src="${RKNNOVPN_DIR}/logs/${name}"
         if [ -s "$src" ]; then
             mkdir -p "$ARCHIVE_DIR" 2>/dev/null || continue
@@ -213,9 +213,9 @@ fi
 # ============================================================================
 
 # Check that the daemon binary exists
-if [ ! -x "$PRIVD_BIN" ]; then
-    log_error "Daemon binary not found or not executable: ${PRIVD_BIN}"
-    log_error "Install sing-box/privd to ${RKNNOVPN_DIR}/bin/ and reboot"
+if [ ! -x "$DAEMON_BIN" ]; then
+    log_error "Daemon binary not found or not executable: ${DAEMON_BIN}"
+    log_error "Install sing-box/daemon to ${RKNNOVPN_DIR}/bin/ and reboot"
     exit 1
 fi
 
@@ -256,27 +256,27 @@ log_info "File descriptor limit: ${ACTUAL_ULIMIT}"
 # ============================================================================
 
 launch_daemon() {
-    log_info "Launching privd daemon..."
-    log_info "  Binary:  ${PRIVD_BIN}"
+    log_info "Launching RKNnoVPN daemon..."
+    log_info "  Binary:  ${DAEMON_BIN}"
     log_info "  Config:  ${CONFIG_FILE}"
-    log_info "  PID file: ${PRIVD_PID_FILE}"
+    log_info "  PID file: ${DAEMON_PID_FILE}"
 
     # Ensure log directory is writable
     mkdir -p "${RKNNOVPN_DIR}/logs" 2>/dev/null
     chown 0:0 "${RKNNOVPN_DIR}/logs" 2>/dev/null
     chmod 0700 "${RKNNOVPN_DIR}/logs" 2>/dev/null
-    touch "${RKNNOVPN_DIR}/logs/privd.log" 2>/dev/null
-    chown 0:0 "${RKNNOVPN_DIR}/logs/privd.log" 2>/dev/null
-    chmod 0600 "${RKNNOVPN_DIR}/logs/privd.log" 2>/dev/null
+    touch "${RKNNOVPN_DIR}/logs/daemon.log" 2>/dev/null
+    chown 0:0 "${RKNNOVPN_DIR}/logs/daemon.log" 2>/dev/null
+    chmod 0600 "${RKNNOVPN_DIR}/logs/daemon.log" 2>/dev/null
 
     # Launch daemon with nohup + setsid to fully detach from init
     # - nohup: ignore SIGHUP when terminal closes
     # - setsid: create new session (no controlling terminal)
     # stdout/stderr go to daemon log file
-    nohup setsid "${PRIVD_BIN}" \
+    nohup setsid "${DAEMON_BIN}" \
         --config "${CONFIG_FILE}" \
         --data-dir "${RKNNOVPN_DIR}" \
-        >> "${RKNNOVPN_DIR}/logs/privd.log" 2>&1 &
+        >> "${RKNNOVPN_DIR}/logs/daemon.log" 2>&1 &
 
     DAEMON_PID=$!
 
@@ -286,15 +286,15 @@ launch_daemon() {
     # Check if process is still alive
     if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
         # Process died — try to find the actual PID (setsid may have forked)
-        DAEMON_PID="$(first_pid_by_cmd_path "$PRIVD_BIN" 2>/dev/null)"
+        DAEMON_PID="$(first_pid_by_cmd_path "$DAEMON_BIN" 2>/dev/null)"
         if [ -z "$DAEMON_PID" ]; then
-            log_error "Daemon failed to start — check ${RKNNOVPN_DIR}/logs/privd.log"
+            log_error "Daemon failed to start — check ${RKNNOVPN_DIR}/logs/daemon.log"
             return 1
         fi
     fi
 
     # Write PID file
-    echo "$DAEMON_PID" > "$PRIVD_PID_FILE" 2>/dev/null
+    echo "$DAEMON_PID" > "$DAEMON_PID_FILE" 2>/dev/null
     log_info "Daemon started with PID ${DAEMON_PID}"
 
     return 0
@@ -308,7 +308,7 @@ LAUNCH_RESULT=$?
 # ============================================================================
 
 if [ "$LAUNCH_RESULT" -eq 0 ]; then
-    DAEMON_PID="$(cat "$PRIVD_PID_FILE" 2>/dev/null)"
+    DAEMON_PID="$(cat "$DAEMON_PID_FILE" 2>/dev/null)"
     if [ -n "$DAEMON_PID" ] && [ -d "/proc/${DAEMON_PID}" ]; then
         # oom_score_adj range: -1000 to 1000
         # Positive values make RKNnoVPN easier to reclaim than SystemUI.
@@ -335,17 +335,17 @@ fi
 
 if [ "$LAUNCH_RESULT" -eq 0 ]; then
     # Final check after OOM adjustment
-    DAEMON_PID="$(cat "$PRIVD_PID_FILE" 2>/dev/null)"
+    DAEMON_PID="$(cat "$DAEMON_PID_FILE" 2>/dev/null)"
     if [ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
         log_info "RKNnoVPN daemon is running (PID ${DAEMON_PID})"
         log_info "service.sh completed successfully"
     else
         log_error "Daemon PID ${DAEMON_PID} is no longer running"
-        log_error "Check logs at ${RKNNOVPN_DIR}/logs/privd.log"
+        log_error "Check logs at ${RKNNOVPN_DIR}/logs/daemon.log"
         exit 1
     fi
 else
     log_error "Failed to launch daemon"
-    log_error "Check logs at ${RKNNOVPN_DIR}/logs/privd.log"
+    log_error "Check logs at ${RKNNOVPN_DIR}/logs/daemon.log"
     exit 1
 fi

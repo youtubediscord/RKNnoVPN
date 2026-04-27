@@ -10,7 +10,7 @@ import dagger.hilt.components.SingletonComponent
  * Most core singletons are already annotated with @Inject constructor() + @Singleton
  * and are auto-discovered by Hilt:
  *
- * - [com.rknnovpn.panel.ipc.PrivctlExecutor]
+ * - [com.rknnovpn.panel.ipc.DaemonctlExecutor]
  * - [com.rknnovpn.panel.ipc.DaemonClient]
  * - [com.rknnovpn.panel.ipc.PollingStatusSource]
  * - [com.rknnovpn.panel.repository.ProfileRepository]

@@ -17,7 +17,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
-func TestDoctorRedactsSensitiveJSON(t *testing.T) {
+func TestDiagnosticRedactsSensitiveJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "singbox.json")
 	raw := []byte(`{
 		"outbounds": [{
@@ -55,7 +55,7 @@ func TestSupportedRPCMethodsAdvertiseCanonicalContract(t *testing.T) {
 	if !slices.Equal(methods, ipc.SupportedMethods()) {
 		t.Fatalf("supported methods drifted from IPC contract:\nmethods=%#v\ncontract=%#v", methods, ipc.SupportedMethods())
 	}
-	for _, method := range []string{"doctor", "config-import", "backend.reset", "diagnostics.testNodes", "self-check", "ipc.contract", "profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.preview", "subscription.refresh"} {
+	for _, method := range []string{"diagnostics.report", "config-import", "backend.reset", "diagnostics.testNodes", "self-check", "ipc.contract", "profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.preview", "subscription.refresh"} {
 		if !slices.Contains(methods, method) {
 			t.Fatalf("supported methods missing %s: %#v", method, methods)
 		}
@@ -70,20 +70,22 @@ func TestSupportedRPCMethodsAdvertiseCanonicalContract(t *testing.T) {
 func TestRegisteredHandlersMatchIPCContract(t *testing.T) {
 	server := ipc.NewServer(filepath.Join(t.TempDir(), "daemon.sock"))
 	d := &daemon{ipcServer: server}
-	d.registerHandlers()
+	if err := d.registerHandlers(); err != nil {
+		t.Fatal(err)
+	}
 	if !slices.Equal(server.Methods(), ipc.SupportedMethods()) {
 		t.Fatalf("registered handlers drifted from IPC contract:\nregistered=%#v\ncontract=%#v", server.Methods(), ipc.SupportedMethods())
 	}
 }
 
-func TestPrivctlCommandsMatchIPCContract(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "privctl", "main.go"))
+func TestDaemonctlCommandsMatchIPCContract(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "daemonctl", "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := quotedMapKeysInVar(string(data), "commands")
 	if !slices.Equal(got, ipc.SupportedMethods()) {
-		t.Fatalf("privctl command table drifted from IPC contract:\nprivctl=%#v\ncontract=%#v", got, ipc.SupportedMethods())
+		t.Fatalf("daemonctl command table drifted from IPC contract:\ndaemonctl=%#v\ncontract=%#v", got, ipc.SupportedMethods())
 	}
 }
 
@@ -171,7 +173,7 @@ func TestSupportedCapabilitiesAdvertiseSchemaAndDiagnostics(t *testing.T) {
 	}
 }
 
-func TestDoctorKeepsNodeProbeEndpointMetadata(t *testing.T) {
+func TestDiagnosticKeepsNodeProbeEndpointMetadata(t *testing.T) {
 	value := redactNodeProbeResults([]runtimev2.NodeProbeResult{
 		{
 			ID:     "node-1",
@@ -188,8 +190,8 @@ func TestDoctorKeepsNodeProbeEndpointMetadata(t *testing.T) {
 	}
 }
 
-func TestDoctorSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
-	summary := buildDoctorSummary(
+func TestDiagnosticSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
+	summary := buildDiagnosticSummary(
 		runtimev2.HealthSnapshot{
 			CoreReady:    true,
 			RoutingReady: true,
@@ -207,11 +209,11 @@ func TestDoctorSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
 		nil,
 		map[string]interface{}{"checks": map[string]interface{}{"helper_inbounds_disabled": true}},
 		map[string]string{"version": "v1.6.4"},
-		doctorCommandResult{},
-		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
-		doctorProfileSummary{},
-		doctorRoutingSummary{},
-		doctorPackageResolution{},
+		diagnosticCommandResult{},
+		diagnosticReleaseIntegrity{OK: true, MissingCurrent: true},
+		diagnosticProfileSummary{},
+		diagnosticRoutingSummary{},
+		diagnosticPackageResolution{},
 	)
 
 	if summary.Status != "partial_reset" {
@@ -228,24 +230,24 @@ func TestDoctorSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
 	}
 }
 
-func TestDoctorSummaryFlagsPrivacyFailures(t *testing.T) {
-	summary := buildDoctorSummary(
+func TestDiagnosticSummaryFlagsPrivacyFailures(t *testing.T) {
+	summary := buildDiagnosticSummary(
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{},
 		nil,
-		[]doctorPortStatus{{Port: 10809, TCPListening: true}},
+		[]diagnosticPortStatus{{Port: 10809, TCPListening: true}},
 		map[string]interface{}{"checks": map[string]interface{}{
 			"helper_inbounds_disabled":    false,
 			"localhost_proxy_ports_clear": true,
 			"system_proxy_unset":          true,
 		}},
 		map[string]string{"version": "v1.6.4"},
-		doctorCommandResult{},
-		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
-		doctorProfileSummary{},
-		doctorRoutingSummary{},
-		doctorPackageResolution{},
+		diagnosticCommandResult{},
+		diagnosticReleaseIntegrity{OK: true, MissingCurrent: true},
+		diagnosticProfileSummary{},
+		diagnosticRoutingSummary{},
+		diagnosticPackageResolution{},
 	)
 
 	if summary.Status != "degraded" {
@@ -256,23 +258,23 @@ func TestDoctorSummaryFlagsPrivacyFailures(t *testing.T) {
 	}
 }
 
-func TestDoctorLoopbackDNSDetection(t *testing.T) {
-	if !doctorLinesContainLoopbackDNS([]string{
+func TestDiagnosticLoopbackDNSDetection(t *testing.T) {
+	if !diagnosticLinesContainLoopbackDNS([]string{
 		"LinkProperties{DnsAddresses: [/127.0.0.1,/8.8.8.8]}",
 	}) {
 		t.Fatalf("expected IPv4 loopback DNS to be detected")
 	}
-	if got := doctorFirstLoopbackDNSLine([]string{
+	if got := diagnosticFirstLoopbackDNSLine([]string{
 		"LinkProperties{DnsAddresses: [/127.0.0.1,/8.8.8.8]}",
 	}); !strings.Contains(got, "127.0.0.1") {
 		t.Fatalf("expected first loopback DNS line, got %q", got)
 	}
-	if !doctorLinesContainLoopbackDNS([]string{
+	if !diagnosticLinesContainLoopbackDNS([]string{
 		"mDnses: [ /::1 ]",
 	}) {
 		t.Fatalf("expected IPv6 loopback DNS to be detected")
 	}
-	if doctorLinesContainLoopbackDNS([]string{
+	if diagnosticLinesContainLoopbackDNS([]string{
 		"LinkProperties{DnsAddresses: [/1.1.1.1,/8.8.8.8]}",
 		"localhost proxy port is not a DNS line",
 	}) {
@@ -280,7 +282,7 @@ func TestDoctorLoopbackDNSDetection(t *testing.T) {
 	}
 }
 
-func TestDoctorVPNLikeInterfaceDetection(t *testing.T) {
+func TestDiagnosticVPNLikeInterfaceDetection(t *testing.T) {
 	if got := firstVPNLikeInterfaceLine([]string{
 		"2: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500",
 		"9: wgcf: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420",
@@ -298,18 +300,18 @@ func TestDoctorVPNLikeInterfaceDetection(t *testing.T) {
 	}
 }
 
-func TestDoctorLocalhostProxyPortsUseConfiguredPorts(t *testing.T) {
+func TestDiagnosticLocalhostProxyPortsUseConfiguredPorts(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Proxy.APIPort = 19090
 	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":19080,"httpPort":19081}`)
 
-	if !doctorLocalhostProxyPortsClear(cfg) {
+	if !diagnosticLocalhostProxyPortsClear(cfg) {
 		t.Fatalf("unused configured ports should be clear")
 	}
 }
 
-func TestDoctorSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
-	summary := buildDoctorSummary(
+func TestDiagnosticSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
+	summary := buildDiagnosticSummary(
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{},
@@ -317,17 +319,17 @@ func TestDoctorSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
 		nil,
 		map[string]interface{}{"checks": map[string]interface{}{}},
 		map[string]string{"version": "v1.6.4"},
-		doctorCommandResult{},
-		doctorReleaseIntegrity{
-			CurrentPath:  "/data/adb/rknnovpn/current",
-			ReleasePath:  "/data/adb/rknnovpn/releases/v1.6.4",
+		diagnosticCommandResult{},
+		diagnosticReleaseIntegrity{
+			CurrentPath:  "/data/adb/modules/rknnovpn/current",
+			ReleasePath:  "/data/adb/modules/rknnovpn/releases/v1.6.4",
 			Version:      "v1.6.4",
 			CheckedFiles: 2,
-			Mismatches:   []string{"bin/privd"},
+			Mismatches:   []string{"bin/daemon"},
 		},
-		doctorProfileSummary{},
-		doctorRoutingSummary{},
-		doctorPackageResolution{},
+		diagnosticProfileSummary{},
+		diagnosticRoutingSummary{},
+		diagnosticPackageResolution{},
 	)
 
 	if summary.Status != "degraded" {
@@ -338,8 +340,8 @@ func TestDoctorSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
 	}
 }
 
-func TestDoctorSummaryFlagsRuntimeNetstackFailure(t *testing.T) {
-	summary := buildDoctorSummary(
+func TestDiagnosticSummaryFlagsRuntimeNetstackFailure(t *testing.T) {
+	summary := buildDiagnosticSummary(
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{
@@ -351,11 +353,11 @@ func TestDoctorSummaryFlagsRuntimeNetstackFailure(t *testing.T) {
 		nil,
 		map[string]interface{}{"checks": map[string]interface{}{}},
 		map[string]string{"version": "v1.6.4"},
-		doctorCommandResult{},
-		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
-		doctorProfileSummary{},
-		doctorRoutingSummary{},
-		doctorPackageResolution{},
+		diagnosticCommandResult{},
+		diagnosticReleaseIntegrity{OK: true, MissingCurrent: true},
+		diagnosticProfileSummary{},
+		diagnosticRoutingSummary{},
+		diagnosticPackageResolution{},
 	)
 
 	if summary.Status != "failed" {
@@ -366,7 +368,7 @@ func TestDoctorSummaryFlagsRuntimeNetstackFailure(t *testing.T) {
 	}
 }
 
-func TestDoctorRoutingSummaryDetectsAutoSelector(t *testing.T) {
+func TestDiagnosticRoutingSummaryDetectsAutoSelector(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-a","name":"A","protocol":"vless","group":"EU"}`),
@@ -374,7 +376,7 @@ func TestDoctorRoutingSummaryDetectsAutoSelector(t *testing.T) {
 	}
 	cfg.Apps.AppGroups = map[string]string{"org.telegram.messenger": "EU"}
 
-	summary := doctorRoutingSummaryFromConfig(cfg)
+	summary := diagnosticRoutingSummaryFromConfig(cfg)
 
 	if summary.ActiveNodeMode != "auto_selector" {
 		t.Fatalf("expected auto selector mode, got %#v", summary)
@@ -390,12 +392,12 @@ func TestDoctorRoutingSummaryDetectsAutoSelector(t *testing.T) {
 	}
 }
 
-func TestDoctorPortStatusesIncludeRoles(t *testing.T) {
+func TestDiagnosticPortStatusesIncludeRoles(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Proxy.APIPort = 9090
 	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":10808,"httpPort":10809}`)
 
-	roles := doctorLocalPortRoles(cfg)
+	roles := diagnosticLocalPortRoles(cfg)
 
 	for port, role := range map[int]string{
 		10853: "tproxy",
@@ -410,14 +412,14 @@ func TestDoctorPortStatusesIncludeRoles(t *testing.T) {
 	}
 }
 
-func TestDoctorPortConflictsDetectDuplicateConfiguredPorts(t *testing.T) {
+func TestDiagnosticPortConflictsDetectDuplicateConfiguredPorts(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Proxy.TProxyPort = 10853
 	cfg.Proxy.DNSPort = 10853
 	cfg.Proxy.APIPort = 19090
 	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":19091,"httpPort":19090}`)
 
-	conflicts := doctorLocalPortConflicts(cfg)
+	conflicts := diagnosticLocalPortConflicts(cfg)
 	if len(conflicts) != 2 {
 		t.Fatalf("expected two duplicate local port conflicts, got %#v", conflicts)
 	}
@@ -428,7 +430,7 @@ func TestDoctorPortConflictsDetectDuplicateConfiguredPorts(t *testing.T) {
 		t.Fatalf("unexpected api/http conflict: %#v", conflicts)
 	}
 
-	statuses := doctorPortStatuses(cfg)
+	statuses := diagnosticPortStatuses(cfg)
 	found := false
 	for _, status := range statuses {
 		if status.Port == 10853 {
@@ -440,20 +442,20 @@ func TestDoctorPortConflictsDetectDuplicateConfiguredPorts(t *testing.T) {
 	}
 }
 
-func TestDoctorSummaryFlagsPackageResolutionAndPortWarnings(t *testing.T) {
-	summary := buildDoctorSummary(
+func TestDiagnosticSummaryFlagsPackageResolutionAndPortWarnings(t *testing.T) {
+	summary := buildDiagnosticSummary(
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{},
 		nil,
-		[]doctorPortStatus{{Role: "dns,tproxy", Port: 10853, Conflict: true}},
+		[]diagnosticPortStatus{{Role: "dns,tproxy", Port: 10853, Conflict: true}},
 		map[string]interface{}{"checks": map[string]interface{}{}},
 		map[string]string{"version": "v1.6.4"},
-		doctorCommandResult{},
-		doctorReleaseIntegrity{OK: true, MissingCurrent: true},
-		doctorProfileSummary{},
-		doctorRoutingSummary{},
-		doctorPackageResolution{Warnings: []string{"per-app routing is enabled but selected packages resolved to zero UIDs"}},
+		diagnosticCommandResult{},
+		diagnosticReleaseIntegrity{OK: true, MissingCurrent: true},
+		diagnosticProfileSummary{},
+		diagnosticRoutingSummary{},
+		diagnosticPackageResolution{Warnings: []string{"per-app routing is enabled but selected packages resolved to zero UIDs"}},
 	)
 
 	if summary.Status != "degraded" {
@@ -465,21 +467,21 @@ func TestDoctorSummaryFlagsPackageResolutionAndPortWarnings(t *testing.T) {
 	}
 }
 
-func TestDoctorPortRolesDoNotExpectDisabledLocalHelpers(t *testing.T) {
+func TestDiagnosticPortRolesDoNotExpectDisabledLocalHelpers(t *testing.T) {
 	cfg := config.DefaultConfig()
 
-	roles := doctorLocalPortRoles(cfg)
+	roles := diagnosticLocalPortRoles(cfg)
 	for _, port := range []int{10808, 10809, 9090} {
 		if len(roles[port]) != 0 {
-			t.Fatalf("disabled localhost helper/API port %d must not have doctor roles: %#v", port, roles)
+			t.Fatalf("disabled localhost helper/API port %d must not have diagnostics_report roles: %#v", port, roles)
 		}
 	}
 }
 
-func TestDoctorNetstackReportHandlesMissingConfig(t *testing.T) {
+func TestDiagnosticNetstackReportHandlesMissingConfig(t *testing.T) {
 	d := &daemon{dataDir: t.TempDir()}
 
-	report := d.doctorNetstackReport(nil)
+	report := d.diagnosticNetstackReport(nil)
 	if report.Status != "failed" {
 		t.Fatalf("expected failed report for missing config, got %#v", report)
 	}
@@ -488,29 +490,29 @@ func TestDoctorNetstackReportHandlesMissingConfig(t *testing.T) {
 	}
 }
 
-func TestDoctorRuntimeNetstackReportSkipsWhenStopped(t *testing.T) {
+func TestDiagnosticRuntimeNetstackReportSkipsWhenStopped(t *testing.T) {
 	cfg := config.DefaultConfig()
 	d := &daemon{
 		dataDir: t.TempDir(),
 		coreMgr: core.NewCoreManager(cfg, t.TempDir(), nil),
 	}
 
-	report := d.doctorNetstackRuntimeReport(cfg)
+	report := d.diagnosticNetstackRuntimeReport(cfg)
 	if report.Status != "skipped" {
 		t.Fatalf("stopped runtime should skip netstack verify, got %#v", report)
 	}
 }
 
-func TestDoctorReleaseIntegrityReportDetectsMismatch(t *testing.T) {
+func TestDiagnosticReleaseIntegrityReportDetectsMismatch(t *testing.T) {
 	dataDir := t.TempDir()
 	releaseDir := filepath.Join(dataDir, "releases", "v1.6.4")
 	if err := os.MkdirAll(filepath.Join(releaseDir, "bin"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(releaseDir, "bin", "privd"), []byte("changed\n"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(releaseDir, "bin", "daemon"), []byte("changed\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"version":"v1.6.4","installed_at":"2026-04-24T00:00:00Z","files_sha256":{"bin/privd":"0000"}}`
+	manifest := `{"version":"v1.6.4","installed_at":"2026-04-24T00:00:00Z","files_sha256":{"bin/daemon":"0000"}}`
 	if err := os.WriteFile(filepath.Join(releaseDir, "install-manifest.json"), []byte(manifest), 0640); err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +520,7 @@ func TestDoctorReleaseIntegrityReportDetectsMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report := doctorReleaseIntegrityReport(dataDir)
+	report := diagnosticReleaseIntegrityReport(dataDir)
 	if report.OK {
 		t.Fatalf("expected mismatch report, got %#v", report)
 	}
@@ -527,7 +529,7 @@ func TestDoctorReleaseIntegrityReportDetectsMismatch(t *testing.T) {
 	}
 }
 
-func TestDoctorReleaseIntegrityReportTreatsMissingManifestAsLegacy(t *testing.T) {
+func TestDiagnosticReleaseIntegrityReportFlagsMissingManifest(t *testing.T) {
 	dataDir := t.TempDir()
 	releaseDir := filepath.Join(dataDir, "releases", "v1.7.9")
 	if err := os.MkdirAll(filepath.Join(releaseDir, "bin"), 0755); err != nil {
@@ -537,15 +539,15 @@ func TestDoctorReleaseIntegrityReportTreatsMissingManifestAsLegacy(t *testing.T)
 		t.Fatal(err)
 	}
 
-	report := doctorReleaseIntegrityReport(dataDir)
-	if !report.OK || !report.MissingManifest {
-		t.Fatalf("missing manifest should be legacy/unverified, got %#v", report)
+	report := diagnosticReleaseIntegrityReport(dataDir)
+	if report.OK || !report.MissingManifest {
+		t.Fatalf("missing manifest should fail release integrity, got %#v", report)
 	}
 	if report.Version != "v1.7.9" {
 		t.Fatalf("expected version inferred from release path, got %q", report.Version)
 	}
-	if issues := doctorReleaseIntegrityIssues(report); len(issues) != 0 {
-		t.Fatalf("missing legacy manifest should not create a compatibility issue, got %#v", issues)
+	if issues := diagnosticReleaseIntegrityIssues(report); len(issues) == 0 {
+		t.Fatalf("missing manifest should create a compatibility issue")
 	}
 }
 

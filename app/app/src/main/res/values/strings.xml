@@ -84,6 +84,7 @@
     <string name="edit_node_title">Edit node</string>
     <string name="node_name_label">Name</string>
     <string name="node_group_label">Group</string>
+    <string name="node_owner_package_label">Local proxy app package</string>
     <string name="save">Save</string>
     <string name="copy_link">Copy link</string>
     <string name="test_latency">Test latency</string>
@@ -186,7 +187,7 @@
     <string name="reset_network_rules">Reset network</string>
     <string name="reset_network_rules_desc">Stop the core and remove RKNnoVPN iptables, DNS and routing rules.</string>
     <string name="runtime_logs">Runtime logs</string>
-    <string name="runtime_logs_desc">Shows /data/adb/rknnovpn/logs/privd.log and /data/adb/rknnovpn/logs/sing-box.log.</string>
+    <string name="runtime_logs_desc">Shows /data/adb/modules/rknnovpn/logs/daemon.log and /data/adb/modules/rknnovpn/logs/sing-box.log.</string>
     <string name="show_logs">Show logs</string>
     <string name="loading_logs">Loading…</string>
     <string name="share_logs_telegram">Send to Telegram</string>
@@ -425,7 +426,7 @@
     <string name="audit_check_selinux_status_detail">SELinux is in enforcing mode with daemon-specific policy loaded.</string>
     <string name="audit_check_selinux_status_remediation">No action required.</string>
     <string name="audit_check_module_integrity_title">Kernel module hashes verified</string>
-    <string name="audit_check_module_integrity_detail">privd, privctl, and sing-box match expected SHA-256 digests.</string>
+    <string name="audit_check_module_integrity_detail">daemon, daemonctl, and sing-box match expected SHA-256 digests.</string>
     <string name="audit_check_module_integrity_remediation">No action required.</string>
     <string name="audit_check_private_dns_unchanged_title">Private DNS was modified by daemon</string>
     <string name="audit_check_private_dns_unchanged_detail">The system Private DNS setting was changed, which apps can detect.</string>

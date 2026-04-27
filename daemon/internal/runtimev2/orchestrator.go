@@ -870,6 +870,7 @@ func cloneCompatibilityStatus(compatibility CompatibilityStatus) CompatibilitySt
 	copy := compatibility
 	copy.Capabilities = append([]string(nil), compatibility.Capabilities...)
 	copy.SupportedMethods = append([]string(nil), compatibility.SupportedMethods...)
+	copy.Methods = append([]MethodCapability(nil), compatibility.Methods...)
 	return copy
 }
 

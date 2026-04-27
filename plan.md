@@ -20,8 +20,8 @@
 Уже есть:
 
 - Magisk/KernelSU/APatch module;
-- `privd` root daemon;
-- `privctl` JSON-RPC CLI;
+- `daemon` root daemon;
+- `daemonctl` JSON-RPC CLI;
 - Android APK на Kotlin/Compose;
 - импорт VLESS/VMess/Trojan/Shadowsocks/SOCKS/Hysteria2/TUIC/Amnezia `vpn://`;
 - daemon-owned `profile.json` как canonical user intent storage;
@@ -60,7 +60,7 @@
 - DNS timeout переводит runtime в degraded, а не в hard error;
 - APK показывает `Подключено / degraded`, если core+routing живы;
 - reset возвращает структурный `ResetReport`;
-- `doctor` и `logs` доступны из UI;
+- `diagnostics.report` и `logs` доступны из UI;
 - update/version gate различает repair-команды и команды запуска core.
 - health probe-set больше не завязан на один `www.gstatic.com`;
 - отчёт диагностики можно скопировать одной кнопкой из Settings.
@@ -72,12 +72,12 @@ Acceptance:
 - `diagnostics.testNodes` сохраняет TCP-direct диагностику даже если tunnel/url недоступен;
 - `self-check` возвращает краткий health/privacy/compatibility summary без
   полного diagnostic bundle;
-- self-check/doctor summary включает компактные `compatibility` и `runtime`
+- self-check/diagnostics report summary включает компактные `compatibility` и `runtime`
   поля: версии daemon/module/schema/control protocol, release status и последнюю
   runtime stage summary; compatibility summary также показывает current release
   version и результат `sing-box check`;
 - APK IPC client имеет typed `selfCheck()` только через canonical `self-check`, чтобы UI
-  мог получать короткий repair summary без полного doctor bundle;
+  мог получать короткий repair summary без полного diagnostics report bundle;
 - `StatusRepository` прокидывает typed `selfCheck()` наверх, чтобы будущий
   Settings/Audit экран не зависел от низкоуровневого IPC клиента;
 - `backend.reset` не блокируется из-за version mismatch или отсутствующего
@@ -119,7 +119,7 @@ Acceptance:
 - hot-swap ждёт тот же набор runtime listeners (`tproxy`, `dns`, optional
   `api`), а не только TPROXY;
 - successful start закрывает и `lastStartReport`, и `lastRuntimeReport` как
-  `ok`, чтобы status/doctor не показывали зависшую стадию `running`;
+  `ok`, чтобы status/diagnostics report не показывали зависшую стадию `running`;
 - до первого health result runtime snapshot может считать hard readiness
   зелёной по successful stage report, не придумывая soft DNS/egress успех;
 - UI может показать, где именно остановился запуск:
@@ -166,7 +166,7 @@ Acceptance:
 
 - APK не вызывает неподдерживаемый RPC;
 - start/restart требуют working `sing-box`;
-- reset/logs/doctor/node TCP diagnostics остаются доступны для ремонта;
+- reset/logs/diagnostics report/node TCP diagnostics остаются доступны для ремонта;
 - update installer принимает только canonical verified update dir, требует
   `update-manifest.json` + checksums и проверяет module zip до APK install /
   runtime downtime.
@@ -178,9 +178,9 @@ Acceptance:
   `profile.get`, `profile.apply`, `profile.importNodes`,
   `profile.setActiveNode`, `subscription.preview`, `subscription.refresh`,
   `backend.reset`, `backend.stop`, `diagnostics.testNodes`,
-  update/logs/doctor/self-check методы.
-- Legacy IPC aliases удалены из daemon registration, privctl help, APK client и
-  doctor supported methods.
+  update/logs/diagnostics report/self-check методы.
+- Legacy IPC aliases удалены из daemon registration, daemonctl help, APK client и
+  diagnostics report supported methods.
 - Старый APK-side subscription merge/parser удален из runtime flow; preview и
   refresh выполняет daemon.
 - `diagnostics.testNodes` сохраняет `url_error_class`, чтобы UI показывал
@@ -202,7 +202,7 @@ no public Xray/Clash API
 protected/direct-only app set is active
 ```
 
-Часть self-test уже находится в `audit`/`doctor`: API/helper listeners,
+Часть self-test уже находится в `audit`/`diagnostics.report`: API/helper listeners,
 system proxy, loopback DNS в LinkProperties, VPN-like interfaces,
 per-app whitelist/off defaults и
 diagnostic privacy surface. RKNHardering и YourVPNDead входят в built-in
@@ -213,17 +213,17 @@ HTTP/SOCKS helper inbound теперь считается audit finding даже
 LAN exposure остаётся отдельной более конкретной причиной.
 Diagnostic privacy payload отдаёт `protected_packages.self_test`, чтобы
 проверяемый direct-only набор был виден в отчёте.
-Audit/doctor проверяют configured helper/API ports и common proxy ports
+Audit/diagnostics report проверяют configured helper/API ports и common proxy ports
 10808/10809/9090 на stale localhost listeners.
 Audit helper для local port protection теперь учитывает отсутствие IPv6 mangle
 как допустимый Android-вариант и проверяет TCP/UDP protection отдельно для
 TPROXY/DNS.
 VPN-like interface detection теперь смотрит имя интерфейса из `ip link`, а не
 только фиксированные `tun0/wg0/tap0` имена.
-Doctor bundle теперь разделяет cleanup leftovers (`netstack`) и runtime
+Diagnostics report bundle теперь разделяет cleanup leftovers (`netstack`) и runtime
 apply/status verification (`netstack_runtime`), чтобы stopped runtime не
 выглядел как failed rules.
-Runtime netstack verification failure теперь попадает и в doctor summary, а не
+Runtime netstack verification failure теперь попадает и в diagnostics report summary, а не
 только в сырой payload.
 Daemon advertises `netstack.runtime.verify.v1`, чтобы APK/diagnostics могли
 отличать runtime apply/status checks от cleanup verification.
@@ -310,13 +310,13 @@ server/port/SNI остаются видимыми для диагностики 
   - URL delay ms;
   - status/error.
 - Исправить UI для пустого списка серверов.
-- Убедиться, что `privctl diagnostics.testNodes` не требует running core для TCP-теста, но корректно сообщает, что URL delay невозможен без Clash API.
+- Убедиться, что `daemonctl diagnostics.testNodes` не требует running core для TCP-теста, но корректно сообщает, что URL delay невозможен без Clash API.
 
 Acceptance:
 
-- `privctl backend.start` запускает core без DNS fatal.
+- `daemonctl backend.start` запускает core без DNS fatal.
 - `sing-box.log` при ошибках содержит конкретный fatal.
-- `privctl diagnostics.testNodes` показывает результаты по всем сохранённым nodes.
+- `daemonctl diagnostics.testNodes` показывает результаты по всем сохранённым nodes.
 - UI не даёт запускать core без node.
 
 ## Этап 2. Selector + manual override

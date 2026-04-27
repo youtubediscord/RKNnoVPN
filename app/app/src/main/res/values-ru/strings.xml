@@ -84,6 +84,7 @@
     <string name="edit_node_title">Изменить сервер</string>
     <string name="node_name_label">Имя</string>
     <string name="node_group_label">Группа</string>
+    <string name="node_owner_package_label">Пакет локального прокси</string>
     <string name="save">Сохранить</string>
     <string name="copy_link">Копировать ссылку</string>
     <string name="test_latency">Проверить задержку</string>
@@ -186,7 +187,7 @@
     <string name="reset_network_rules">Сбросить сеть</string>
     <string name="reset_network_rules_desc">Остановить core и убрать правила RKNnoVPN из iptables, DNS и маршрутизации.</string>
     <string name="runtime_logs">Логи runtime</string>
-    <string name="runtime_logs_desc">Показывает /data/adb/rknnovpn/logs/privd.log и /data/adb/rknnovpn/logs/sing-box.log.</string>
+    <string name="runtime_logs_desc">Показывает /data/adb/modules/rknnovpn/logs/daemon.log и /data/adb/modules/rknnovpn/logs/sing-box.log.</string>
     <string name="show_logs">Показать логи</string>
     <string name="loading_logs">Загрузка…</string>
     <string name="share_logs_telegram">Отправить в Telegram</string>
@@ -425,7 +426,7 @@
     <string name="audit_check_selinux_status_detail">SELinux включён в enforcing и использует политику, связанную с демоном.</string>
     <string name="audit_check_selinux_status_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_module_integrity_title">Хэши модулей ядра совпадают</string>
-    <string name="audit_check_module_integrity_detail">privd, privctl и sing-box совпадают с ожидаемыми SHA-256.</string>
+    <string name="audit_check_module_integrity_detail">daemon, daemonctl и sing-box совпадают с ожидаемыми SHA-256.</string>
     <string name="audit_check_module_integrity_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_private_dns_unchanged_title">Приватный DNS был изменён демоном</string>
     <string name="audit_check_private_dns_unchanged_detail">Системная настройка Private DNS была изменена, и приложения могут это заметить.</string>

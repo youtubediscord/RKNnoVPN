@@ -3,7 +3,7 @@ package com.rknnovpn.panel.model
 import kotlinx.serialization.Serializable
 
 /**
- * Result of a daemon privacy/security audit (`privctl audit`).
+ * Result of a daemon privacy/security audit (`daemonctl audit`).
  *
  * The daemon inspects the running configuration, routing rules, DNS settings,
  * and detected traffic patterns to produce a list of findings.

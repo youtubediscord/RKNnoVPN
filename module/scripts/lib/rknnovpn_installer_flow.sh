@@ -2,7 +2,7 @@
 # Shared RKNnoVPN module installer flow for Magisk/KSU/APatch installs.
 # Keep customize.sh thin; release/update code validates this file as required.
 
-RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/rknnovpn}"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}"
 RKNNOVPN_GID="${RKNNOVPN_GID:-23333}"
 SUBDIRS="${SUBDIRS:-bin config config/rendered scripts run logs backup profiles releases}"
 
@@ -194,7 +194,7 @@ install_default_config() {
         cp -f "${MODPATH}/defaults/config.json" "${RKNNOVPN_DIR}/config/config.defaults.json"
     fi
 
-    # New installs let privd create canonical profile.json from config.json.
+    # New installs let daemon create canonical profile.json from config.json.
 }
 
 mark_manual_start_required() {
@@ -325,8 +325,8 @@ write_install_manifest() {
     } > "$tmp_manifest" || return 1
 
     for rel in \
-        bin/privd \
-        bin/privctl \
+        bin/daemon \
+        bin/daemonctl \
         bin/sing-box \
         module/OWNERSHIP.md \
         module/module.prop \
@@ -400,7 +400,7 @@ install_release_catalog() {
         return
     }
 
-    for bin_name in sing-box privd privctl; do
+    for bin_name in sing-box daemon daemonctl; do
         copy_if_present "${RKNNOVPN_DIR}/bin/${bin_name}" "${release_dir}/bin/${bin_name}"
     done
     for name in OWNERSHIP.md module.prop service.sh post-fs-data.sh uninstall.sh customize.sh sepolicy.rule; do
@@ -445,7 +445,7 @@ set_capabilities() {
     ui_print "  [*] Setting capabilities with setcap..."
     CAPS="cap_net_admin,cap_net_raw,cap_net_bind_service+ep"
 
-    for bin_name in sing-box privd; do
+    for bin_name in sing-box daemon; do
         bin_path="${RKNNOVPN_DIR}/bin/${bin_name}"
         if [ -f "$bin_path" ]; then
             $SETCAP "$CAPS" "$bin_path" 2>/dev/null
@@ -509,7 +509,7 @@ rknnovpn_installer_run() {
     ui_print ""
     ui_print "  Data directory: ${RKNNOVPN_DIR}/"
     ui_print "  Config file:    ${RKNNOVPN_DIR}/config/config.json"
-    ui_print "  Daemon binary:  ${RKNNOVPN_DIR}/bin/privd"
+    ui_print "  Daemon binary:  ${RKNNOVPN_DIR}/bin/daemon"
     ui_print "  Core binary:    ${RKNNOVPN_DIR}/bin/sing-box"
     ui_print ""
     if [ "$PRESERVE_CONFIG" -eq 1 ]; then

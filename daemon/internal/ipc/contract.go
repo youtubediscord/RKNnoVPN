@@ -62,6 +62,10 @@ func MethodContracts() []MethodContract {
 	return cloneMethodContracts(contractManifest().Methods)
 }
 
+func ContractVersion() int {
+	return contractManifest().Version
+}
+
 func NewContract(controlProtocolVersion int, schemaVersion int, capabilities []string) Contract {
 	copiedCapabilities := append([]string(nil), capabilities...)
 	sort.Strings(copiedCapabilities)

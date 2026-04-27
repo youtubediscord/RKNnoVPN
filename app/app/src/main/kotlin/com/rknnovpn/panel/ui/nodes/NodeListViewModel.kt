@@ -161,9 +161,10 @@ class NodeListViewModel @Inject constructor(
         }
     }
 
-    fun updateNodeMetadata(nodeId: String, name: String, group: String) {
+    fun updateNodeMetadata(nodeId: String, name: String, group: String, ownerPackage: String) {
         val cleanName = name.trim()
         val cleanGroup = group.trim().ifBlank { messages.defaultGroupName() }
+        val cleanOwnerPackage = ownerPackage.trim()
         if (cleanName.isBlank()) {
             _uiState.update {
                 it.copy(
@@ -191,6 +192,7 @@ class NodeListViewModel @Inject constructor(
                 current.copy(
                     name = cleanName,
                     group = cleanGroup,
+                    ownerPackage = cleanOwnerPackage,
                 )
             )
             if (!ok) {

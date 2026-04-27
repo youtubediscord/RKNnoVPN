@@ -17,9 +17,9 @@ func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCEr
 	return map[string]interface{}{
 		"daemon":                   Version,
 		"core":                     Version,
-		"privctl":                  Version,
+		"daemonctl":                Version,
 		"module":                   readModuleVersion(),
-		"current_release":          doctorReleaseIntegrityReport(d.dataDir),
+		"current_release":          diagnosticReleaseIntegrityReport(d.dataDir),
 		"sing_box":                 d.singBoxVersion(singBoxPath, 20),
 		"control_protocol":         controlProtocolVersion,
 		"control_protocol_version": controlProtocolVersion,
@@ -27,6 +27,6 @@ func (d *daemon) handleVersion(params *json.RawMessage) (interface{}, *ipc.RPCEr
 		"panel_min_version":        Version,
 		"capabilities":             supportedCapabilities(),
 		"supported_methods":        supportedRPCMethods(),
-		"ipc_contract_version":     1,
+		"ipc_contract_version":     ipc.ContractVersion(),
 	}, nil
 }

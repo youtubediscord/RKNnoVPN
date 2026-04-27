@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 /**
  * Metadata about an installed Android application, used for per-app routing.
  *
- * Retrieved via `privctl app.list` (daemon reads package data from the system)
+ * Retrieved via `daemonctl app.list` (daemon reads package data from the system)
  * or resolved locally from PackageManager for faster access.
  */
 @Serializable

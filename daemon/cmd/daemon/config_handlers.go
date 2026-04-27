@@ -10,7 +10,6 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
-	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -94,10 +93,9 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		}
 	}
 
-	profileSaved := true
 	mutation, err := d.persistProfileConfigMutation(newCfg, true)
 	if err != nil {
-		return nil, d.configApplyRPCErrorSaved("config-import", err, profileSaved)
+		return nil, d.configApplyRPCErrorSaved("config-import", err, mutation.ConfigSaved)
 	}
 
 	return d.configMutationSuccess("config-import", "imported", true, mutation.RuntimeWasRunning, -1), nil
@@ -194,7 +192,7 @@ func configMutationWasSaved(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "config saved") || strings.Contains(msg, "panel saved")
+	return strings.Contains(msg, "config saved")
 }
 
 func (d *daemon) failIfRuntimeOperationActive() error {

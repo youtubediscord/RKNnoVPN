@@ -9,6 +9,7 @@ import com.rknnovpn.panel.ipc.ConfigMutationInfo
 import com.rknnovpn.panel.ipc.PollingStatusSource
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.ProfileConfig
+import com.rknnovpn.panel.model.SubscriptionSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +25,7 @@ import javax.inject.Singleton
 
 data class SubscriptionImportPreview(
     val url: String,
+    val source: SubscriptionSource,
     val nodes: List<Node>,
     val parseFailures: Int,
     val added: Int,
@@ -473,7 +475,8 @@ class ProfileRepository @Inject constructor(
         }
 
         return SubscriptionImportPreview(
-            url = url,
+            url = preview.source.url.ifBlank { url },
+            source = preview.source,
             nodes = preview.nodes,
             parseFailures = preview.parseFailures,
             added = preview.added,
@@ -490,8 +493,8 @@ class ProfileRepository @Inject constructor(
                 publishRuntimeStatus(result.data)
                 refreshUnlockedWithStatus("subscriptionRefresh")
                 _notice.value = messages.formatSubscriptionRefresh(
-                    importedNodes = preview.nodes.size,
-                    parseFailures = preview.parseFailures,
+                    importedNodes = result.data.imported ?: preview.nodes.size,
+                    parseFailures = result.data.parseFailures ?: preview.parseFailures,
                 )
                 preview.nodes
             }

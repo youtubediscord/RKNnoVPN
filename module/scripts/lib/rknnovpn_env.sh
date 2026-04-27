@@ -2,7 +2,7 @@
 # Shared RKNnoVPN module runtime helpers.
 # POSIX sh compatible; safe to source from boot/install/rescue scripts.
 
-RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/rknnovpn}"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-${MODDIR:-${MODPATH:-/data/adb/modules/rknnovpn}}}"
 RKNNOVPN_GID="${RKNNOVPN_GID:-23333}"
 
 BIN_DIR="${BIN_DIR:-${RKNNOVPN_DIR}/bin}"
@@ -19,9 +19,9 @@ RELEASES_DIR="${RELEASES_DIR:-${RKNNOVPN_DIR}/releases}"
 RESET_LOCK="${RESET_LOCK:-${RUN_DIR}/reset.lock}"
 ACTIVE_FILE="${ACTIVE_FILE:-${RUN_DIR}/active}"
 MANUAL_FLAG="${MANUAL_FLAG:-${CONFIG_DIR}/manual}"
-PRIVD_PID_FILE="${PRIVD_PID_FILE:-${RUN_DIR}/privd.pid}"
+DAEMON_PID_FILE="${DAEMON_PID_FILE:-${RUN_DIR}/daemon.pid}"
 SINGBOX_PID_FILE="${SINGBOX_PID_FILE:-${RUN_DIR}/singbox.pid}"
-PRIVD_SOCK="${PRIVD_SOCK:-${RUN_DIR}/daemon.sock}"
+DAEMON_SOCK="${DAEMON_SOCK:-${RUN_DIR}/daemon.sock}"
 
 FWMARK="${FWMARK:-0x2023}"
 ROUTE_TABLE="${ROUTE_TABLE:-2023}"
@@ -131,9 +131,9 @@ rknnovpn_has_boot_cleanup_markers() {
     for _marker in \
         "$ACTIVE_FILE" \
         "$RESET_LOCK" \
-        "$PRIVD_PID_FILE" \
+        "$DAEMON_PID_FILE" \
         "$SINGBOX_PID_FILE" \
-        "$PRIVD_SOCK" \
+        "$DAEMON_SOCK" \
         "$RUN_DIR/env.sh" \
         "$RUN_DIR/iptables.rules" \
         "$RUN_DIR/ip6tables.rules" \
@@ -153,5 +153,5 @@ rknnovpn_remove_runtime_snapshots() {
 }
 
 rknnovpn_remove_daemon_runtime_files() {
-    rm -f "$PRIVD_PID_FILE" "$PRIVD_SOCK" 2>/dev/null || true
+    rm -f "$DAEMON_PID_FILE" "$DAEMON_SOCK" 2>/dev/null || true
 }

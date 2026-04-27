@@ -243,10 +243,10 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		cfg.Routing.AlwaysDirectApps,
 		cfg.Routing.Mode,
 	)
-	chainProxyPorts, chainProxyUIDs := core.BuildChainedProxyProtectionEnv(cfg)
+	chainProxyPorts, chainProxyUIDs, chainProxyRules := core.BuildChainedProxyProtectionEnv(cfg)
 
 	return map[string]string{
-		"RKNNOVPN_DIR":     dataDir,
+		"RKNNOVPN_DIR":      dataDir,
 		"CORE_GID":          strconv.Itoa(gid),
 		"TPROXY_PORT":       strconv.Itoa(tproxyPort),
 		"DNS_PORT":          strconv.Itoa(dnsPort),
@@ -255,6 +255,7 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"HTTP_PORT":         strconv.Itoa(profileInbounds.HTTPPort),
 		"CHAIN_PROXY_PORTS": chainProxyPorts,
 		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
+		"CHAIN_PROXY_RULES": chainProxyRules,
 		"FWMARK":            fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":       "2023",
 		"ROUTE_TABLE_V6":    "2024",
@@ -285,6 +286,7 @@ func runtimeReloadNeedsFullRestart(oldCfg *config.Config, newCfg *config.Config,
 		"HTTP_PORT",
 		"CHAIN_PROXY_PORTS",
 		"CHAIN_PROXY_UIDS",
+		"CHAIN_PROXY_RULES",
 		"FWMARK",
 		"ROUTE_TABLE",
 		"ROUTE_TABLE_V6",

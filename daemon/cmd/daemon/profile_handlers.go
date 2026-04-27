@@ -218,7 +218,6 @@ func subscriptionRPCError(rawURL string, status int, headers map[string]string, 
 }
 
 func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, action string, updated int) (interface{}, *ipc.RPCError) {
-	runtimeWasRunning := d.runtimeIsRunning()
 	before := d.runtimeV2.Status()
 
 	d.mu.Lock()
@@ -233,24 +232,22 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 		}
 	}
 
-	if err := d.failIfRuntimeOperationActive(); err != nil {
-		rpcErr := d.configApplyRPCError(action, err)
-		rpcErr.Data = profileOperation(action, "failed", false, false, "not_started", before.AppliedState.Generation+1, before.AppliedState.Generation, runtimeErrorCode(err, "PROFILE_APPLY_BUSY"), err.Error(), nil, warnings, updated)
-		return nil, rpcErr
-	}
-
-	if err := profiledoc.Save(d.profilePath, profiledoc.FromConfig(nextCfg)); err != nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "persist profile: " + err.Error()}
-	}
-	if err := d.applyConfig(nextCfg, reload); err != nil {
+	mutation, err := d.persistProfileConfigMutation(nextCfg, reload)
+	if err != nil {
 		rpcErr := d.configApplyRPCError(action, err)
 		status := d.runtimeV2.Status()
-		rpcErr.Data = profileOperation(action, "saved_not_applied", true, false, "failed", desiredGeneration(status, before), status.AppliedState.Generation, runtimeErrorCode(err, "PROFILE_APPLY_FAILED"), err.Error(), resetReportFromRuntimeError(err), warnings, updated)
+		resultStatus := "failed"
+		runtimeApply := "not_started"
+		if mutation.ConfigSaved {
+			resultStatus = "saved_not_applied"
+			runtimeApply = "failed"
+		}
+		rpcErr.Data = profileOperation(action, resultStatus, mutation.ConfigSaved, false, runtimeApply, desiredGeneration(status, before), status.AppliedState.Generation, runtimeErrorCode(err, "PROFILE_APPLY_FAILED"), err.Error(), resetReportFromRuntimeError(err), warnings, updated)
 		return nil, rpcErr
 	}
 
 	status := d.runtimeV2.Status()
-	runtimeApply := applytx.RuntimeApplyStatus(reload, runtimeWasRunning)
+	runtimeApply := applytx.RuntimeApplyStatus(reload, mutation.RuntimeWasRunning)
 	runtimeApplied := runtimeApply == "applied"
 	if runtimeApply == "accepted" {
 		runtimeApplied = false

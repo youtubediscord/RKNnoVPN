@@ -23,6 +23,8 @@ data class Node(
     /** Protocol-specific outbound config in daemon's canonical schema. */
     val outbound: JsonObject,
     val group: String = "Default",
+    /** Android package that is expected to own a loopback proxy listener. */
+    val ownerPackage: String = "",
     /** TCP connect latency in milliseconds, null if never tested. */
     val latencyMs: Int? = null,
     /** URL response delay through the outbound, null if never tested or core is stopped. */

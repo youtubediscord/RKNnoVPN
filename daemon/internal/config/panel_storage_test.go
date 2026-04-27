@@ -139,7 +139,7 @@ func TestLoadRejectsLegacyNodeArray(t *testing.T) {
 		"transport": {"protocol":"reality","tls_server":"","fingerprint":"chrome","extra":{}},
 		"node": [],
 		"runtime_v2": {"backend_kind":"ROOT_TPROXY","fallback_policy":"OFFER_RESET"},
-		"routing": {"mode":"whitelist","bypass_lan":true,"bypass_china":false,"bypass_russia":false,"block_ads":false,"custom_direct":[],"custom_proxy":[],"custom_block":[],"geoip_path":"/data/adb/rknnovpn/data/geoip.db","geosite_path":"/data/adb/rknnovpn/data/geosite.db"},
+		"routing": {"mode":"whitelist","bypass_lan":true,"bypass_china":false,"bypass_russia":false,"block_ads":false,"custom_direct":[],"custom_proxy":[],"custom_block":[],"geoip_path":"/data/adb/modules/rknnovpn/data/geoip.db","geosite_path":"/data/adb/modules/rknnovpn/data/geosite.db"},
 		"apps": {"mode":"whitelist","list":[],"app_groups":{}},
 		"dns": {"hijack_per_uid":true,"proxy_dns":"https://1.1.1.1/dns-query","direct_dns":"https://dns.google/dns-query","bootstrap_ip":"1.1.1.1","block_quic_dns":true,"fake_ip":false},
 		"ipv6": {"mode":"mirror"},

@@ -164,10 +164,10 @@
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
     },
     {
-      "method": "doctor",
+      "method": "diagnostics.report",
       "capability": "diagnostics.bundle.v2",
-      "request": "DoctorRequest",
-      "result": "DoctorReport",
+      "request": "DiagnosticsReportRequest",
+      "result": "DiagnosticsReport",
       "errorCodes": ["INVALID_PARAMS", "INTERNAL_ERROR"]
     },
     {

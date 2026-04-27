@@ -15,14 +15,14 @@
 #            that change and refuse to work.  Instead we intercept at the
 #            network layer, which is invisible to userspace.
 #
-# Environment (set by privd before calling this script):
+# Environment (set by daemon before calling this script):
 #   DNS_PORT       — sing-box DNS listener port (default 10856)
 #   CORE_GID       — GID used by the proxy core (default 23333)
 #   DNS_SCOPE      — "off" | "all" | "uids" | "all_except_uids"
 #   PROXY_UIDS     — UIDs whose DNS should be redirected in uids scope
 #   DIRECT_UIDS    — UIDs whose DNS must stay direct in all_except_uids scope
 #   BYPASS_UIDS    — space-separated list of UIDs that must never be redirected
-#   RKNNOVPN_DIR  — base directory, e.g. /data/adb/rknnovpn
+#   RKNNOVPN_DIR  — base directory, e.g. /data/adb/modules/rknnovpn
 # ============================================================================
 
 # Fail on first error; treat unset variables as errors.
@@ -44,7 +44,7 @@ DNS_SCOPE="${DNS_SCOPE:-}"
 PROXY_UIDS="${PROXY_UIDS:-}"
 DIRECT_UIDS="${DIRECT_UIDS:-}"
 BYPASS_UIDS="${BYPASS_UIDS:-}"
-RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/rknnovpn}"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}"
 IPT_WAIT="${IPT_WAIT:--w 100}"
 
 # Chain names — keep in sync with the rest of RKNnoVPN.

@@ -316,10 +316,10 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		r.cfg.Routing.AlwaysDirectApps,
 		r.cfg.Routing.Mode,
 	)
-	chainProxyPorts, chainProxyUIDs := core.BuildChainedProxyProtectionEnv(r.cfg)
+	chainProxyPorts, chainProxyUIDs, chainProxyRules := core.BuildChainedProxyProtectionEnv(r.cfg)
 
 	return map[string]string{
-		"RKNNOVPN_DIR":     r.dataDir,
+		"RKNNOVPN_DIR":      r.dataDir,
 		"CORE_GID":          fmt.Sprintf("%d", gid),
 		"TPROXY_PORT":       fmt.Sprintf("%d", tproxyPort),
 		"DNS_PORT":          fmt.Sprintf("%d", dnsPort),
@@ -328,6 +328,7 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		"HTTP_PORT":         fmt.Sprintf("%d", profileInbounds.HTTPPort),
 		"CHAIN_PROXY_PORTS": chainProxyPorts,
 		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
+		"CHAIN_PROXY_RULES": chainProxyRules,
 		"FWMARK":            fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":       "2023",
 		"ROUTE_TABLE_V6":    "2024",

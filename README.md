@@ -24,15 +24,15 @@
   -> прокси-сервер
 ```
 
-APK вызывает `privctl` через `su`. `privctl` общается с root-демоном `privd` по Unix socket. `privd` хранит конфигурацию, рендерит `sing-box` config, запускает core, применяет iptables и выполняет health checks.
+APK вызывает `daemonctl` через `su`. `daemonctl` общается с root-демоном `daemon` по Unix socket. `daemon` хранит конфигурацию, рендерит `sing-box` config, запускает core, применяет iptables и выполняет health checks.
 
 ## Компоненты
 
 | Компонент | Назначение |
 |---|---|
-| Magisk-модуль | Скрипты установки, boot service, SELinux policy, `privd`, `privctl`, `sing-box` |
-| `privd` | root-демон: config, IPC, запуск core, iptables, DNS, health, update |
-| `privctl` | CLI-клиент для ручной диагностики и IPC-команд |
+| Magisk-модуль | Скрипты установки, boot service, SELinux policy, `daemon`, `daemonctl`, `sing-box` |
+| `daemon` | root-демон: config, IPC, запуск core, iptables, DNS, health, update |
+| `daemonctl` | CLI-клиент для ручной диагностики и IPC-команд |
 | Android APK | Kotlin/Compose панель управления; в `v2` держит только control-plane сеть |
 | `sing-box` | transport core: tproxy inbound, outbounds, `urltest`, Clash API для delay-тестов |
 
@@ -96,7 +96,7 @@ APK вызывает `privctl` через `su`. `privctl` общается с ro
 
 ## Выбор серверов и тесты
 
-Все сохранённые nodes попадают в `sing-box` как outbounds. Если серверов несколько, `privd` рендерит `urltest` outbound с тегом `proxy`, а маршрут по умолчанию указывает на него.
+Все сохранённые nodes попадают в `sing-box` как outbounds. Если серверов несколько, `daemon` рендерит `urltest` outbound с тегом `proxy`, а маршрут по умолчанию указывает на него.
 
 В UI есть `Проверить все`:
 
@@ -124,7 +124,7 @@ APK вызывает `privctl` через `su`. `privctl` общается с ro
 
 Требования:
 
-- Go 1.22+ для `privd`/`privctl`;
+- Go 1.22+ для `daemon`/`daemonctl`;
 - Go 1.24.x для сборки актуального `sing-box`;
 - JDK 17 + Android SDK для APK;
 - Linux/macOS для кросс-сборки.
@@ -132,7 +132,7 @@ APK вызывает `privctl` через `su`. `privctl` общается с ro
 Команды:
 
 ```bash
-make daemon    # privd + privctl для arm64 + armeabi-v7a
+make daemon    # daemon + daemonctl для arm64 + armeabi-v7a
 make singbox   # статическая сборка sing-box для arm64 + armv7
 make module    # Magisk module ZIP
 make apk       # debug APK
@@ -156,7 +156,7 @@ git push origin v1.4.2
 
 Workflow:
 
-- собирает `privd`/`privctl` для `arm64` и `armv7`;
+- собирает `daemon`/`daemonctl` для `arm64` и `armv7`;
 - резолвит актуальный release `sing-box`;
 - собирает `sing-box` статически;
 - собирает module ZIP;
@@ -169,31 +169,31 @@ Workflow:
 Проверка состояния:
 
 ```sh
-su -c '/data/adb/rknnovpn/bin/privctl backend.status'
+su -c '/data/adb/modules/rknnovpn/bin/daemonctl backend.status'
 ```
 
 Запуск:
 
 ```sh
-su -c '/data/adb/rknnovpn/bin/privctl backend.start'
+su -c '/data/adb/modules/rknnovpn/bin/daemonctl backend.start'
 ```
 
 Логи core:
 
 ```sh
-su -c 'cat /data/adb/rknnovpn/logs/sing-box.log'
+su -c 'cat /data/adb/modules/rknnovpn/logs/sing-box.log'
 ```
 
 Логи daemon:
 
 ```sh
-su -c '/data/adb/rknnovpn/bin/privctl logs {"lines":100}'
+su -c '/data/adb/modules/rknnovpn/bin/daemonctl logs {"lines":100}'
 ```
 
 Проверка всех nodes:
 
 ```sh
-su -c '/data/adb/rknnovpn/bin/privctl diagnostics.testNodes'
+su -c '/data/adb/modules/rknnovpn/bin/daemonctl diagnostics.testNodes'
 ```
 
 Если `sing-box` упал до открытия порта `10853`, ошибка в приложении должна содержать хвост `sing-box.log`.

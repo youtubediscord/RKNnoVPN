@@ -14,7 +14,7 @@ import (
 )
 
 func TestIgnorableCleanupScriptError(t *testing.T) {
-	if !ignorableCleanupScriptError(errors.New("script not found: /data/adb/rknnovpn/scripts/dns.sh: no such file or directory")) {
+	if !ignorableCleanupScriptError(errors.New("script not found: /data/adb/modules/rknnovpn/scripts/dns.sh: no such file or directory")) {
 		t.Fatal("missing cleanup script should be treated as an idempotent cleanup no-op")
 	}
 	if ignorableCleanupScriptError(errors.New("exec iptables.sh stop: exit status 2")) {

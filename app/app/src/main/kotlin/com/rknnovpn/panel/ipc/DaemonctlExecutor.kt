@@ -30,22 +30,22 @@ import kotlin.concurrent.thread
 import kotlin.coroutines.resume
 
 /**
- * Low-level executor that shells out to the `privctl` binary via `su`.
+ * Low-level executor that shells out to the `daemonctl` binary via `su`.
  *
  * Every call:
- * 1. Builds a JSON-RPC-style request for `privctl <method>`
+ * 1. Builds a JSON-RPC-style request for `daemonctl <method>`
  * 2. Streams optional JSON params via stdin to avoid argv length limits
  * 3. Runs it under `su -c "..."`
  * 4. Captures stdout, parses as JSON
- * 4. Maps the response to [PrivctlResult]
+ * 4. Maps the response to [DaemonctlResult]
  *
  * Thread-safety: all calls are dispatched on [Dispatchers.IO].
  * Timeout default: 5 000 ms, configurable per-call.
  */
 @Singleton
-class PrivctlExecutor @Inject constructor() {
+class DaemonctlExecutor @Inject constructor() {
 
-    private val privctlPath = "/data/adb/rknnovpn/bin/privctl"
+    private val daemonctlPath = "/data/adb/modules/rknnovpn/bin/daemonctl"
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -54,7 +54,7 @@ class PrivctlExecutor @Inject constructor() {
     }
 
     companion object {
-        private const val TAG = "PrivctlExecutor"
+        private const val TAG = "DaemonctlExecutor"
         private const val DEFAULT_TIMEOUT_MS = 5_000L
         private const val INLINE_PARAMS_LIMIT = 16 * 1024
 
@@ -63,26 +63,26 @@ class PrivctlExecutor @Inject constructor() {
     }
 
     /**
-     * Execute a single privctl JSON-RPC method.
+     * Execute a single daemonctl JSON-RPC method.
      *
      * @param method  The method name (e.g. "backend.status", "profile.get").
      * @param params  Optional parameter object.
      * @param timeoutMs  Maximum wall-clock time for the command.
-     * @return A [PrivctlResult] that is never null.
+     * @return A [DaemonctlResult] that is never null.
      */
     suspend fun execute(
         method: String,
         params: JsonObject = emptyJsonObject(),
         timeoutMs: Long = DEFAULT_TIMEOUT_MS
-    ): PrivctlResult = withContext(Dispatchers.IO) {
+    ): DaemonctlResult = withContext(Dispatchers.IO) {
         try {
             val result = withTimeoutOrNull(timeoutMs) {
                 executeRaw(method, params)
             }
-            result ?: PrivctlResult.Timeout(timeoutMs, method)
+            result ?: DaemonctlResult.Timeout(timeoutMs, method)
         } catch (e: Exception) {
             Log.e(TAG, "execute($method) failed unexpectedly", e)
-            PrivctlResult.UnexpectedError(e)
+            DaemonctlResult.UnexpectedError(e)
         }
     }
 
@@ -91,16 +91,16 @@ class PrivctlExecutor @Inject constructor() {
     private suspend fun executeRaw(
         method: String,
         params: JsonObject
-    ): PrivctlResult = suspendCancellableCoroutine { cont ->
+    ): DaemonctlResult = suspendCancellableCoroutine { cont ->
         var process: Process? = null
         try {
             val paramsJson = params.toString()
             val useStdin = params.isNotEmpty() &&
                 paramsJson.toByteArray(StandardCharsets.UTF_8).size > INLINE_PARAMS_LIMIT
             val commandString = when {
-                params.isEmpty() -> "$privctlPath $method"
-                useStdin -> "RKNNOVPN_STDIN_PARAMS=1 $privctlPath $method"
-                else -> "$privctlPath $method ${shellQuote(paramsJson)}"
+                params.isEmpty() -> "$daemonctlPath $method"
+                useStdin -> "RKNNOVPN_STDIN_PARAMS=1 $daemonctlPath $method"
+                else -> "$daemonctlPath $method ${shellQuote(paramsJson)}"
             }
             val command = arrayOf(
                 "su", "-c", commandString
@@ -118,10 +118,10 @@ class PrivctlExecutor @Inject constructor() {
 
             var stdout = ""
             var stderr = ""
-            val stdoutReader = thread(start = true, name = "privctl-stdout") {
+            val stdoutReader = thread(start = true, name = "daemonctl-stdout") {
                 stdout = readStreamSafely(process.inputStream, "stdout")
             }
-            val stderrReader = thread(start = true, name = "privctl-stderr") {
+            val stderrReader = thread(start = true, name = "daemonctl-stderr") {
                 stderr = readStreamSafely(process.errorStream, "stderr")
             }
 
@@ -138,7 +138,7 @@ class PrivctlExecutor @Inject constructor() {
         } catch (e: Exception) {
             terminateProcess(process, "failed")
             if (cont.isActive) {
-                cont.resume(PrivctlResult.UnexpectedError(e))
+                cont.resume(DaemonctlResult.UnexpectedError(e))
             }
         }
     }
@@ -160,12 +160,12 @@ class PrivctlExecutor @Inject constructor() {
         try {
             process.destroy()
             if (!process.waitFor(300, TimeUnit.MILLISECONDS)) {
-                Log.w(TAG, "privctl process still alive after $reason; forcing kill")
+                Log.w(TAG, "daemonctl process still alive after $reason; forcing kill")
                 process.destroyForcibly()
                 process.waitFor(1, TimeUnit.SECONDS)
             }
         } catch (e: Exception) {
-            Log.d(TAG, "privctl process cleanup after $reason failed: ${e.message}")
+            Log.d(TAG, "daemonctl process cleanup after $reason failed: ${e.message}")
         }
     }
 
@@ -183,10 +183,10 @@ class PrivctlExecutor @Inject constructor() {
         return try {
             BufferedReader(InputStreamReader(stream)).use { it.readText().trim() }
         } catch (e: InterruptedIOException) {
-            Log.d(TAG, "privctl $streamName reader interrupted")
+            Log.d(TAG, "daemonctl $streamName reader interrupted")
             ""
         } catch (e: IOException) {
-            Log.d(TAG, "privctl $streamName reader closed: ${e.message}")
+            Log.d(TAG, "daemonctl $streamName reader closed: ${e.message}")
             ""
         }
     }
@@ -196,39 +196,39 @@ class PrivctlExecutor @Inject constructor() {
         stdout: String,
         stderr: String,
         method: String
-    ): PrivctlResult {
+    ): DaemonctlResult {
         // su denied
         if (exitCode == SU_DENIED_EXIT_CODE ||
             stderr.contains("permission denied", ignoreCase = true) ||
             stderr.contains("not found", ignoreCase = true) && stderr.contains("su")
         ) {
-            return PrivctlResult.RootDenied(stderr.ifBlank { "su exited with code $exitCode" })
+            return DaemonctlResult.RootDenied(stderr.ifBlank { "su exited with code $exitCode" })
         }
 
-        // privctl binary missing
+        // daemonctl binary missing
         if (stderr.contains("not found", ignoreCase = true) &&
-            stderr.contains("privctl", ignoreCase = true)
+            stderr.contains("daemonctl", ignoreCase = true)
         ) {
-            return PrivctlResult.DaemonNotFound(privctlPath)
+            return DaemonctlResult.DaemonNotFound(daemonctlPath)
         }
 
-        // Old privctl binary that doesn't know the requested command.
+        // Old daemonctl binary that doesn't know the requested command.
         // It prints "error: unknown command ..." to stderr and exits 1.
         // Detect this before trying to parse stdout (which may contain
         // the usage text and fail JSON parsing).
         if (exitCode != 0 &&
             stderr.contains("unknown command", ignoreCase = true)
         ) {
-            return PrivctlResult.Error(
+            return DaemonctlResult.Error(
                 code = -32601, // MethodNotFound (JSON-RPC standard)
-                message = "method not found: $method (privctl does not support this command)"
+                message = "method not found: $method (daemonctl does not support this command)"
             )
         }
 
         // No output at all. New daemons always return a typed IPC envelope;
         // a silent success would make mutating operations look safer than they are.
         if (stdout.isBlank()) {
-            return PrivctlResult.Error(
+            return DaemonctlResult.Error(
                 code = if (exitCode == 0) -32600 else exitCode,
                 message = stderr.ifBlank {
                     "Daemon response for $method is missing the typed IPC envelope"
@@ -241,7 +241,7 @@ class PrivctlExecutor @Inject constructor() {
             json.parseToJsonElement(stdout)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse stdout as JSON: ${stdout.take(100)}", e)
-            return PrivctlResult.Error(
+            return DaemonctlResult.Error(
                 code = -32700,
                 message = "Invalid JSON from daemon: ${e.message}"
             )
@@ -250,7 +250,7 @@ class PrivctlExecutor @Inject constructor() {
         val obj = try {
             jsonElement.jsonObject
         } catch (e: Exception) {
-            return PrivctlResult.Error(
+            return DaemonctlResult.Error(
                 code = -32700,
                 message = "Expected JSON object, got: ${jsonElement::class.simpleName}"
             )
@@ -268,13 +268,13 @@ class PrivctlExecutor @Inject constructor() {
             return try {
                 val errJson = errorObj.jsonObject
                 val envelope = errJson["data"]?.daemonEnvelopeOrNull()
-                    ?: return PrivctlResult.Error(
+                    ?: return DaemonctlResult.Error(
                         code = errJson["code"]?.jsonPrimitive?.int ?: -32600,
                         message = "Daemon error for $method is missing the typed IPC envelope",
                         details = errJson["data"],
                     )
                 val envelopeError = envelope?.get("error")?.jsonObject
-                PrivctlResult.Error(
+                DaemonctlResult.Error(
                     code = errJson["code"]?.jsonPrimitive?.int ?: -1,
                     message = envelopeError?.get("message")?.jsonPrimitive?.contentOrNull
                         ?: errJson["message"]?.jsonPrimitive?.content
@@ -283,7 +283,7 @@ class PrivctlExecutor @Inject constructor() {
                     envelope = envelope,
                 )
             } catch (e: Exception) {
-                PrivctlResult.Error(
+                DaemonctlResult.Error(
                     code = -1,
                     message = errorObj.toString()
                 )
@@ -291,9 +291,9 @@ class PrivctlExecutor @Inject constructor() {
         }
 
         if (exitCode != 0) {
-            return PrivctlResult.Error(
+            return DaemonctlResult.Error(
                 code = exitCode,
-                message = stderr.ifBlank { "privctl exited with code $exitCode" },
+                message = stderr.ifBlank { "daemonctl exited with code $exitCode" },
                 details = jsonElement
             )
         }
@@ -305,14 +305,14 @@ class PrivctlExecutor @Inject constructor() {
             if (envelope != null) {
                 return resultFromEnvelope(envelope)
             }
-            return PrivctlResult.Error(
+            return DaemonctlResult.Error(
                 code = -32600,
                 message = "Daemon result for $method is missing the typed IPC envelope",
                 details = resultField,
             )
         }
 
-        return PrivctlResult.Error(
+        return DaemonctlResult.Error(
             code = -32600,
             message = "Daemon response for $method is missing result/error typed IPC envelope",
             details = jsonElement,
@@ -335,13 +335,13 @@ class PrivctlExecutor @Inject constructor() {
         return if (hasEnvelopeStatus && hasEnvelopePayload) this else null
     }
 
-    private fun resultFromEnvelope(envelope: JsonObject): PrivctlResult {
+    private fun resultFromEnvelope(envelope: JsonObject): DaemonctlResult {
         val ok = envelope["ok"]?.jsonPrimitive?.booleanOrNull ?: true
         return if (ok) {
-            PrivctlResult.Success(envelope["result"] ?: JsonNull, envelope)
+            DaemonctlResult.Success(envelope["result"] ?: JsonNull, envelope)
         } else {
             val envelopeError = envelope["error"]?.jsonObject
-            PrivctlResult.Error(
+            DaemonctlResult.Error(
                 code = envelopeError?.get("rpcCode")?.jsonPrimitive?.intOrNull ?: -1,
                 message = envelopeError?.get("message")?.jsonPrimitive?.contentOrNull
                     ?: "Unknown daemon error",

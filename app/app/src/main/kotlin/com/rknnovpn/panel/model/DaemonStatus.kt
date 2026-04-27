@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 
 /**
- * Snapshot of the daemon's runtime state, returned by `privctl backend.status`.
+ * Snapshot of the daemon's runtime state, returned by `daemonctl backend.status`.
  */
 @Serializable
 data class DaemonStatus(
@@ -71,7 +71,7 @@ data class TrafficStats(
 }
 
 /**
- * Result of a daemon health check (`privctl diagnostics.health`).
+ * Result of a daemon health check (`daemonctl diagnostics.health`).
  */
 @Serializable
 data class HealthResult(

@@ -14,7 +14,7 @@
 #     packets because their source address does not match the receiving
 #     interface.
 #
-# Environment (set by privd):
+# Environment (set by daemon):
 #   FWMARK         — hex mark, e.g. 0x2023
 #   ROUTE_TABLE    — IPv4 table number, e.g. 2023
 #   ROUTE_TABLE_V6 — IPv6 table number, e.g. 2024

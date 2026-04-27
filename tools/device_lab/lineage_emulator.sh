@@ -29,7 +29,7 @@ Usage:
   tools/device_lab/lineage_emulator.sh start --vm-dir PATH
   tools/device_lab/lineage_emulator.sh prepare-insecure-adb --vm-dir PATH
   tools/device_lab/lineage_emulator.sh connect
-  tools/device_lab/lineage_emulator.sh doctor
+  tools/device_lab/lineage_emulator.sh diagnostics-report
   tools/device_lab/lineage_emulator.sh collect [--include-packages]
   tools/device_lab/lineage_emulator.sh smoke [--allow-reset] [--allow-start] [--stop-after-start]
   tools/device_lab/lineage_emulator.sh install --apk PATH --module PATH --allow-module-install --reboot-after-install
@@ -349,7 +349,7 @@ case "$command_name" in
         ensure_adb_shell_service || exit 1
         wait_boot_completed
         ;;
-    doctor)
+    diagnostics-report)
         connect_emulator
         ensure_adb_shell_service || exit 1
         wait_boot_completed

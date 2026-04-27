@@ -20,13 +20,13 @@
 ## v1.7.1
 
 - Reworked root TPROXY runtime recovery with structured reset reports, netstack cleanup verification, and idempotent rescue behavior.
-- Added `privctl doctor` diagnostics with redacted configs/logs, compatibility metadata, release integrity, netstack leftovers, node-test summary, and runtime stage reports.
+- Added `daemonctl diagnostics.report` diagnostics with redacted configs/logs, compatibility metadata, release integrity, netstack leftovers, node-test summary, and runtime stage reports.
 - Hardened APK/module/daemon compatibility checks before mutating actions, including repair-safe reset handling.
 - Split readiness, DNS, routing, egress, and node-test verdicts so TCP-only servers are not treated as usable routes.
 - Kept production privacy defaults off for localhost SOCKS/HTTP/API helpers and tightened APK privacy guardrails.
-- Unified runtime listener readiness for start/hot-swap across TPROXY, DNS, and optional API ports, and fixed successful start reports to finish cleanly in both status and doctor payloads.
+- Unified runtime listener readiness for start/hot-swap across TPROXY, DNS, and optional API ports, and fixed successful start reports to finish cleanly in both status and diagnostics report payloads.
 - Extended netstack/status privacy verification to check local listener DROP rules and tightened diagnostic redaction for WireGuard/Amnezia pre-shared keys.
-- Expanded self-check/doctor summary with compact compatibility, current-release, sing-box check, and runtime stage metadata for quick support triage.
+- Expanded self-check/diagnostics report summary with compact compatibility, current-release, sing-box check, and runtime stage metadata for quick support triage.
 - Added typed APK IPC access to `self-check` with `self.check` fallback for quick repair summaries.
 - Exposed self-check through the APK status repository so Settings/Audit can use concise repair summaries without depending on raw IPC.
 - Treated legacy `unknown command` audit responses like method-not-found so old daemons still fall back to local audit checks.
@@ -39,7 +39,7 @@
 
 - Split hard runtime readiness from soft DNS and egress diagnostics so cold-start DNS timeouts leave the runtime connected but degraded.
 - Added deterministic readiness/operational diagnostics and clearer node-test reasons for runtime, proxy DNS, and HTTP helper failures.
-- Added in-app display and sharing for `/data/adb/rknnovpn/logs/privd.log` and `/data/adb/rknnovpn/logs/sing-box.log`.
+- Added in-app display and sharing for `/data/adb/modules/rknnovpn/logs/daemon.log` and `/data/adb/modules/rknnovpn/logs/sing-box.log`.
 
 ## v1.6.3
 
@@ -49,7 +49,7 @@
 
 ## v1.6.2
 
-- Stabilized large config/panel payload handling between APK, `privctl`, and daemon IPC.
+- Stabilized large config/panel payload handling between APK, `daemonctl`, and daemon IPC.
 - Added `panel.json` install/upgrade support and migration regression coverage.
 - Hardened runtime sync, reset cleanup, and mixed APK/module compatibility paths.
 - Require matching module and APK artifacts for in-app updates after the storage/API split.

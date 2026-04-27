@@ -46,6 +46,12 @@ data class Subscription(
 )
 
 @Serializable
+data class SubscriptionSource(
+    val providerKey: String = "",
+    val url: String = ""
+)
+
+@Serializable
 data class RoutingConfig(
     val mode: RoutingMode = RoutingMode.PER_APP,
     /** Package names routed through the proxy (only for PER_APP mode). */

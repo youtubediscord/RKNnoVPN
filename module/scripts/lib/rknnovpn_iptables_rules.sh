@@ -53,7 +53,10 @@ emit_chain_proxy_port_protection() {
     ps_emit_chain="$1"
     ps_proxy_port=""
     ps_proxy_uid=""
-    if [ -z "${CHAIN_PROXY_PORTS}" ] || [ -z "${CHAIN_PROXY_UIDS}" ]; then
+    ps_proxy_rule=""
+    ps_rule_port=""
+    ps_rule_uid=""
+    if [ -z "${CHAIN_PROXY_PORTS}" ]; then
         return 0
     fi
     for ps_proxy_port in ${CHAIN_PROXY_PORTS}; do
@@ -63,12 +66,28 @@ emit_chain_proxy_port_protection() {
         if [ "${ps_proxy_port}" -le 0 ] 2>/dev/null || chain_proxy_port_reserved "${ps_proxy_port}"; then
             continue
         fi
-        for ps_proxy_uid in ${CHAIN_PROXY_UIDS}; do
-            case "${ps_proxy_uid}" in
-                ''|*[!0-9]*) continue ;;
-            esac
-            echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -m owner --uid-owner ${ps_proxy_uid} -j RETURN"
-        done
+        if [ -n "${CHAIN_PROXY_RULES}" ]; then
+            for ps_proxy_rule in ${CHAIN_PROXY_RULES}; do
+                ps_rule_port="${ps_proxy_rule%%:*}"
+                ps_rule_uid="${ps_proxy_rule#*:}"
+                case "${ps_rule_port}" in
+                    ''|*[!0-9]*) continue ;;
+                esac
+                case "${ps_rule_uid}" in
+                    ''|*[!0-9]*) continue ;;
+                esac
+                if [ "${ps_rule_port}" = "${ps_proxy_port}" ]; then
+                    echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -m owner --uid-owner ${ps_rule_uid} -j RETURN"
+                fi
+            done
+        else
+            for ps_proxy_uid in ${CHAIN_PROXY_UIDS}; do
+                case "${ps_proxy_uid}" in
+                    ''|*[!0-9]*) continue ;;
+                esac
+                echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -m owner --uid-owner ${ps_proxy_uid} -j RETURN"
+            done
+        fi
         echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -m owner ! --uid-owner 0 ! --gid-owner ${CORE_GID} -j DROP"
         echo "-A ${ps_emit_chain} -p tcp --dport ${ps_proxy_port} -j RETURN"
     done
@@ -104,7 +123,7 @@ check_local_listener_protection() {
     if http_port_enabled; then
         check_listener_protection "${ps_check_ipt}" tcp "${HTTP_PORT}" "HTTP" || ps_listener_missing=1
     fi
-    if [ -n "${CHAIN_PROXY_UIDS}" ]; then
+    if [ -n "${CHAIN_PROXY_PORTS}" ]; then
         for ps_proxy_port in ${CHAIN_PROXY_PORTS}; do
             case "${ps_proxy_port}" in
                 ''|*[!0-9]*) continue ;;

@@ -66,6 +66,10 @@ type NodeConfig struct {
 	SocksVersion string `json:"socks_version,omitempty"`
 	Network      string `json:"network,omitempty"`
 
+	// Local proxy hardening. When Address points at loopback, OwnerPackage
+	// declares the Android package that is expected to own that listener.
+	OwnerPackage string `json:"owner_package,omitempty"`
+
 	// Hysteria2-specific fields.
 	ServerPorts  []string `json:"server_ports,omitempty"`
 	ObfsType     string   `json:"obfs_type,omitempty"`
@@ -234,6 +238,7 @@ type NodeProfile struct {
 	SSPluginOpts    string            `json:"ss_plugin_opts,omitempty"`
 	SocksVersion    string            `json:"socks_version,omitempty"`
 	Network         string            `json:"network,omitempty"`
+	OwnerPackage    string            `json:"owner_package,omitempty"`
 	ServerPorts     []string          `json:"server_ports,omitempty"`
 	ObfsType        string            `json:"obfs_type,omitempty"`
 	ObfsPassword    string            `json:"obfs_password,omitempty"`
@@ -283,8 +288,8 @@ func DefaultConfig() *Config {
 		Routing: RoutingConfig{
 			Mode:        "whitelist",
 			BypassLAN:   true,
-			GeoIPPath:   "/data/adb/rknnovpn/data/geoip.db",
-			GeoSitePath: "/data/adb/rknnovpn/data/geosite.db",
+			GeoIPPath:   "/data/adb/modules/rknnovpn/data/geoip.db",
+			GeoSitePath: "/data/adb/modules/rknnovpn/data/geosite.db",
 		},
 		Apps: AppsConfig{
 			Mode: "whitelist",
@@ -696,6 +701,7 @@ func (c *Config) ResolveProfile() *NodeProfile {
 		SSPluginOpts:    c.Node.SSPluginOpts,
 		SocksVersion:    c.Node.SocksVersion,
 		Network:         c.Node.Network,
+		OwnerPackage:    c.Node.OwnerPackage,
 		ServerPorts:     c.Node.ServerPorts,
 		ObfsType:        c.Node.ObfsType,
 		ObfsPassword:    c.Node.ObfsPassword,
@@ -818,6 +824,7 @@ func (c *Config) SyncFromProfileProjection(authoritative bool) {
 		c.Node.SSPluginOpts = profile.SSPluginOpts
 		c.Node.SocksVersion = profile.SocksVersion
 		c.Node.Network = profile.Network
+		c.Node.OwnerPackage = profile.OwnerPackage
 		c.Node.ServerPorts = append([]string(nil), profile.ServerPorts...)
 		c.Node.ObfsType = profile.ObfsType
 		c.Node.ObfsPassword = profile.ObfsPassword

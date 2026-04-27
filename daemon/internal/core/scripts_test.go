@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -186,16 +187,19 @@ func TestBuildChainedProxyProtectionEnvAllowsMutualLocalProxyUIDs(t *testing.T) 
 		"outbound":{"protocol":"socks","settings":{"address":"localhost","port":10809}}
 	}`)
 
-	ports, uids := BuildChainedProxyProtectionEnv(cfg)
+	ports, uids, rules := BuildChainedProxyProtectionEnv(cfg)
 	if ports != "10808 10809" {
 		t.Fatalf("unexpected chain proxy ports: %q", ports)
 	}
 	if uids != "10123 10124" {
 		t.Fatalf("unexpected chain proxy UIDs: %q", uids)
 	}
+	if rules != "10808:10123 10809:10124" {
+		t.Fatalf("unexpected chain proxy rules: %q", rules)
+	}
 }
 
-func TestBuildChainedProxyProtectionEnvSkipsUnownedAndReservedPorts(t *testing.T) {
+func TestBuildChainedProxyProtectionEnvProtectsUnownedLocalPorts(t *testing.T) {
 	withProcNetTCPTestEnv(t, `
   sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 0100007F:2A38 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10123 0 111 1 00000000
@@ -214,11 +218,41 @@ func TestBuildChainedProxyProtectionEnvSkipsUnownedAndReservedPorts(t *testing.T
 		"server":"127.0.0.1",
 		"port":10809,
 		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":10809}}
+		}`)
+
+	ports, uids, rules := BuildChainedProxyProtectionEnv(cfg)
+	if ports != "10809" || uids != "" || rules != "" {
+		t.Fatalf("unowned local ports must be protected without allow UIDs, got ports=%q uids=%q rules=%q", ports, uids, rules)
+	}
+}
+
+func TestBuildChainedProxyProtectionEnvUsesDeclaredOwnerPackageBeforeListener(t *testing.T) {
+	withProcNetTCPTestEnv(t, "", "")
+	withPackageResolverTestEnv(t, `
+com.proxy.owner 10123 0 /data/user/0/com.proxy.owner default 3003
+`, func(bool) (string, error) {
+		return "", fmt.Errorf("unexpected package command")
+	})
+	cfg := config.DefaultConfig()
+	cfg.Profile.Nodes = jsonRawMessage(t, `{
+		"id":"nekobox",
+		"name":"NekoBox local",
+		"protocol":"SOCKS",
+		"server":"127.0.0.1",
+		"port":10808,
+		"ownerPackage":"com.proxy.owner",
+		"outbound":{"protocol":"socks","settings":{"address":"127.0.0.1","port":10808}}
 	}`)
 
-	ports, uids := BuildChainedProxyProtectionEnv(cfg)
-	if ports != "" || uids != "" {
-		t.Fatalf("reserved/unowned ports must stay fail-open, got ports=%q uids=%q", ports, uids)
+	ports, uids, rules := BuildChainedProxyProtectionEnv(cfg)
+	if ports != "10808" {
+		t.Fatalf("unexpected chain proxy ports: %q", ports)
+	}
+	if uids != "10123" {
+		t.Fatalf("unexpected owner package UIDs: %q", uids)
+	}
+	if rules != "10808:10123" {
+		t.Fatalf("unexpected owner package rules: %q", rules)
 	}
 }
 

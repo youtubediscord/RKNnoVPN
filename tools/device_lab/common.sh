@@ -3,8 +3,8 @@ set -u
 
 ADB="${ADB:-adb}"
 ADB_SERIAL="${ADB_SERIAL:-}"
-RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/rknnovpn}"
-PRIVCTL_PATH="${PRIVCTL_PATH:-$RKNNOVPN_DIR/bin/privctl}"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/modules/rknnovpn}"
+DAEMONCTL_PATH="${DAEMONCTL_PATH:-$RKNNOVPN_DIR/bin/daemonctl}"
 OUT_ROOT="${OUT_ROOT:-lab-artifacts/device_lab}"
 
 die() {
@@ -56,8 +56,8 @@ ensure_root_shell() {
     adb_su "id" >/dev/null 2>&1 || die "su is not available through adb shell"
 }
 
-ensure_privctl() {
-    adb_su "test -x '$PRIVCTL_PATH'" >/dev/null 2>&1 || die "privctl is missing or not executable at $PRIVCTL_PATH"
+ensure_daemonctl() {
+    adb_su "test -x '$DAEMONCTL_PATH'" >/dev/null 2>&1 || die "daemonctl is missing or not executable at $DAEMONCTL_PATH"
 }
 
 make_run_dir() {

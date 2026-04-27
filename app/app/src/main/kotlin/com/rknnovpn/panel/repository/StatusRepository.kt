@@ -116,7 +116,7 @@ class StatusRepository @Inject constructor(
     suspend fun audit(): DaemonClientResult<AuditReport> = client.audit()
 
     /**
-     * Fetch the daemon's concise repair summary without the full doctor bundle.
+     * Fetch the daemon's concise repair summary without the full diagnostics bundle.
      */
     suspend fun selfCheck(): DaemonClientResult<SelfCheckSummary> = client.selfCheck()
 

@@ -6,10 +6,10 @@
 # iptables backup. It removes only RKNnoVPN-owned network artifacts.
 #
 # Modes:
-#   daemon-reset    - called by privd; keep privd socket/process alive
-#   --boot-clean    - called from service.sh before privd starts
-#   hard-reset      - external rescue; also kill privd and remove daemon socket
-#   update-clean    - called by updater; keep privd socket/process alive
+#   daemon-reset    - called by daemon; keep daemon socket/process alive
+#   --boot-clean    - called from service.sh before daemon starts
+#   hard-reset      - external rescue; also kill daemon and remove daemon socket
+#   update-clean    - called by updater; keep daemon socket/process alive
 #   uninstall-clean - called by module removal; kill runtime without changing
 #                     user config/manual state
 # ============================================================================
@@ -68,8 +68,8 @@ if [ "$MODE" = "daemon-reset" ] || [ "$MODE" = "hard-reset" ]; then
 fi
 
 log "[1/8] asking daemon for graceful stop"
-if [ -x "$RKNNOVPN_DIR/bin/privctl" ] && [ "$MODE" = "hard-reset" ]; then
-    "$RKNNOVPN_DIR/bin/privctl" stop >/dev/null 2>&1 || true
+if [ -x "$RKNNOVPN_DIR/bin/daemonctl" ] && [ "$MODE" = "hard-reset" ]; then
+    "$RKNNOVPN_DIR/bin/daemonctl" stop >/dev/null 2>&1 || true
 fi
 
 kill_matching_processes() {
@@ -86,7 +86,7 @@ kill_matching_processes() {
                 log "$signal $pid :: $cmd"
                 kill "-$signal" "$pid" 2>/dev/null
                 ;;
-            *"$RKNNOVPN_DIR/bin/privd"*)
+            *"$RKNNOVPN_DIR/bin/daemon"*)
                 if [ "$MODE" = "hard-reset" ] || [ "$MODE" = "boot-clean" ] || [ "$MODE" = "uninstall-clean" ]; then
                     log "$signal $pid :: $cmd"
                     kill "-$signal" "$pid" 2>/dev/null
@@ -96,7 +96,7 @@ kill_matching_processes() {
     done
 }
 
-log "[2/8] killing orphan privd/sing-box/net_handler processes"
+log "[2/8] killing orphan daemon/sing-box/net_handler processes"
 kill_matching_processes TERM
 sleep 1
 kill_matching_processes KILL

@@ -197,16 +197,22 @@ type BackendCapability struct {
 }
 
 type CompatibilityStatus struct {
-	DaemonVersion          string   `json:"daemonVersion,omitempty"`
-	ModuleVersion          string   `json:"moduleVersion,omitempty"`
-	CurrentReleaseVersion  string   `json:"currentReleaseVersion,omitempty"`
-	CurrentReleaseOK       bool     `json:"currentReleaseOk"`
-	CurrentReleaseError    string   `json:"currentReleaseError,omitempty"`
-	ControlProtocolVersion int      `json:"controlProtocolVersion"`
-	SchemaVersion          int      `json:"schemaVersion"`
-	PanelMinVersion        string   `json:"panelMinVersion,omitempty"`
-	Capabilities           []string `json:"capabilities,omitempty"`
-	SupportedMethods       []string `json:"supportedMethods,omitempty"`
+	DaemonVersion          string             `json:"daemonVersion,omitempty"`
+	ModuleVersion          string             `json:"moduleVersion,omitempty"`
+	CurrentReleaseVersion  string             `json:"currentReleaseVersion,omitempty"`
+	CurrentReleaseOK       bool               `json:"currentReleaseOk"`
+	CurrentReleaseError    string             `json:"currentReleaseError,omitempty"`
+	ControlProtocolVersion int                `json:"controlProtocolVersion"`
+	SchemaVersion          int                `json:"schemaVersion"`
+	PanelMinVersion        string             `json:"panelMinVersion,omitempty"`
+	Capabilities           []string           `json:"capabilities,omitempty"`
+	SupportedMethods       []string           `json:"supportedMethods,omitempty"`
+	Methods                []MethodCapability `json:"methods,omitempty"`
+}
+
+type MethodCapability struct {
+	Method     string `json:"method"`
+	Capability string `json:"capability,omitempty"`
 }
 
 type Status struct {

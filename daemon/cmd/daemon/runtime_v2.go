@@ -186,7 +186,7 @@ func (d *daemon) refreshRuntimeV2Compatibility() {
 	if d.runtimeV2 == nil {
 		return
 	}
-	release := doctorReleaseIntegrityReport(d.dataDir)
+	release := diagnosticReleaseIntegrityReport(d.dataDir)
 	d.runtimeV2.SetCompatibility(runtimev2.CompatibilityStatus{
 		DaemonVersion:          Version,
 		ModuleVersion:          readModuleVersion()["version"],
@@ -198,10 +198,23 @@ func (d *daemon) refreshRuntimeV2Compatibility() {
 		PanelMinVersion:        Version,
 		Capabilities:           supportedCapabilities(),
 		SupportedMethods:       supportedRPCMethods(),
+		Methods:                runtimeMethodCapabilities(),
 	})
 }
 
-func releaseIntegrityStatusDetail(release doctorReleaseIntegrity) string {
+func runtimeMethodCapabilities() []runtimev2.MethodCapability {
+	contracts := ipc.MethodContracts()
+	methods := make([]runtimev2.MethodCapability, 0, len(contracts))
+	for _, contract := range contracts {
+		methods = append(methods, runtimev2.MethodCapability{
+			Method:     contract.Method,
+			Capability: contract.Capability,
+		})
+	}
+	return methods
+}
+
+func releaseIntegrityStatusDetail(release diagnosticReleaseIntegrity) string {
 	if release.OK {
 		return ""
 	}
@@ -980,13 +993,7 @@ func (d *daemon) persistDesiredStateV2(desired runtimev2.DesiredState) error {
 	if err != nil {
 		return err
 	}
-	if err := d.failIfRuntimeOperationActive(); err != nil {
-		return err
-	}
-	if err := profiledoc.Save(d.profilePath, profiledoc.FromConfig(nextCfg)); err != nil {
-		return err
-	}
-	if err := d.applyConfig(nextCfg, false); err != nil {
+	if _, err := d.persistProfileConfigMutation(nextCfg, false); err != nil {
 		return err
 	}
 	return nil

@@ -3,12 +3,12 @@ package com.rknnovpn.panel.ipc
 import kotlinx.serialization.json.JsonElement
 
 /**
- * Sealed result type for every `privctl` invocation.
+ * Sealed result type for every `daemonctl` invocation.
  *
  * Every IPC call returns exactly one of these variants. Callers should
  * exhaustively `when`-match to handle all failure modes at the call site.
  */
-sealed class PrivctlResult {
+sealed class DaemonctlResult {
 
     /**
      * The daemon returned a successful JSON-RPC response.
@@ -17,7 +17,7 @@ sealed class PrivctlResult {
     data class Success(
         val data: JsonElement,
         val envelope: JsonElement? = null,
-    ) : PrivctlResult()
+    ) : DaemonctlResult()
 
     /**
      * The daemon returned a JSON-RPC error response.
@@ -28,8 +28,8 @@ sealed class PrivctlResult {
         val message: String,
         val details: JsonElement? = null,
         val envelope: JsonElement? = null,
-    ) : PrivctlResult() {
-        override fun toString(): String = "PrivctlError($code: $message)"
+    ) : DaemonctlResult() {
+        override fun toString(): String = "DaemonctlError($code: $message)"
     }
 
     /**
@@ -38,7 +38,7 @@ sealed class PrivctlResult {
      */
     data class RootDenied(
         val reason: String = "Superuser access was denied or unavailable"
-    ) : PrivctlResult()
+    ) : DaemonctlResult()
 
     /**
      * The command did not complete within the allowed timeout.
@@ -47,9 +47,9 @@ sealed class PrivctlResult {
     data class Timeout(
         val timeoutMs: Long,
         val method: String
-    ) : PrivctlResult() {
+    ) : DaemonctlResult() {
         override fun toString(): String =
-            "PrivctlTimeout(method=$method, limit=${timeoutMs}ms)"
+            "DaemonctlTimeout(method=$method, limit=${timeoutMs}ms)"
     }
 
     /**
@@ -57,16 +57,16 @@ sealed class PrivctlResult {
      */
     data class DaemonNotFound(
         val path: String
-    ) : PrivctlResult()
+    ) : DaemonctlResult()
 
     /**
      * An unexpected exception occurred during execution (I/O error, parse failure, etc.).
      */
     data class UnexpectedError(
         val throwable: Throwable
-    ) : PrivctlResult() {
+    ) : DaemonctlResult() {
         override fun toString(): String =
-            "PrivctlUnexpectedError(${throwable::class.simpleName}: ${throwable.message})"
+            "DaemonctlUnexpectedError(${throwable::class.simpleName}: ${throwable.message})"
     }
 
     // ---- convenience helpers ----
@@ -78,24 +78,24 @@ sealed class PrivctlResult {
     fun dataOrNull(): JsonElement? = (this as? Success)?.data
 
     /**
-     * Returns [Success.data] or throws [PrivctlException] wrapping the failure.
+     * Returns [Success.data] or throws [DaemonctlException] wrapping the failure.
      */
     fun dataOrThrow(): JsonElement = when (this) {
         is Success -> data
-        is Error -> throw PrivctlException("Daemon error $code: $message")
-        is RootDenied -> throw PrivctlException("Root denied: $reason")
-        is Timeout -> throw PrivctlException("Timeout after ${timeoutMs}ms on $method")
-        is DaemonNotFound -> throw PrivctlException("Daemon not found at $path")
-        is UnexpectedError -> throw PrivctlException("Unexpected: ${throwable.message}", throwable)
+        is Error -> throw DaemonctlException("Daemon error $code: $message")
+        is RootDenied -> throw DaemonctlException("Root denied: $reason")
+        is Timeout -> throw DaemonctlException("Timeout after ${timeoutMs}ms on $method")
+        is DaemonNotFound -> throw DaemonctlException("Daemon not found at $path")
+        is UnexpectedError -> throw DaemonctlException("Unexpected: ${throwable.message}", throwable)
     }
 }
 
 /**
- * Exception wrapper for [PrivctlResult] failures.
- * Thrown by [PrivctlResult.dataOrThrow] so callers that prefer exceptions
+ * Exception wrapper for [DaemonctlResult] failures.
+ * Thrown by [DaemonctlResult.dataOrThrow] so callers that prefer exceptions
  * can catch a single type.
  */
-class PrivctlException(
+class DaemonctlException(
     message: String,
     cause: Throwable? = null
 ) : Exception(message, cause)

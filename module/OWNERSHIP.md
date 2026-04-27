@@ -11,7 +11,7 @@ entrypoint.
   permissions, and set kernel toggles. It must not clean runtime markers.
 - `service.sh` is late boot only: wait for boot completion, ask
   `rknnovpn_env.sh` whether boot cleanup markers exist, run canonical boot
-  cleanup, and launch `privd`. It must not implement its own stale
+  cleanup, and launch `daemon`. It must not implement its own stale
   process/socket/PID cleanup.
 - `scripts/rescue_reset.sh` is the canonical root cleanup API.
 - `uninstall.sh` delegates runtime cleanup to `scripts/rescue_reset.sh` and
@@ -39,10 +39,10 @@ installer must treat all `scripts/lib/*.sh` files as required module files.
 
 The library owns these path names:
 
-- `RKNNOVPN_DIR=/data/adb/rknnovpn`
+- `RKNNOVPN_DIR=/data/adb/modules/rknnovpn`
 - `BIN_DIR`, `CONFIG_DIR`, `SCRIPTS_DIR`, `RUN_DIR`, `LOG_DIR`
 - `RESET_LOCK`, `ACTIVE_FILE`, `MANUAL_FLAG`
-- `PRIVD_PID_FILE`, `SINGBOX_PID_FILE`, `PRIVD_SOCK`
+- `DAEMON_PID_FILE`, `SINGBOX_PID_FILE`, `DAEMON_SOCK`
 
 ## Marker Ownership
 

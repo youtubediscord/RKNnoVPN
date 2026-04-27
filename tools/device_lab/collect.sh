@@ -51,16 +51,16 @@ capture_su listeners "ss -lntu 2>&1 || netstat -lntu 2>&1" || true
 capture_su connectivity "dumpsys connectivity 2>&1 | sed -n '1,220p'" || true
 capture_su system_proxy "settings get global http_proxy; settings get global global_http_proxy_host; settings get global global_http_proxy_port" || true
 
-if adb_su "test -x '$PRIVCTL_PATH'" >/dev/null 2>&1; then
-    capture_su privctl_version "'$PRIVCTL_PATH' version" || true
-    capture_su privctl_status "'$PRIVCTL_PATH' status" || true
-    capture_su privctl_self_check "'$PRIVCTL_PATH' self-check" || true
-    capture_su_raw doctor.json "'$PRIVCTL_PATH' doctor '{\"lines\":160}'" || true
+if adb_su "test -x '$DAEMONCTL_PATH'" >/dev/null 2>&1; then
+    capture_su daemonctl_version "'$DAEMONCTL_PATH' version" || true
+    capture_su daemonctl_status "'$DAEMONCTL_PATH' status" || true
+    capture_su daemonctl_self_check "'$DAEMONCTL_PATH' self-check" || true
+    capture_su_raw diagnostics_report.json "'$DAEMONCTL_PATH' diagnostics.report '{\"lines\":160}'" || true
     if command -v python3 >/dev/null 2>&1; then
-        python3 "$SCRIPT_DIR/check_doctor.py" "$RUN_DIR/doctor.json" >"$RUN_DIR/doctor_check.txt" 2>&1 || true
+        python3 "$SCRIPT_DIR/check_diagnostics_report.py" "$RUN_DIR/diagnostics_report.json" >"$RUN_DIR/diagnostics_report_check.txt" 2>&1 || true
     fi
 else
-    printf '%s\n' "privctl is not installed at $PRIVCTL_PATH" >"$RUN_DIR/privctl_missing.txt"
+    printf '%s\n' "daemonctl is not installed at $DAEMONCTL_PATH" >"$RUN_DIR/daemonctl_missing.txt"
 fi
 
 if [ "$INCLUDE_PACKAGES" = "1" ]; then

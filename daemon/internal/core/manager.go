@@ -297,7 +297,7 @@ type CoreManager struct {
 }
 
 // NewCoreManager creates a CoreManager that stores runtime data under dataDir
-// (normally /data/adb/rknnovpn).
+// (normally /data/adb/modules/rknnovpn).
 func NewCoreManager(cfg *config.Config, dataDir string, logger *log.Logger) *CoreManager {
 	if logger == nil {
 		logger = log.New(os.Stderr, "[core] ", log.LstdFlags)
@@ -1042,10 +1042,10 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		m.config.Routing.AlwaysDirectApps,
 		m.config.Routing.Mode,
 	)
-	chainProxyPorts, chainProxyUIDs := BuildChainedProxyProtectionEnv(m.config)
+	chainProxyPorts, chainProxyUIDs, chainProxyRules := BuildChainedProxyProtectionEnv(m.config)
 
 	return map[string]string{
-		"RKNNOVPN_DIR":     m.dataDir,
+		"RKNNOVPN_DIR":      m.dataDir,
 		"CORE_GID":          strconv.Itoa(gid),
 		"TPROXY_PORT":       strconv.Itoa(tproxyPort),
 		"DNS_PORT":          strconv.Itoa(dnsPort),
@@ -1054,6 +1054,7 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		"HTTP_PORT":         strconv.Itoa(profileInbounds.HTTPPort),
 		"CHAIN_PROXY_PORTS": chainProxyPorts,
 		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
+		"CHAIN_PROXY_RULES": chainProxyRules,
 		"FWMARK":            fmt.Sprintf("0x%x", mark),
 		"ROUTE_TABLE":       "2023",
 		"ROUTE_TABLE_V6":    "2024",

@@ -9,7 +9,7 @@
 # ============================================================================
 
 MODDIR="${0%/*}"
-RKNNOVPN_DIR="/data/adb/rknnovpn"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-${MODDIR:-/data/adb/modules/rknnovpn}}"
 RKNNOVPN_GID=23333
 TAG="rknnovpn:post-fs-data"
 
@@ -154,7 +154,7 @@ log_info "rp_filter disabled for TPROXY"
 
 MISSING_BIN=0
 
-for bin_name in sing-box privd; do
+for bin_name in sing-box daemon; do
     bin_path="${RKNNOVPN_DIR}/bin/${bin_name}"
     if [ ! -f "$bin_path" ]; then
         log_warn "Binary missing: ${bin_path}"

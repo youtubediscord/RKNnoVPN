@@ -76,8 +76,8 @@ type egressSnapshot struct {
 }
 
 func main() {
-	cfgPath := flag.String("config", "/data/adb/rknnovpn/config/config.json", "path to config.json")
-	dataDir := flag.String("data-dir", "/data/adb/rknnovpn", "path to data directory")
+	cfgPath := flag.String("config", "/data/adb/modules/rknnovpn/config/config.json", "path to config.json")
+	dataDir := flag.String("data-dir", "/data/adb/modules/rknnovpn", "path to data directory")
 	logFile := flag.String("log-file", "", "path to log file (default: stderr)")
 	pidFile := flag.String("pid-file", "", "path to PID file")
 	flag.Parse()
@@ -96,7 +96,7 @@ func main() {
 		log.SetOutput(f)
 	}
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
-	log.Printf("privd %s starting", Version)
+	log.Printf("daemon %s starting", Version)
 
 	// ---- PID file ----------------------------------------------------------
 
@@ -277,7 +277,9 @@ func main() {
 
 	// ---- IPC server --------------------------------------------------------
 
-	d.registerHandlers()
+	if err := d.registerHandlers(); err != nil {
+		log.Fatalf("ipc handler registration: %v", err)
+	}
 	if err := d.ipcServer.Start(); err != nil {
 		log.Fatalf("ipc start: %v", err)
 	}
@@ -462,7 +464,7 @@ func fileMissing(path string) bool {
 // IPC handler registration
 // --------------------------------------------------------------------------
 
-func (d *daemon) registerHandlers() {
+func (d *daemon) registerHandlers() error {
 	handlers := map[string]ipc.Handler{
 		"app.list":                  d.handleAppList,
 		"app.resolveUid":            d.handleResolveUID,
@@ -477,7 +479,7 @@ func (d *daemon) registerHandlers() {
 		"config-list":               d.handleConfigList,
 		"diagnostics.health":        d.handleDiagnosticsHealth,
 		"diagnostics.testNodes":     d.handleDiagnosticsTestNodes,
-		"doctor":                    d.handleDoctor,
+		"diagnostics.report":        d.handleDiagnosticsReport,
 		"ipc.contract":              d.handleIPCContract,
 		"logs":                      d.handleLogs,
 		"profile.apply":             d.handleProfileApply,
@@ -492,14 +494,19 @@ func (d *daemon) registerHandlers() {
 		"update-install":            d.handleUpdateInstall,
 		"version":                   d.handleVersion,
 	}
+	var missing []string
 	for _, contract := range ipc.MethodContracts() {
 		handler, ok := handlers[contract.Method]
 		if !ok {
-			log.Printf("ipc: contract method %s has no daemon handler", contract.Method)
+			missing = append(missing, contract.Method)
 			continue
 		}
 		d.ipcServer.Register(contract.Method, handler)
 	}
+	if len(missing) > 0 {
+		return fmt.Errorf("contract method(s) without daemon handlers: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // --------------------------------------------------------------------------

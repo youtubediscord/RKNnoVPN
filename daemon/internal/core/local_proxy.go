@@ -14,40 +14,86 @@ import (
 var procNetTCPFiles = []string{"/proc/net/tcp", "/proc/net/tcp6"}
 
 // BuildChainedProxyProtectionEnv returns ports of local proxy outbounds and
-// the listener-owner UIDs that may mutually reach those ports.
-func BuildChainedProxyProtectionEnv(cfg *config.Config) (string, string) {
-	ports := localOutboundProxyPorts(cfg)
-	if len(ports) == 0 {
-		return "", ""
+// the owner UIDs that may reach those ports. The third return value contains
+// per-port allow rules in "port:uid" form for stricter iptables rendering.
+func BuildChainedProxyProtectionEnv(cfg *config.Config) (string, string, string) {
+	profiles := localOutboundProxyProfiles(cfg)
+	if len(profiles) == 0 {
+		return "", "", ""
+	}
+	ports := make([]int, 0, len(profiles))
+	for _, profile := range profiles {
+		ports = append(ports, profile.Port)
 	}
 	owners := tcpListenerOwnersByPort(ports)
-	protectedPorts := make([]int, 0, len(ports))
+
+	portSet := map[int]bool{}
 	uidSet := map[int]bool{}
-	for _, port := range ports {
-		portOwners := owners[port]
-		if len(portOwners) == 0 {
+	portUIDSet := map[int]map[int]bool{}
+	addPort := func(port int) {
+		if port > 0 {
+			portSet[port] = true
+		}
+	}
+	addPortUID := func(port int, uid int) {
+		if port <= 0 || uid < 0 {
+			return
+		}
+		addPort(port)
+		uidSet[uid] = true
+		if portUIDSet[port] == nil {
+			portUIDSet[port] = map[int]bool{}
+		}
+		portUIDSet[port][uid] = true
+	}
+
+	for _, profile := range profiles {
+		addPort(profile.Port)
+		if ownerPackage := strings.TrimSpace(profile.OwnerPackage); ownerPackage != "" {
+			for _, uid := range ResolvePackageUIDsDetailed([]string{ownerPackage}).UIDs {
+				parsed, err := strconv.Atoi(uid)
+				if err == nil {
+					addPortUID(profile.Port, parsed)
+				}
+			}
 			continue
 		}
-		protectedPorts = append(protectedPorts, port)
-		for _, uid := range portOwners {
-			if uid >= 0 {
-				uidSet[uid] = true
-			}
+		for _, uid := range owners[profile.Port] {
+			addPortUID(profile.Port, uid)
 		}
 	}
-	if len(protectedPorts) == 0 || len(uidSet) == 0 {
-		return "", ""
+
+	protectedPorts := make([]int, 0, len(portSet))
+	for port := range portSet {
+		protectedPorts = append(protectedPorts, port)
 	}
+	sort.Ints(protectedPorts)
+	if len(protectedPorts) == 0 {
+		return "", "", ""
+	}
+
 	uids := make([]int, 0, len(uidSet))
 	for uid := range uidSet {
 		uids = append(uids, uid)
 	}
-	sort.Ints(protectedPorts)
 	sort.Ints(uids)
-	return joinInts(protectedPorts), joinInts(uids)
+
+	rules := make([]string, 0)
+	for _, port := range protectedPorts {
+		portUIDs := make([]int, 0, len(portUIDSet[port]))
+		for uid := range portUIDSet[port] {
+			portUIDs = append(portUIDs, uid)
+		}
+		sort.Ints(portUIDs)
+		for _, uid := range portUIDs {
+			rules = append(rules, fmt.Sprintf("%d:%d", port, uid))
+		}
+	}
+
+	return joinInts(protectedPorts), joinInts(uids), strings.Join(rules, " ")
 }
 
-func localOutboundProxyPorts(cfg *config.Config) []int {
+func localOutboundProxyProfiles(cfg *config.Config) []*config.NodeProfile {
 	if cfg == nil {
 		return nil
 	}
@@ -60,7 +106,7 @@ func localOutboundProxyPorts(cfg *config.Config) []int {
 
 	reserved := reservedCorePorts(cfg)
 	seen := map[int]bool{}
-	var ports []int
+	var result []*config.NodeProfile
 	for _, profile := range profiles {
 		if profile == nil || profile.Port <= 0 || !isLocalEndpoint(profile.Address) {
 			continue
@@ -69,9 +115,20 @@ func localOutboundProxyPorts(cfg *config.Config) []int {
 			continue
 		}
 		seen[profile.Port] = true
+		result = append(result, profile)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Port < result[j].Port
+	})
+	return result
+}
+
+func localOutboundProxyPorts(cfg *config.Config) []int {
+	profiles := localOutboundProxyProfiles(cfg)
+	ports := make([]int, 0, len(profiles))
+	for _, profile := range profiles {
 		ports = append(ports, profile.Port)
 	}
-	sort.Ints(ports)
 	return ports
 }
 

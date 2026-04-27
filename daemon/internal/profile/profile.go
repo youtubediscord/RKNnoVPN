@@ -103,6 +103,7 @@ type Node struct {
 	Link          string          `json:"link,omitempty"`
 	Outbound      json.RawMessage `json:"outbound"`
 	Group         string          `json:"group,omitempty"`
+	OwnerPackage  string          `json:"ownerPackage,omitempty"`
 	LatencyMS     *int            `json:"latencyMs,omitempty"`
 	ResponseMS    *int            `json:"responseMs,omitempty"`
 	ThroughputBps *int64          `json:"throughputBps,omitempty"`
@@ -283,6 +284,10 @@ func Normalize(doc Document) (Document, []Warning, error) {
 		node.Server = strings.TrimSpace(node.Server)
 		node.Name = firstNonEmpty(strings.TrimSpace(node.Name), node.Server, node.ID)
 		node.Group = firstNonEmpty(strings.TrimSpace(node.Group), "Default")
+		node.OwnerPackage = strings.TrimSpace(node.OwnerPackage)
+		if node.OwnerPackage != "" && !isValidAndroidPackageName(node.OwnerPackage) {
+			return doc, warnings, fmt.Errorf("profile.nodes[%d].ownerPackage must be an Android package name", i)
+		}
 		if node.CreatedAt == 0 {
 			node.CreatedAt = time.Now().UnixMilli()
 		}
@@ -422,8 +427,12 @@ func MergeNodes(current Document, incoming []Node, markRemovedStale bool) (Docum
 }
 
 func MergeSubscriptionNodes(current Document, subscription Subscription, incoming []Node) (Document, map[string]int) {
-	subscription.ProviderKey = firstNonEmpty(strings.TrimSpace(subscription.ProviderKey), ProviderKeyFor(subscription.URL))
+	stats := map[string]int{"added": 0, "updated": 0, "unchanged": 0, "stale": 0}
+	subscription.ProviderKey = strings.TrimSpace(subscription.ProviderKey)
 	subscription.URL = strings.TrimSpace(subscription.URL)
+	if subscription.ProviderKey == "" {
+		return current, stats
+	}
 	for i := range incoming {
 		incoming[i].Source.Type = "SUBSCRIPTION"
 		if incoming[i].Source.ProviderKey == "" {
@@ -434,9 +443,6 @@ func MergeSubscriptionNodes(current Document, subscription Subscription, incomin
 		}
 	}
 	next, stats := MergeNodes(current, incoming, false)
-	if subscription.ProviderKey == "" {
-		return next, stats
-	}
 	seenIncoming := map[string]bool{}
 	for _, node := range incoming {
 		if key := nodeMatchKey(node); key != "" {
@@ -899,6 +905,30 @@ func normalizeProtocol(value string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(value))
 	}
+}
+
+func isValidAndroidPackageName(value string) bool {
+	parts := strings.Split(value, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for i, r := range part {
+			if i == 0 {
+				if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_') {
+					return false
+				}
+				continue
+			}
+			if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func stableNodeID(protocol, host string, port int, secret string) string {

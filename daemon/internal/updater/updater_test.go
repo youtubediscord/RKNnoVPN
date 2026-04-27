@@ -141,7 +141,7 @@ func TestValidateModuleStagingRejectsIncompleteBundle(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"privd", "privctl"} {
+	for _, name := range []string{"daemon", "daemonctl"} {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 
@@ -156,7 +156,7 @@ func TestValidateModuleStagingAcceptsCompleteBundle(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sing-box", "privd", "privctl"} {
+	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 	for _, path := range []string{
@@ -191,7 +191,7 @@ func TestValidateModuleStagingRejectsBadModuleProp(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sing-box", "privd", "privctl"} {
+	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 	for _, path := range []string{
@@ -253,7 +253,7 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"sing-box", "privd", "privctl"} {
+	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 	for _, path := range []string{
@@ -282,8 +282,8 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{
-		filepath.Join(releaseDir, "bin", "privd"),
-		filepath.Join(releaseDir, "bin", "privctl"),
+		filepath.Join(releaseDir, "bin", "daemon"),
+		filepath.Join(releaseDir, "bin", "daemonctl"),
 		filepath.Join(releaseDir, "bin", "sing-box"),
 		filepath.Join(releaseDir, "module", "module.prop"),
 		filepath.Join(releaseDir, "module", "OWNERSHIP.md"),
@@ -323,8 +323,8 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		t.Fatalf("manifest version = %q, want v1.6.4", manifest.Version)
 	}
 	for _, rel := range []string{
-		"bin/privd",
-		"bin/privctl",
+		"bin/daemon",
+		"bin/daemonctl",
 		"bin/sing-box",
 		"module/module.prop",
 		"module/OWNERSHIP.md",
@@ -529,7 +529,7 @@ type zipTestFile struct {
 func writeCompleteModuleZipForTest(t *testing.T, zipPath string, version string) {
 	t.Helper()
 	files := map[string]zipTestFile{}
-	for _, name := range []string{"sing-box", "privd", "privctl"} {
+	for _, name := range []string{"sing-box", "daemon", "daemonctl"} {
 		files[filepath.ToSlash(filepath.Join("binaries", runtimeBinaryArch(), name))] = zipTestFile{mode: 0755, body: "bin\n"}
 	}
 	for _, path := range []string{
