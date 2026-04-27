@@ -294,6 +294,19 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun removeAlwaysDirectPackage(packageName: String) {
+        val cleanPackage = packageName.trim()
+        if (cleanPackage.isBlank()) return
+        _uiState.update { state ->
+            val packages = parsePackageList(state.alwaysDirectPackagesText)
+                .filterNot { it == cleanPackage }
+            state.copy(
+                alwaysDirectPackagesText = packages.joinToString("\n"),
+                errorMessage = null,
+            )
+        }
+    }
+
     fun applyUrlTestUrl() {
         val url = _uiState.value.urlTestUrl.trim()
         if (url.isBlank()) {

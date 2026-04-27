@@ -70,6 +70,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rknnovpn.panel.R
 import com.rknnovpn.panel.model.DnsIpv6Mode
 import com.rknnovpn.panel.model.FallbackPolicy
+import com.rknnovpn.panel.ui.common.AppPackageListItem
 import com.rknnovpn.panel.ui.common.AppPackagePickerDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,6 +83,9 @@ fun SettingsScreen(
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showAlwaysDirectAppPicker by remember { mutableStateOf(false) }
+    val alwaysDirectPackages = remember(state.alwaysDirectPackagesText) {
+        parsePackageSelection(state.alwaysDirectPackagesText)
+    }
 
     LaunchedEffect(state.shareLogsEventId) {
         val logs = state.shareLogsText
@@ -223,25 +227,45 @@ fun SettingsScreen(
                 Text(stringResource(R.string.apply))
             }
 
-            OutlinedTextField(
-                value = state.alwaysDirectPackagesText,
-                onValueChange = viewModel::setAlwaysDirectPackagesText,
-                label = { Text(stringResource(R.string.always_direct_apps)) },
-                supportingText = { Text(stringResource(R.string.always_direct_apps_desc)) },
-                minLines = 3,
-                maxLines = 6,
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
-            )
-
-            TextButton(
-                onClick = { showAlwaysDirectAppPicker = true },
-                modifier = Modifier.padding(horizontal = 8.dp),
             ) {
-                Icon(Icons.Filled.Apps, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(stringResource(R.string.add_app))
+                Text(
+                    text = stringResource(R.string.always_direct_apps),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = stringResource(R.string.always_direct_apps_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (alwaysDirectPackages.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.no_apps_selected),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Column {
+                        alwaysDirectPackages.forEach { packageName ->
+                            AppPackageListItem(
+                                packageName = packageName,
+                                onRemove = { viewModel.removeAlwaysDirectPackage(packageName) },
+                            )
+                        }
+                    }
+                }
+                TextButton(
+                    onClick = { showAlwaysDirectAppPicker = true },
+                    modifier = Modifier.align(Alignment.Start),
+                ) {
+                    Icon(Icons.Filled.Apps, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.add_app))
+                }
             }
 
             TextButton(
@@ -503,6 +527,12 @@ fun SettingsScreen(
 }
 
 // ---- Section helper composables ----
+
+private fun parsePackageSelection(raw: String): List<String> =
+    raw.split('\n', ',', ';', ' ', '\t')
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
 
 @Composable
 private fun SectionHeader(

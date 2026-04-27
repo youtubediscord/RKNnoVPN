@@ -84,8 +84,12 @@
     <string name="edit_node_title">Edit node</string>
     <string name="node_name_label">Name</string>
     <string name="node_group_label">Group</string>
-    <string name="node_owner_package_label">Local proxy app package</string>
+    <string name="node_owner_package_label">Local proxy owner app</string>
     <string name="choose_app">Choose app</string>
+    <string name="clear_app">Clear app</string>
+    <string name="remove_app">Remove app</string>
+    <string name="no_app_selected">No app selected</string>
+    <string name="no_apps_selected">No apps selected</string>
     <string name="app_picker_search">Search app or package</string>
     <string name="app_picker_empty">No apps found</string>
     <string name="add_app">Add app</string>
@@ -178,7 +182,7 @@
     <string name="log_level">Log level</string>
     <string name="urltest_url">URL test endpoint</string>
     <string name="always_direct_apps">Always-direct apps</string>
-    <string name="always_direct_apps_desc">Package names, one per line. These apps bypass TPROXY and DNS interception before routing.</string>
+    <string name="always_direct_apps_desc">These apps bypass TPROXY and DNS interception before routing.</string>
     <string name="sharing_mode">Hotspot sharing</string>
     <string name="sharing_mode_desc">Route tethered client traffic through RKNnoVPN. Leave off unless you explicitly share the proxy to other devices.</string>
     <string name="sharing_interfaces">Sharing interfaces</string>

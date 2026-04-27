@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -70,6 +69,7 @@ import com.rknnovpn.panel.`import`.ClipboardWatcher
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.NodeSourceType
 import com.rknnovpn.panel.ui.common.AppPackagePickerDialog
+import com.rknnovpn.panel.ui.common.AppPackageSelector
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -626,19 +626,12 @@ private fun EditNodeDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (node.isLoopbackNode()) {
-                    OutlinedTextField(
-                        value = ownerPackage,
-                        onValueChange = { ownerPackage = it },
-                        label = { Text(stringResource(R.string.node_owner_package_label)) },
-                        placeholder = { Text("com.example.proxy") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                    AppPackageSelector(
+                        label = stringResource(R.string.node_owner_package_label),
+                        selectedPackage = ownerPackage,
+                        onChoose = { showOwnerPicker = true },
+                        onClear = { ownerPackage = "" },
                     )
-                    TextButton(onClick = { showOwnerPicker = true }) {
-                        Icon(Icons.Filled.Apps, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(stringResource(R.string.choose_app))
-                    }
                 }
             }
         },

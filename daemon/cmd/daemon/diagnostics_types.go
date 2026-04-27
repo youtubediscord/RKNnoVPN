@@ -7,19 +7,9 @@ import (
 
 const controlProtocolVersion = 5
 
-type diagnosticCommandResult struct {
-	Command string   `json:"command"`
-	Lines   []string `json:"lines,omitempty"`
-	Error   string   `json:"error,omitempty"`
-}
+type diagnosticCommandResult = diagnostics.CommandResult
 
-type diagnosticFileStatus struct {
-	Path       string `json:"path"`
-	Exists     bool   `json:"exists"`
-	Executable bool   `json:"executable,omitempty"`
-	Mode       string `json:"mode,omitempty"`
-	Error      string `json:"error,omitempty"`
-}
+type diagnosticFileStatus = diagnostics.FileStatus
 
 type diagnosticLogSection struct {
 	Name    string   `json:"name"`
@@ -29,12 +19,7 @@ type diagnosticLogSection struct {
 	Error   string   `json:"error,omitempty"`
 }
 
-type diagnosticJSONSection struct {
-	Path    string      `json:"path"`
-	Value   interface{} `json:"value,omitempty"`
-	Missing bool        `json:"missing,omitempty"`
-	Error   string      `json:"error,omitempty"`
-}
+type diagnosticJSONSection = diagnostics.JSONSection
 
 type diagnosticPortStatus = diagnostics.PortStatus
 

@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
@@ -60,47 +59,11 @@ func (d *daemon) diagnosticDevice(maxLines int) map[string]diagnosticCommandResu
 }
 
 func (d *daemon) privacyDiagnostics(cfg *config.Config, maxLines int) map[string]interface{} {
-	ipLinks := runDiagnosticCommand(maxLines, "ip", "link", "show")
-	connectivity := runDiagnosticCommand(maxLines, "dumpsys", "connectivity")
-	settingsProxyHost := runDiagnosticCommand(maxLines, "settings", "get", "global", "http_proxy")
-	settingsProxyPort := runDiagnosticCommand(maxLines, "settings", "get", "global", "global_http_proxy_port")
-	checks := map[string]interface{}{
-		"no_vpn_like_interfaces":      firstVPNLikeInterfaceLine(ipLinks.Lines) == "",
-		"no_transport_vpn_hint":       !diagnosticLinesContainAny(connectivity.Lines, "TRANSPORT_VPN", "VpnTransportInfo"),
-		"no_loopback_dns":             !diagnosticLinesContainLoopbackDNS(connectivity.Lines),
-		"system_proxy_unset":          diagnosticCommandLooksEmptySetting(settingsProxyHost) && diagnosticCommandLooksEmptySetting(settingsProxyPort),
-		"localhost_proxy_ports_clear": diagnosticLocalhostProxyPortsClear(cfg),
-	}
-	if cfg != nil {
-		profileInbounds := cfg.ResolveProfileInbounds()
-		checks["clash_api_disabled"] = cfg.Proxy.APIPort == 0
-		checks["helper_inbounds_disabled"] = profileInbounds.HTTPPort == 0 && profileInbounds.SocksPort == 0
-		checks["helper_inbounds_local_only"] = !profileInbounds.AllowLAN
-		checks["per_app_whitelist_default"] = cfg.Apps.Mode == "whitelist" || cfg.Apps.Mode == "off"
-		checks["dns_hijack_per_uid"] = cfg.DNS.HijackPerUID
-		checks["self_test_apps_direct"] = selfTestProtectedAppsDirect()
-	}
-	return map[string]interface{}{
-		"checks": checks,
-		"protected_packages": map[string]interface{}{
-			"self_test": core.SelfTestProtectedPackages,
-		},
-		"commands": map[string]diagnosticCommandResult{
-			"ip_link":                    ipLinks,
-			"dumpsys_connectivity":       connectivity,
-			"settings_global_http_proxy": settingsProxyHost,
-			"settings_global_proxy_port": settingsProxyPort,
-		},
-	}
+	return diagnostics.Privacy(cfg, maxLines, core.ExecCommand)
 }
 
 func selfTestProtectedAppsDirect() bool {
-	for _, pkgName := range core.SelfTestProtectedPackages {
-		if !core.IsBuiltInAlwaysDirectPackage(pkgName) {
-			return false
-		}
-	}
-	return true
+	return diagnostics.SelfTestProtectedAppsDirect()
 }
 
 func diagnosticLocalhostProxyPortsClear(cfg *config.Config) bool {
@@ -108,16 +71,7 @@ func diagnosticLocalhostProxyPortsClear(cfg *config.Config) bool {
 }
 
 func runDiagnosticCommand(maxLines int, name string, args ...string) diagnosticCommandResult {
-	command := strings.Join(append([]string{name}, args...), " ")
-	out, err := core.ExecCommand(name, args...)
-	result := diagnosticCommandResult{
-		Command: command,
-		Lines:   limitLines(splitLines(redactDiagnosticText(out)), maxLines),
-	}
-	if err != nil {
-		result.Error = err.Error()
-	}
-	return result
+	return diagnostics.RunCommand(maxLines, core.ExecCommand, name, args...)
 }
 
 func diagnosticPortStatuses(cfg *config.Config) []diagnosticPortStatus {
@@ -157,40 +111,9 @@ func (d *daemon) diagnosticLogs(maxLines int) []diagnosticLogSection {
 }
 
 func fileStatus(path string, executable bool) diagnosticFileStatus {
-	status := diagnosticFileStatus{Path: path}
-	info, err := os.Stat(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			status.Error = err.Error()
-		}
-		return status
-	}
-	status.Exists = true
-	status.Mode = info.Mode().Perm().String()
-	if executable {
-		status.Executable = info.Mode().Perm()&0111 != 0
-	}
-	return status
+	return diagnostics.StatFile(path, executable)
 }
 
 func readModuleVersion() map[string]string {
-	paths := []string{
-		"/data/adb/modules/rknnovpn/module.prop",
-		"/data/adb/modules_update/rknnovpn/module.prop",
-	}
-	for _, path := range paths {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		result := map[string]string{"path": path}
-		for _, line := range splitLines(string(data)) {
-			key, value, ok := strings.Cut(line, "=")
-			if ok && (key == "version" || key == "versionCode") {
-				result[key] = value
-			}
-		}
-		return result
-	}
-	return map[string]string{"version": "unknown"}
+	return diagnostics.ReadModuleVersion()
 }

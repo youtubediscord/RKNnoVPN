@@ -18,6 +18,14 @@ const maxBodyBytes = 4 * 1024 * 1024
 
 var ErrNoSupportedNodes = errors.New("subscription contains no supported nodes")
 
+type ErrorKind string
+
+const (
+	ErrorInvalidParams ErrorKind = "invalid_params"
+	ErrorConfig        ErrorKind = "config_error"
+	ErrorInternal      ErrorKind = "internal_error"
+)
+
 type FetchResult struct {
 	Status  int
 	Body    string
@@ -78,6 +86,14 @@ type RefreshResult struct {
 	FetchHeaders  map[string]string       `json:"-"`
 }
 
+type RefreshResponse struct {
+	Source        SubscriptionSource      `json:"source"`
+	Subscription  profiledoc.Subscription `json:"subscription"`
+	Imported      int                     `json:"imported"`
+	ParseFailures int                     `json:"parseFailures"`
+	Merge         map[string]int          `json:"merge"`
+}
+
 func NewClient(fetcher Fetcher) Client {
 	if fetcher == nil {
 		fetcher = FetcherFunc(FetchURL)
@@ -133,6 +149,16 @@ func (c Client) ApplyRefresh(rawURL string, current profiledoc.Document) (Refres
 		FetchStatus:   fetched.Status,
 		FetchHeaders:  fetched.Headers,
 	}, nil
+}
+
+func (r RefreshResult) Response() RefreshResponse {
+	return RefreshResponse{
+		Source:        r.Source,
+		Subscription:  r.Subscription,
+		Imported:      len(r.Nodes),
+		ParseFailures: r.ParseFailures,
+		Merge:         r.Merge,
+	}
 }
 
 func (c Client) fetchAndParse(rawURL string) (SubscriptionSource, []profiledoc.Node, profiledoc.Subscription, int, FetchResult, error) {
@@ -215,6 +241,16 @@ func FetchURL(rawURL string) (FetchResult, error) {
 func ValidateFetchURL(rawURL string) error {
 	_, err := NewSubscriptionSource(rawURL)
 	return err
+}
+
+func ClassifyError(rawURL string, err error) ErrorKind {
+	if ValidateFetchURL(rawURL) != nil || rawURL == "" {
+		return ErrorInvalidParams
+	}
+	if errors.Is(err, ErrNoSupportedNodes) {
+		return ErrorConfig
+	}
+	return ErrorInternal
 }
 
 func NewSubscriptionSource(rawURL string) (SubscriptionSource, error) {

@@ -8,6 +8,7 @@ import (
 
 	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
@@ -32,51 +33,13 @@ func (d *daemon) handleConfigList(params *json.RawMessage) (interface{}, *ipc.RP
 }
 
 func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	if params == nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "params required: full config JSON object",
-		}
-	}
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(*params, &raw); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeConfigError,
-			Message: "invalid config: " + err.Error(),
-		}
-	}
-	if len(raw) == 0 {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "params required: non-empty full config JSON object",
-		}
-	}
-	for key := range raw {
-		if !isFullConfigImportKey(key) {
-			return nil, &ipc.RPCError{
-				Code:    ipc.CodeInvalidParams,
-				Message: fmt.Sprintf("unknown config import field %q; config-import expects a full daemon config object", key),
-			}
-		}
-	}
-	if _, ok := raw["schema_version"]; !ok {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "schema_version is required for full config import; use profile.apply for user intent updates",
-		}
-	}
-
-	newCfg := config.DefaultConfig()
-	if err := json.Unmarshal(*params, newCfg); err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeConfigError,
-			Message: "invalid config: " + err.Error(),
-		}
-	}
 	d.mu.Lock()
-	newCfg.Profile = d.cfg.Profile
+	currentProfile := d.cfg.Profile
 	d.mu.Unlock()
+	newCfg, err := control.DecodeConfigImportParams(params, currentProfile)
+	if err != nil {
+		return nil, configImportRPCError(err)
+	}
 
 	if err := newCfg.Validate(); err != nil {
 		return nil, &ipc.RPCError{
@@ -101,25 +64,13 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 	return d.configMutationSuccess("config-import", "imported", true, mutation.RuntimeWasRunning, -1), nil
 }
 
-func isFullConfigImportKey(key string) bool {
-	switch key {
-	case "schema_version",
-		"proxy",
-		"transport",
-		"node",
-		"runtime_v2",
-		"routing",
-		"apps",
-		"dns",
-		"ipv6",
-		"sharing",
-		"health",
-		"rescue",
-		"autostart":
-		return true
-	default:
-		return false
+func configImportRPCError(err error) *ipc.RPCError {
+	code := ipc.CodeInvalidParams
+	var requestErr control.ConfigImportError
+	if errors.As(err, &requestErr) && requestErr.Kind == control.ConfigImportInvalidConfig {
+		code = ipc.CodeConfigError
 	}
+	return &ipc.RPCError{Code: code, Message: err.Error()}
 }
 
 func (d *daemon) configApplyRPCError(action string, err error) *ipc.RPCError {

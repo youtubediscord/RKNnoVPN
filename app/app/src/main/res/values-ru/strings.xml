@@ -84,8 +84,12 @@
     <string name="edit_node_title">Изменить сервер</string>
     <string name="node_name_label">Имя</string>
     <string name="node_group_label">Группа</string>
-    <string name="node_owner_package_label">Пакет локального прокси</string>
+    <string name="node_owner_package_label">Приложение-владелец локального прокси</string>
     <string name="choose_app">Выбрать приложение</string>
+    <string name="clear_app">Очистить</string>
+    <string name="remove_app">Удалить приложение</string>
+    <string name="no_app_selected">Приложение не выбрано</string>
+    <string name="no_apps_selected">Приложения не выбраны</string>
     <string name="app_picker_search">Поиск приложения или пакета</string>
     <string name="app_picker_empty">Приложения не найдены</string>
     <string name="add_app">Добавить приложение</string>
@@ -178,7 +182,7 @@
     <string name="log_level">Уровень лога</string>
     <string name="urltest_url">URL для проверки</string>
     <string name="always_direct_apps">Всегда напрямую</string>
-    <string name="always_direct_apps_desc">Имена пакетов, по одному в строке. Эти приложения обходят TPROXY и DNS-перехват до маршрутизации.</string>
+    <string name="always_direct_apps_desc">Эти приложения обходят TPROXY и DNS-перехват до маршрутизации.</string>
     <string name="sharing_mode">Раздача через RKNnoVPN</string>
     <string name="sharing_mode_desc">Направлять трафик клиентов хотспота через RKNnoVPN. Оставьте выключенным, если не раздаёте прокси другим устройствам.</string>
     <string name="sharing_interfaces">Интерфейсы раздачи</string>
