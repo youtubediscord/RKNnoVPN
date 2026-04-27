@@ -29,6 +29,7 @@ data class DaemonStatus(
     val compatibility: RuntimeCompatibilityStatus? = null,
     val activeOperation: RuntimeOperationStatus? = null,
     val lastOperation: RuntimeOperationResult? = null,
+    val updateInstall: UpdateInstallState? = null,
 )
 
 /**

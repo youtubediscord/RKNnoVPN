@@ -1513,6 +1513,7 @@ private fun BackendStatusV2.toDaemonStatus(
         compatibility = compatibility,
         activeOperation = activeOperation,
         lastOperation = lastOperation,
+        updateInstall = updateInstall,
     )
 }
 

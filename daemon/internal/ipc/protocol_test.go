@@ -1,6 +1,9 @@
 package ipc
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestNewResponseWrapsResultEnvelope(t *testing.T) {
 	activeOperation := map[string]interface{}{"kind": "start"}
@@ -19,7 +22,7 @@ func TestNewResponseWrapsResultEnvelope(t *testing.T) {
 	if envelope.Result == nil {
 		t.Fatalf("success envelope must carry result: %#v", envelope)
 	}
-	if envelope.Operation != activeOperation {
+	if !reflect.DeepEqual(envelope.Operation, activeOperation) {
 		t.Fatalf("success envelope must expose active operation: %#v", envelope)
 	}
 	if envelope.Warnings == nil || len(envelope.Warnings) != 0 {
@@ -39,7 +42,7 @@ func TestNewResponsePrefersExplicitOperationEnvelope(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected response result envelope, got %#v", resp.Result)
 	}
-	if envelope.Operation != configOperation {
+	if !reflect.DeepEqual(envelope.Operation, configOperation) {
 		t.Fatalf("success envelope must prefer explicit operation: %#v", envelope)
 	}
 }
