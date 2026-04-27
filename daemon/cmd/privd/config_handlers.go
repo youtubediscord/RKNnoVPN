@@ -94,19 +94,13 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		}
 	}
 
-	if err := d.failIfRuntimeOperationActive(); err != nil {
-		return nil, d.configApplyRPCError("config-import", err)
-	}
-	if err := profiledoc.Save(d.profilePath, profiledoc.FromConfig(newCfg)); err != nil {
-		return nil, d.configApplyRPCError("config-import", fmt.Errorf("persist profile: %w", err))
-	}
 	profileSaved := true
-	runtimeWasRunning := d.runtimeIsRunning()
-	if err := d.applyConfig(newCfg, true); err != nil {
+	mutation, err := d.persistProfileConfigMutation(newCfg, true)
+	if err != nil {
 		return nil, d.configApplyRPCErrorSaved("config-import", err, profileSaved)
 	}
 
-	return d.configMutationSuccess("config-import", "imported", true, runtimeWasRunning, -1), nil
+	return d.configMutationSuccess("config-import", "imported", true, mutation.RuntimeWasRunning, -1), nil
 }
 
 func isFullConfigImportKey(key string) bool {

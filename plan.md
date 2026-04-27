@@ -1,4 +1,4 @@
-# План развития RKNnoVPN / RKNnoVPN
+# План развития RKNnoVPN
 
 Документ описывает актуальный roadmap проекта после перехода на `sing-box`, `urltest` outbounds и root-only TPROXY архитектуру.
 

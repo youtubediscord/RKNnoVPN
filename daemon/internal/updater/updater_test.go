@@ -48,7 +48,7 @@ func TestVerifyChecksumsRequiresEveryDownloadedArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	sumPath := filepath.Join(dir, "SHA256SUMS.txt")
-	if err := os.WriteFile(sumPath, []byte(moduleHash+"  RKNnoVPN-module.zip\n"), 0644); err != nil {
+	if err := os.WriteFile(sumPath, []byte(moduleHash+"  rknnovpn-module.zip\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -73,8 +73,8 @@ func TestVerifyChecksumsAcceptsAllDownloadedArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	sumPath := filepath.Join(dir, "SHA256SUMS.txt")
-	sums := moduleHash + "  RKNnoVPN-module.zip\n" +
-		apkHash + "  RKNnoVPN-panel.apk\n"
+	sums := moduleHash + "  rknnovpn-module.zip\n" +
+		apkHash + "  rknnovpn-panel.apk\n"
 	if err := os.WriteFile(sumPath, []byte(sums), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -482,8 +482,8 @@ func writeChecksumsForTest(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sums := moduleHash + "  RKNnoVPN-module.zip\n" +
-		apkHash + "  RKNnoVPN-panel.apk\n"
+	sums := moduleHash + "  rknnovpn-module.zip\n" +
+		apkHash + "  rknnovpn-panel.apk\n"
 	if err := os.WriteFile(filepath.Join(dir, "SHA256SUMS.txt"), []byte(sums), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-# Архитектура RKNnoVPN / RKNnoVPN
+# Архитектура RKNnoVPN
 
 ## Назначение
 

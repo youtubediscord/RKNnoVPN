@@ -1,4 +1,4 @@
-# RKNnoVPN / RKNnoVPN
+# RKNnoVPN
 
 Прозрачный прокси для rooted Android без `VpnService`, TUN-интерфейса и VPN-иконки.
 
