@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sort"
 	"sync"
 )
 
@@ -41,6 +42,17 @@ func (s *Server) Register(method string, handler Handler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.handlers[method] = handler
+}
+
+func (s *Server) Methods() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	methods := make([]string, 0, len(s.handlers))
+	for method := range s.handlers {
+		methods = append(methods, method)
+	}
+	sort.Strings(methods)
+	return methods
 }
 
 // Start begins listening on the Unix domain socket and accepting connections.

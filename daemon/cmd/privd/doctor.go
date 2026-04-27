@@ -835,68 +835,11 @@ func doctorSHA256File(path string) (string, error) {
 }
 
 func supportedCapabilities() []string {
-	return []string{
-		"backend.root-tproxy",
-		"backend.reset.structured",
-		"backend.reset.warnings.v1",
-		"config.import.v2",
-		"config.mutation.envelope.v1",
-		"config.schema.v5",
-		"diagnostics.bundle.v2",
-		"diagnostics.health.v2",
-		"diagnostics.testNodes.v2",
-		"ipc.envelope.v1",
-		"netstack.report.v1",
-		"netstack.runtime.verify.v1",
-		"netstack.verify.v1",
-		"diagnostics.testNodes.tcp-direct",
-		"diagnostics.testNodes.url",
-		"profile.apply.v2",
-		"profile.document.v2",
-		"profile.importNodes.v2",
-		"profile.subscription.v2",
-		"privacy.audit.v2",
-		"privacy.localhost-listeners.v1",
-		"privacy.loopback-dns.v1",
-		"privacy.self-check.v1",
-		"privacy.self-test-protected-apps.v1",
-		"privacy.vpn-interface-patterns.v1",
-		"runtime.logs",
-		"update.install.v1",
-	}
+	return ipc.SupportedCapabilities()
 }
 
 func supportedRPCMethods() []string {
-	methods := []string{
-		"app.list",
-		"app.resolveUid",
-		"audit",
-		"backend.applyDesiredState",
-		"backend.reset",
-		"backend.restart",
-		"backend.start",
-		"backend.status",
-		"backend.stop",
-		"config-import",
-		"config-list",
-		"diagnostics.health",
-		"diagnostics.testNodes",
-		"doctor",
-		"logs",
-		"profile.apply",
-		"profile.get",
-		"profile.importNodes",
-		"profile.setActiveNode",
-		"self-check",
-		"subscription.preview",
-		"subscription.refresh",
-		"update-check",
-		"update-download",
-		"update-install",
-		"version",
-	}
-	sort.Strings(methods)
-	return methods
+	return ipc.SupportedMethods()
 }
 
 func (d *daemon) singBoxVersion(path string, maxLines int) doctorCommandResult {

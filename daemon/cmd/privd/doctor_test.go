@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
@@ -50,7 +52,10 @@ func TestDoctorRedactsSensitiveJSON(t *testing.T) {
 
 func TestSupportedRPCMethodsAdvertiseCanonicalContract(t *testing.T) {
 	methods := supportedRPCMethods()
-	for _, method := range []string{"doctor", "config-import", "backend.reset", "diagnostics.testNodes", "self-check", "profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.preview", "subscription.refresh"} {
+	if !slices.Equal(methods, ipc.SupportedMethods()) {
+		t.Fatalf("supported methods drifted from IPC contract:\nmethods=%#v\ncontract=%#v", methods, ipc.SupportedMethods())
+	}
+	for _, method := range []string{"doctor", "config-import", "backend.reset", "diagnostics.testNodes", "self-check", "ipc.contract", "profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.preview", "subscription.refresh"} {
 		if !slices.Contains(methods, method) {
 			t.Fatalf("supported methods missing %s: %#v", method, methods)
 		}
@@ -60,6 +65,101 @@ func TestSupportedRPCMethodsAdvertiseCanonicalContract(t *testing.T) {
 			t.Fatalf("supported methods must not advertise legacy alias %s: %#v", method, methods)
 		}
 	}
+}
+
+func TestRegisteredHandlersMatchIPCContract(t *testing.T) {
+	server := ipc.NewServer(filepath.Join(t.TempDir(), "daemon.sock"))
+	d := &daemon{ipcServer: server}
+	d.registerHandlers()
+	if !slices.Equal(server.Methods(), ipc.SupportedMethods()) {
+		t.Fatalf("registered handlers drifted from IPC contract:\nregistered=%#v\ncontract=%#v", server.Methods(), ipc.SupportedMethods())
+	}
+}
+
+func TestPrivctlCommandsMatchIPCContract(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "privctl", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := quotedMapKeysInVar(string(data), "commands")
+	if !slices.Equal(got, ipc.SupportedMethods()) {
+		t.Fatalf("privctl command table drifted from IPC contract:\nprivctl=%#v\ncontract=%#v", got, ipc.SupportedMethods())
+	}
+}
+
+func TestKotlinRequiredMethodsStayWithinIPCContract(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "app", "app", "src", "main", "kotlin", "com", "privstack", "panel", "ipc", "DaemonClient.kt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	required := quotedSetValuesInKotlinVar(string(data), "REQUIRED_METHODS")
+	if len(required) == 0 {
+		t.Fatalf("Kotlin REQUIRED_METHODS was not found")
+	}
+	contract := ipc.SupportedMethods()
+	for _, method := range required {
+		if !slices.Contains(contract, method) {
+			t.Fatalf("Kotlin REQUIRED_METHODS contains method outside IPC contract: %s", method)
+		}
+	}
+	for _, method := range []string{"backend.status", "profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.preview", "subscription.refresh", "ipc.contract", "version"} {
+		if !slices.Contains(required, method) {
+			t.Fatalf("Kotlin REQUIRED_METHODS missing APK-used contract method %s: %#v", method, required)
+		}
+	}
+}
+
+func quotedMapKeysInVar(source string, varName string) []string {
+	block := extractInitializerBlock(source, varName)
+	re := regexp.MustCompile(`(?m)^\s*"([^"]+)"\s*:`)
+	matches := re.FindAllStringSubmatch(block, -1)
+	values := make([]string, 0, len(matches))
+	for _, match := range matches {
+		values = append(values, match[1])
+	}
+	slices.Sort(values)
+	return values
+}
+
+func quotedSetValuesInKotlinVar(source string, varName string) []string {
+	block := extractInitializerBlock(source, varName)
+	re := regexp.MustCompile(`"([^"]+)"`)
+	matches := re.FindAllStringSubmatch(block, -1)
+	values := make([]string, 0, len(matches))
+	for _, match := range matches {
+		values = append(values, match[1])
+	}
+	slices.Sort(values)
+	return values
+}
+
+func extractInitializerBlock(source string, varName string) string {
+	start := strings.Index(source, varName)
+	if start < 0 {
+		return ""
+	}
+	open := strings.IndexAny(source[start:], "({")
+	if open < 0 {
+		return ""
+	}
+	open += start
+	closeChar := byte('}')
+	if source[open] == '(' {
+		closeChar = ')'
+	}
+	depth := 0
+	for i := open; i < len(source); i++ {
+		switch source[i] {
+		case source[open]:
+			depth++
+		case closeChar:
+			depth--
+			if depth == 0 {
+				return source[open : i+1]
+			}
+		}
+	}
+	return source[open:]
 }
 
 func TestSupportedCapabilitiesAdvertiseSchemaAndDiagnostics(t *testing.T) {

@@ -50,27 +50,15 @@ func TestNormalizeProfileNodesAddsManualSource(t *testing.T) {
 	}
 }
 
-func TestNormalizeProfileNodesBackfillsLegacyStaleSource(t *testing.T) {
+func TestNormalizeProfileNodesDoesNotBackfillLegacyStaleProvider(t *testing.T) {
 	profile := defaultProfileProjectionConfig()
 	profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"stale":true}`),
 	}
 
 	normalized := normalizeProfileProjectionConfig(profile)
-	if err := validateProfileProjectionConfig(normalized); err != nil {
-		t.Fatalf("legacy stale node should be normalized to subscription source: %v", err)
-	}
-
-	var node map[string]json.RawMessage
-	if err := json.Unmarshal(normalized.Nodes[0], &node); err != nil {
-		t.Fatalf("parse normalized node: %v", err)
-	}
-	var source ProfileNodeSourceConfig
-	if err := json.Unmarshal(node["source"], &source); err != nil {
-		t.Fatalf("parse normalized source: %v", err)
-	}
-	if source.Type != "SUBSCRIPTION" || source.ProviderKey == "" {
-		t.Fatalf("expected legacy subscription source, got %#v", source)
+	if err := validateProfileProjectionConfig(normalized); err == nil {
+		t.Fatalf("legacy stale node without provider key should be rejected")
 	}
 }
 
@@ -169,5 +157,32 @@ func TestWriteFileAtomicReplacesFileWithoutLeavingTemp(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("atomic replacement mode = %o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestLoadRejectsLegacyNodeArray(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	raw := []byte(`{
+		"schema_version": 5,
+		"proxy": {"mode":"tproxy","tproxy_port":10853,"dns_port":10856,"gid":23333,"mark":8227,"api_port":0},
+		"transport": {"protocol":"reality","tls_server":"","fingerprint":"chrome","extra":{}},
+		"node": [],
+		"runtime_v2": {"backend_kind":"ROOT_TPROXY","fallback_policy":"OFFER_RESET"},
+		"routing": {"mode":"whitelist","bypass_lan":true,"bypass_china":false,"bypass_russia":false,"block_ads":false,"custom_direct":[],"custom_proxy":[],"custom_block":[],"geoip_path":"/data/adb/privstack/data/geoip.db","geosite_path":"/data/adb/privstack/data/geosite.db"},
+		"apps": {"mode":"whitelist","list":[],"app_groups":{}},
+		"dns": {"hijack_per_uid":true,"proxy_dns":"https://1.1.1.1/dns-query","direct_dns":"https://dns.google/dns-query","bootstrap_ip":"1.1.1.1","block_quic_dns":true,"fake_ip":false},
+		"ipv6": {"mode":"mirror"},
+		"sharing": {"enabled":false},
+		"health": {"enabled":true,"interval_sec":30,"threshold":3,"check_url":"https://www.gstatic.com/generate_204","timeout_sec":5,"dns_is_hard_readiness":false},
+		"rescue": {"enabled":true,"max_attempts":3,"cooldown_sec":60},
+		"autostart": false
+	}`)
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatalf("legacy node array must not be normalized")
 	}
 }

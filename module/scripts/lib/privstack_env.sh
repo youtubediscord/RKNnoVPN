@@ -10,6 +10,7 @@ CONFIG_DIR="${CONFIG_DIR:-${PRIVSTACK_DIR}/config}"
 RENDERED_CONFIG_DIR="${RENDERED_CONFIG_DIR:-${CONFIG_DIR}/rendered}"
 SCRIPTS_DIR="${SCRIPTS_DIR:-${PRIVSTACK_DIR}/scripts}"
 RUN_DIR="${RUN_DIR:-${PRIVSTACK_DIR}/run}"
+DATA_DIR="${DATA_DIR:-${PRIVSTACK_DIR}/data}"
 LOG_DIR="${LOG_DIR:-${PRIVSTACK_DIR}/logs}"
 BACKUP_DIR="${BACKUP_DIR:-${PRIVSTACK_DIR}/backup}"
 PROFILES_DIR="${PROFILES_DIR:-${PRIVSTACK_DIR}/profiles}"
@@ -54,7 +55,7 @@ privstack_log_warn() { privstack_log w "$@"; }
 privstack_log_error() { privstack_log e "$@"; }
 
 privstack_ensure_layout() {
-    for _dir in "$BIN_DIR" "$CONFIG_DIR" "$RENDERED_CONFIG_DIR" "$SCRIPTS_DIR" "$RUN_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR"; do
+    for _dir in "$BIN_DIR" "$CONFIG_DIR" "$RENDERED_CONFIG_DIR" "$SCRIPTS_DIR" "$RUN_DIR" "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR"; do
         mkdir -p "$_dir" 2>/dev/null || return 1
     done
 }
@@ -80,8 +81,8 @@ privstack_apply_data_permissions() {
     chown -R 0:"$PRIVSTACK_GID" "$RUN_DIR" 2>/dev/null || true
     chmod 0750 "$RUN_DIR" 2>/dev/null || true
 
-    chown -R 0:0 "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" 2>/dev/null || true
-    chmod 0700 "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" 2>/dev/null || true
+    chown -R 0:0 "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" 2>/dev/null || true
+    chmod 0700 "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$PROFILES_DIR" "$RELEASES_DIR" 2>/dev/null || true
     find "$LOG_DIR" -type f -exec chmod 0600 {} \; 2>/dev/null || true
 }
 

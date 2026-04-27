@@ -73,6 +73,7 @@ class DaemonClient @Inject constructor(
             "update-check",
             "update-download",
             "update-install",
+            "ipc.contract",
             "version",
         )
     }
@@ -492,6 +493,11 @@ class DaemonClient @Inject constructor(
 
     // ---- Meta ----
 
+    suspend fun ipcContract(): DaemonClientResult<IpcContractInfo> =
+        call("ipc.contract") { element ->
+            json.decodeFromJsonElement(IpcContractInfo.serializer(), element)
+        }
+
     suspend fun version(): DaemonClientResult<VersionInfo> =
         call("version") { element ->
             val obj = element as JsonObject
@@ -603,6 +609,30 @@ class DaemonClient @Inject constructor(
                 val enforceReleaseMatch = required.none { it in REPAIR_METHODS }
                 val requiresSingBox = required.any { it in SING_BOX_METHODS }
                 val requiresSchemaV4 = enforceReleaseMatch && required.any { it in SCHEMA_V4_METHODS }
+                val contract = if ("ipc.contract" in info.supportedMethods) {
+                    when (val contractResult = ipcContract()) {
+                        is DaemonClientResult.Ok -> contractResult.data
+                        is DaemonClientResult.DaemonError -> return DaemonClientResult.DaemonError(
+                            COMPATIBILITY_ERROR_CODE,
+                            "APK и модуль несовместимы: daemon не отдал IPC contract (${contractResult.message})",
+                            contractResult.details,
+                        )
+                        is DaemonClientResult.ParseError -> return DaemonClientResult.DaemonError(
+                            COMPATIBILITY_ERROR_CODE,
+                            "APK и модуль несовместимы: некорректный IPC contract",
+                        )
+                        is DaemonClientResult.RootDenied -> return contractResult
+                        is DaemonClientResult.Timeout -> return contractResult
+                        is DaemonClientResult.DaemonNotFound -> return contractResult
+                        is DaemonClientResult.Failure -> return contractResult
+                    }
+                } else {
+                    null
+                }
+                val missingCapabilities = contract?.missingCapabilities(requiredMethods.toList())
+                    ?: info.missingCapabilities(requiredMethods.toList())
+                val missingMethods = contract?.missingRequiredMethods(requiredMethods.toList() + "version")
+                    ?: info.missingRequiredMethods(requiredMethods.toList() + "version")
                 when {
                     enforceReleaseMatch && info.releaseMismatch(BuildConfig.VERSION_NAME) != null ->
                         DaemonClientResult.DaemonError(
@@ -619,10 +649,10 @@ class DaemonClient @Inject constructor(
                             COMPATIBILITY_ERROR_CODE,
                             "APK и модуль несовместимы: daemon config schema ${info.schemaVersion}, нужна $MIN_SCHEMA_VERSION",
                         )
-                    enforceReleaseMatch && info.missingCapabilities(requiredMethods.toList()).isNotEmpty() ->
+                    enforceReleaseMatch && missingCapabilities.isNotEmpty() ->
                         DaemonClientResult.DaemonError(
                             COMPATIBILITY_ERROR_CODE,
-                            "APK и модуль несовместимы: daemon ${info.daemonVersion}, module ${info.moduleVersion}; нет capabilities ${info.missingCapabilities(requiredMethods.toList()).joinToString(", ")}",
+                            "APK и модуль несовместимы: daemon ${info.daemonVersion}, module ${info.moduleVersion}; нет capabilities ${missingCapabilities.joinToString(", ")}",
                         )
                     requiresSingBox && !info.singBoxAvailable ->
                         DaemonClientResult.DaemonError(
@@ -630,13 +660,12 @@ class DaemonClient @Inject constructor(
                             "APK и модуль несовместимы: sing-box недоступен (${info.singBoxError.ifBlank { "unknown" }})",
                         )
                     else -> {
-                        val missing = info.missingRequiredMethods(requiredMethods.toList() + "version")
-                        if (missing.isEmpty()) {
+                        if (missingMethods.isEmpty()) {
                             null
                         } else {
                             DaemonClientResult.DaemonError(
                                 COMPATIBILITY_ERROR_CODE,
-                                "APK и модуль несовместимы: APK ${BuildConfig.VERSION_NAME}, daemon ${info.daemonVersion}, module ${info.moduleVersion}; нет методов ${missing.joinToString(", ")}",
+                                "APK и модуль несовместимы: APK ${BuildConfig.VERSION_NAME}, daemon ${info.daemonVersion}, module ${info.moduleVersion}; нет методов ${missingMethods.joinToString(", ")}",
                             )
                         }
                     }
@@ -698,6 +727,53 @@ data class ProfileSummary(
     val id: String,
     val name: String,
     val isActive: Boolean
+)
+
+@Serializable
+data class IpcContractInfo(
+    val version: Int = 0,
+    val controlProtocolVersion: Int = 0,
+    val schemaVersion: Int = 0,
+    val capabilities: List<String> = emptyList(),
+    val methods: List<IpcMethodContractInfo> = emptyList(),
+) {
+    fun missingRequiredMethods(required: Collection<String>): List<String> {
+        val methodNames = methods.mapTo(mutableSetOf()) { it.method }
+        if (methodNames.isEmpty()) return required.toList()
+        return required.filterNot { it in methodNames }
+    }
+
+    fun missingCapabilities(requiredMethods: Collection<String>): List<String> {
+        if (capabilities.isEmpty()) return listOf("capabilities")
+        val byMethod = methods.associateBy { it.method }
+        return requiredMethods
+            .mapNotNull { method ->
+                byMethod[method]?.capability?.takeIf { it.isNotBlank() }
+                    ?: capabilityForMethod(method)
+            }
+            .distinct()
+            .filterNot { it in capabilities }
+    }
+}
+
+@Serializable
+data class IpcMethodContractInfo(
+    val method: String = "",
+    val capability: String = "",
+    val mutating: Boolean = false,
+    val async: Boolean = false,
+    val request: String = "",
+    val result: String = "",
+    val errorCodes: List<String> = emptyList(),
+    val operation: IpcOperationContractInfo? = null,
+    val compatibility: String = "",
+)
+
+@Serializable
+data class IpcOperationContractInfo(
+    val type: String = "",
+    val asyncResultVia: String = "",
+    val stages: List<String> = emptyList(),
 )
 
 data class VersionInfo(
@@ -786,6 +862,7 @@ private fun capabilityForMethod(method: String): String? = when (method) {
     "subscription.preview", "subscription.refresh" -> "profile.subscription.v2"
     "diagnostics.health" -> "diagnostics.health.v2"
     "diagnostics.testNodes" -> "diagnostics.testNodes.v2"
+    "ipc.contract", "version" -> "ipc.contract.v1"
     "self-check" -> "privacy.self-check.v1"
     "logs", "doctor" -> "runtime.logs"
     "update-install" -> "update.install.v1"

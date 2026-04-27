@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -170,7 +171,15 @@ func (d *daemon) initRuntimeV2() {
 		d.desiredStateV2(),
 		&rootBackendV2{d: d},
 	)
+	d.runtimeV2.SetStatusObserver(func(status runtimev2.Status) {
+		if err := runtimev2.WriteRuntimeState(d.dataDir, status); err != nil {
+			log.Printf("runtime_state persist failed: %v", err)
+		}
+	})
 	d.refreshRuntimeV2Compatibility()
+	if err := runtimev2.WriteRuntimeState(d.dataDir, d.runtimeV2.Status()); err != nil {
+		log.Printf("runtime_state initial persist failed: %v", err)
+	}
 }
 
 func (d *daemon) refreshRuntimeV2Compatibility() {

@@ -269,8 +269,10 @@ operation. Save-only операции возвращают `runtimeApply: not_re
   "stages": [
     {"name": "validate", "status": "ok"},
     {"name": "render", "status": "ok"},
-    {"name": "persist-desired", "status": "ok"},
-    {"name": "runtime-apply", "status": "accepted"}
+    {"name": "persist-draft", "status": "ok"},
+    {"name": "runtime-apply", "status": "accepted"},
+    {"name": "verify", "status": "accepted"},
+    {"name": "commit-generation", "status": "accepted"}
   ]
 }
 ```
@@ -280,6 +282,14 @@ operation. Save-only операции возвращают `runtimeApply: not_re
 показывает, была ли выполнена cleanup/reset ветка. APK должен показывать
 пользователю именно этот typed результат, а не угадывать состояние по тексту
 ошибки.
+
+Runtime operation state хранится отдельно от user intent:
+`<dataDir>/run/runtime_state.json` содержит desired/applied state, health,
+compatibility, `activeOperation`, `lastOperation` и `updatedAt`. Это
+observable snapshot текущего runtime owner, а не source of truth для профиля.
+`profile.json` остаётся user intent, `config.json` остаётся root/runtime
+projection, а operation generation/result фиксируются через runtime state и
+`backend.status`.
 
 APK projection: repository слой публикует отдельный informational notice для
 typed config transaction outcomes (`skipped_runtime_stopped`, `failed` +

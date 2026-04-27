@@ -18,6 +18,7 @@ import (
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/subscription"
 )
 
 func TestBuildRuntimeV2HealthSnapshotSeparatesOperationalFailures(t *testing.T) {
@@ -553,6 +554,7 @@ func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 	if !statusHasOperation(status, runtimev2.OperationReload) {
 		t.Fatalf("config import should expose reload operation, got %#v", status)
 	}
+	d.runtimeV2.SetStatusObserver(nil)
 	savedProfile, found, err := profiledoc.Load(d.profilePath)
 	if err != nil {
 		t.Fatalf("load imported profile: %v", err)
@@ -621,6 +623,7 @@ func TestReloadConfigApplyBusyDoesNotPersistConfig(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	d.runtimeV2.SetStatusObserver(nil)
 	defer close(release)
 
 	nextCfg := *d.cfg
@@ -656,6 +659,7 @@ func TestConfigApplyWithoutReloadBusyDoesNotPersistConfig(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	d.runtimeV2.SetStatusObserver(nil)
 	defer close(release)
 
 	nextCfg := *d.cfg
@@ -1047,11 +1051,11 @@ func TestValidateSubscriptionFetchURLRejectsLocalTargets(t *testing.T) {
 		"http://192.168.1.1/sub",
 		"http://[::1]/sub",
 	} {
-		if err := validateSubscriptionFetchURL(rawURL); err == nil {
+		if err := subscription.ValidateFetchURL(rawURL); err == nil {
 			t.Fatalf("expected %q to be rejected", rawURL)
 		}
 	}
-	if err := validateSubscriptionFetchURL("https://example.com/sub"); err != nil {
+	if err := subscription.ValidateFetchURL("https://example.com/sub"); err != nil {
 		t.Fatalf("expected public https URL to pass, got %v", err)
 	}
 }

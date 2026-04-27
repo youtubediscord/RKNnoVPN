@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
-	"time"
+	"errors"
 
+	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/subscription"
 )
 
 func (d *daemon) handleProfileGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -24,9 +27,15 @@ func (d *daemon) handleProfileApply(params *json.RawMessage) (interface{}, *ipc.
 		Profile *profiledoc.Document `json:"profile"`
 		Reload  *bool                `json:"reload"`
 	}
-	if err := json.Unmarshal(*params, &p); err != nil {
-		var doc profiledoc.Document
-		if docErr := json.Unmarshal(*params, &doc); docErr != nil {
+	if hasJSONField(*params, "profile") {
+		decoder := json.NewDecoder(bytes.NewReader(*params))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&p); err != nil {
+			return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "invalid profile.apply params: " + err.Error()}
+		}
+	} else {
+		doc, err := profiledoc.DecodeStrictDocument(*params)
+		if err != nil {
 			return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "invalid profile: " + err.Error()}
 		}
 		p.Profile = &doc
@@ -39,6 +48,15 @@ func (d *daemon) handleProfileApply(params *json.RawMessage) (interface{}, *ipc.
 		reload = *p.Reload
 	}
 	return d.applyProfileDocument(*p.Profile, reload, "profile.apply", -1)
+}
+
+func hasJSONField(data []byte, field string) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+	_, ok := raw[field]
+	return ok
 }
 
 func (d *daemon) handleProfileImportNodes(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -118,89 +136,82 @@ func (d *daemon) handleProfileSetActiveNode(params *json.RawMessage) (interface{
 }
 
 func (d *daemon) handleSubscriptionPreview(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	nodes, sub, failures, rpcErr := d.fetchAndParseSubscription(params)
+	rawURL, rpcErr := subscriptionURLFromParams(params)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
 	d.mu.Lock()
 	current := profiledoc.FromConfig(d.cfg)
 	d.mu.Unlock()
-	_, stats := profiledoc.MergeSubscriptionNodes(current, sub, nodes)
+	preview, err := subscription.NewClient(nil).Preview(rawURL, current)
+	if err != nil {
+		return nil, subscriptionRPCError(rawURL, preview.FetchStatus, preview.FetchHeaders, err)
+	}
 	return map[string]interface{}{
-		"subscription":  sub,
-		"nodes":         nodes,
-		"added":         stats["added"],
-		"updated":       stats["updated"],
-		"unchanged":     stats["unchanged"],
-		"stale":         stats["stale"],
-		"parseFailures": failures,
+		"subscription":  preview.Subscription,
+		"nodes":         preview.Nodes,
+		"added":         preview.Added,
+		"updated":       preview.Updated,
+		"unchanged":     preview.Unchanged,
+		"stale":         preview.Stale,
+		"parseFailures": preview.ParseFailures,
 	}, nil
 }
 
 func (d *daemon) handleSubscriptionRefresh(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	nodes, sub, failures, rpcErr := d.fetchAndParseSubscription(params)
+	rawURL, rpcErr := subscriptionURLFromParams(params)
 	if rpcErr != nil {
 		return nil, rpcErr
 	}
 	d.mu.Lock()
 	current := profiledoc.FromConfig(d.cfg)
 	d.mu.Unlock()
-	next, stats := profiledoc.MergeSubscriptionNodes(current, sub, nodes)
-	replaced := false
-	for i, existing := range next.Subscriptions {
-		if existing.ProviderKey == sub.ProviderKey {
-			sub.Name = existing.Name
-			next.Subscriptions[i] = sub
-			replaced = true
-			break
-		}
+	refresh, err := subscription.NewClient(nil).ApplyRefresh(rawURL, current)
+	if err != nil {
+		return nil, subscriptionRPCError(rawURL, refresh.FetchStatus, refresh.FetchHeaders, err)
 	}
-	if !replaced {
-		next.Subscriptions = append(next.Subscriptions, sub)
-	}
-	result, applyErr := d.applyProfileDocument(next, true, "subscription.refresh", len(nodes))
+	result, applyErr := d.applyProfileDocument(refresh.Profile, true, "subscription.refresh", len(refresh.Nodes))
 	if applyErr != nil {
 		return nil, applyErr
 	}
 	if obj, ok := result.(map[string]interface{}); ok {
-		obj["subscription"] = sub
-		obj["imported"] = len(nodes)
-		obj["parseFailures"] = failures
-		obj["merge"] = stats
+		obj["subscription"] = refresh.Subscription
+		obj["imported"] = len(refresh.Nodes)
+		obj["parseFailures"] = refresh.ParseFailures
+		obj["merge"] = refresh.Merge
 	}
 	return result, nil
 }
 
-func (d *daemon) fetchAndParseSubscription(params *json.RawMessage) ([]profiledoc.Node, profiledoc.Subscription, int, *ipc.RPCError) {
+func subscriptionURLFromParams(params *json.RawMessage) (string, *ipc.RPCError) {
 	if params == nil {
-		return nil, profiledoc.Subscription{}, 0, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "params required: {\"url\": \"https://...\"}"}
+		return "", &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "params required: {\"url\": \"https://...\"}"}
 	}
 	var p struct {
 		URL string `json:"url"`
 	}
 	if err := json.Unmarshal(*params, &p); err != nil {
-		return nil, profiledoc.Subscription{}, 0, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "invalid params: " + err.Error()}
+		return "", &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "invalid params: " + err.Error()}
 	}
-	fetched, err := fetchSubscriptionURL(p.URL)
-	if err != nil {
-		code := ipc.CodeInternalError
-		if validateSubscriptionFetchURL(p.URL) != nil || p.URL == "" {
-			code = ipc.CodeInvalidParams
-		}
-		return nil, profiledoc.Subscription{}, 0, &ipc.RPCError{
-			Code:    code,
-			Message: err.Error(),
-			Data: map[string]interface{}{
-				"status":  fetched.Status,
-				"headers": fetched.Headers,
-			},
-		}
+	return p.URL, nil
+}
+
+func subscriptionRPCError(rawURL string, status int, headers map[string]string, err error) *ipc.RPCError {
+	code := ipc.CodeInternalError
+	if subscription.ValidateFetchURL(rawURL) != nil || rawURL == "" {
+		code = ipc.CodeInvalidParams
 	}
-	nodes, sub, failures := profiledoc.ParseSubscription(fetched.Body, fetched.Headers, p.URL, time.Now().UnixMilli())
-	if len(nodes) == 0 && failures > 0 {
-		return nil, sub, failures, &ipc.RPCError{Code: ipc.CodeConfigError, Message: "subscription contains no supported nodes"}
+	if errors.Is(err, subscription.ErrNoSupportedNodes) {
+		code = ipc.CodeConfigError
 	}
-	return nodes, sub, failures, nil
+	return &ipc.RPCError{
+		Code:    code,
+		Message: err.Error(),
+		Data: map[string]interface{}{
+			"status":  status,
+			"headers": headers,
+		},
+	}
 }
 
 func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, action string, updated int) (interface{}, *ipc.RPCError) {
@@ -236,7 +247,7 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 	}
 
 	status := d.runtimeV2.Status()
-	runtimeApply := configRuntimeApplyStatus(reload, runtimeWasRunning)
+	runtimeApply := applytx.RuntimeApplyStatus(reload, runtimeWasRunning)
 	runtimeApplied := runtimeApply == "applied"
 	if runtimeApply == "accepted" {
 		runtimeApplied = false
@@ -266,74 +277,14 @@ func profileOperation(
 	warnings []profiledoc.Warning,
 	updated int,
 ) map[string]interface{} {
-	rollback := "not_needed"
-	if resetReport != nil {
-		rollback = "cleanup_incomplete"
-		if resetReport.Status == "ok" {
-			rollback = "cleanup_succeeded"
-		}
-	} else if configSaved && status == "saved_not_applied" {
-		rollback = "not_needed"
-	}
-	stages := []map[string]interface{}{
-		{"name": "validate", "status": "ok"},
-		{"name": "render", "status": "ok"},
-		{"name": "persist-desired", "status": stageStatus(configSaved, status == "failed")},
-		{"name": "runtime-apply", "status": runtimeApply},
-	}
-	if resetReport != nil {
-		stages = append(stages, map[string]interface{}{"name": "cleanup", "status": resetReport.Status})
-	}
-	warningItems := make([]map[string]string, 0, len(warnings))
+	warningItems := make([]applytx.Warning, 0, len(warnings))
 	for _, warning := range warnings {
-		warningItems = append(warningItems, map[string]string{
-			"code":    warning.Code,
-			"message": warning.Message,
+		warningItems = append(warningItems, applytx.Warning{
+			Code:    warning.Code,
+			Message: warning.Message,
 		})
 	}
-	result := map[string]interface{}{
-		"status":            status,
-		"configSaved":       configSaved,
-		"config_saved":      configSaved,
-		"runtimeApplied":    runtimeApplied,
-		"runtime_applied":   runtimeApplied,
-		"runtimeApply":      runtimeApply,
-		"runtime_apply":     runtimeApply,
-		"desiredGeneration": desiredGeneration,
-		"appliedGeneration": appliedGeneration,
-		"rollback":          rollback,
-		"stages":            stages,
-		"warnings":          warningItems,
-		"operation": map[string]interface{}{
-			"type":              "profile-apply",
-			"action":            action,
-			"status":            status,
-			"configSaved":       configSaved,
-			"runtimeApplied":    runtimeApplied,
-			"runtimeApply":      runtimeApply,
-			"desiredGeneration": desiredGeneration,
-			"appliedGeneration": appliedGeneration,
-			"rollback":          rollback,
-			"stages":            stages,
-			"warnings":          warningItems,
-		},
-	}
-	if updated >= 0 {
-		result["updated"] = updated
-		result["operation"].(map[string]interface{})["updated"] = updated
-	}
-	if code != "" {
-		result["code"] = code
-		result["operation"].(map[string]interface{})["code"] = code
-	}
-	if message != "" {
-		result["message"] = message
-		result["operation"].(map[string]interface{})["message"] = message
-	}
-	if resetReport != nil {
-		result["resetReport"] = resetReport
-	}
-	return result
+	return applytx.ProfileOperation(action, status, configSaved, runtimeApplied, runtimeApply, desiredGeneration, appliedGeneration, code, message, resetReport, warningItems, updated)
 }
 
 func desiredGeneration(status runtimev2.Status, before runtimev2.Status) int64 {

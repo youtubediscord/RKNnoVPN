@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"sort"
@@ -162,13 +163,21 @@ func FromConfig(cfg *config.Config) Document {
 		Inbounds: decodeInbounds(panel.Inbounds),
 		Extra:    cloneRaw(panel.Extra),
 	}
-	if len(doc.Nodes) == 0 {
-		if node := nodeFromLegacyConfig(cfg); node != nil {
-			doc.Nodes = append(doc.Nodes, *node)
-			doc.ActiveNodeID = node.ID
-		}
-	}
 	return doc
+}
+
+func DecodeStrictDocument(data []byte) (Document, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var doc Document
+	if err := decoder.Decode(&doc); err != nil {
+		return Document{}, err
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return Document{}, fmt.Errorf("profile document must contain a single JSON object")
+	}
+	return doc, nil
 }
 
 func ApplyToConfig(base *config.Config, doc Document) (*config.Config, []Warning, error) {
@@ -820,89 +829,6 @@ func decodeInbounds(raw json.RawMessage) InboundsConfig {
 	_ = json.Unmarshal(raw, &inbounds)
 	inbounds.AllowLAN = false
 	return inbounds
-}
-
-func nodeFromLegacyConfig(cfg *config.Config) *Node {
-	profile := cfg.ResolveProfile()
-	if profile == nil || profile.Address == "" {
-		return nil
-	}
-	node := Node{
-		ID:        stableNodeID(profile.Protocol, profile.Address, profile.Port, profile.UUID+profile.Password),
-		Name:      firstNonEmpty(profile.Name, profile.Address),
-		Protocol:  normalizeProtocol(profile.Protocol),
-		Server:    profile.Address,
-		Port:      profile.Port,
-		Group:     "Default",
-		CreatedAt: time.Now().UnixMilli(),
-		Source:    NodeSource{Type: "MANUAL"},
-	}
-	settings := map[string]interface{}{}
-	switch node.Protocol {
-	case "vless", "vmess":
-		user := map[string]interface{}{"id": profile.UUID}
-		if profile.Flow != "" {
-			user["flow"] = profile.Flow
-		}
-		if node.Protocol == "vmess" {
-			user["alterId"] = profile.AlterID
-			user["security"] = firstNonEmpty(profile.Security, "auto")
-		}
-		settings["vnext"] = []interface{}{map[string]interface{}{
-			"address": profile.Address,
-			"port":    profile.Port,
-			"users":   []interface{}{user},
-		}}
-	case "trojan", "shadowsocks":
-		server := map[string]interface{}{
-			"address":  profile.Address,
-			"port":     profile.Port,
-			"password": firstNonEmpty(profile.Password, profile.UUID),
-		}
-		if node.Protocol == "shadowsocks" {
-			server["method"] = firstNonEmpty(profile.SSMethod, "aes-128-gcm")
-			if profile.SSPlugin != "" {
-				server["plugin"] = profile.SSPlugin
-			}
-			if profile.SSPluginOpts != "" {
-				server["plugin_opts"] = profile.SSPluginOpts
-			}
-		}
-		settings["servers"] = []interface{}{server}
-	case "socks":
-		settings["address"] = profile.Address
-		settings["port"] = profile.Port
-		settings["version"] = firstNonEmpty(profile.SocksVersion, "5")
-		if profile.Username != "" {
-			settings["username"] = profile.Username
-		}
-		if profile.Password != "" {
-			settings["password"] = profile.Password
-		}
-	case "wireguard":
-		settings["address"] = profile.Address
-		settings["port"] = profile.Port
-		settings["private_key"] = profile.WGPrivateKey
-		settings["peer_public_key"] = profile.WGPeerPublicKey
-		settings["pre_shared_key"] = profile.WGPresharedKey
-		settings["local_address"] = profile.WGLocalAddress
-		settings["allowed_ips"] = profile.WGAllowedIPs
-		settings["mtu"] = profile.WGMTU
-		settings["reserved"] = profile.WGReserved
-	}
-	outbound := map[string]interface{}{
-		"protocol": node.Protocol,
-		"settings": settings,
-	}
-	if profile.Transport != "" && node.Protocol != "socks" && node.Protocol != "wireguard" {
-		outbound["streamSettings"] = map[string]interface{}{
-			"network":  profile.Transport,
-			"security": profile.Extra["security"],
-		}
-	}
-	raw, _ := json.Marshal(outbound)
-	node.Outbound = raw
-	return &node
 }
 
 func nodeMatchKey(node Node) string {

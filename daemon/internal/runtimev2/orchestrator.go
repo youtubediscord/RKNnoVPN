@@ -35,8 +35,9 @@ type Orchestrator struct {
 	opSeq             uint64
 	activeStuckLogged bool
 
-	watchdogAfter time.Duration
-	logger        func(OperationLogEvent)
+	watchdogAfter  time.Duration
+	logger         func(OperationLogEvent)
+	statusObserver func(Status)
 }
 
 type operationCompletion struct {
@@ -90,6 +91,12 @@ func (o *Orchestrator) SetOperationLogger(logger func(OperationLogEvent)) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.logger = logger
+}
+
+func (o *Orchestrator) SetStatusObserver(observer func(Status)) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.statusObserver = observer
 }
 
 func (o *Orchestrator) SetCompatibility(compatibility CompatibilityStatus) {
@@ -663,8 +670,12 @@ func (o *Orchestrator) submitLocked(
 		Phase:       op.Phase,
 		Result:      "accepted",
 	})
+	observer := o.statusObserver
 	o.mu.Unlock()
 
+	if observer != nil {
+		observer(status)
+	}
 	go o.runSubmittedOperation(op, run)
 	return status, nil
 }
@@ -698,7 +709,12 @@ func (o *Orchestrator) runSubmittedOperation(op OperationStatus, run func(Operat
 			o.mu.Lock()
 		}
 		o.finishOperationLocked(op, completion)
+		status := o.statusLockedWithoutStuckLog()
+		observer := o.statusObserver
 		o.mu.Unlock()
+		if observer != nil {
+			observer(status)
+		}
 	}()
 	if run != nil {
 		completion = run(op)
@@ -790,7 +806,7 @@ func (o *Orchestrator) statusLockedWithStuckLog(logStuck bool) Status {
 	var active *OperationStatus
 	if o.active != nil {
 		active = o.cloneActiveOperationLocked(time.Now())
-		if logStuck && active.Stuck && active.RuntimeMS > 0 && !o.activeStuckLogged {
+		if logStuck && active.Stuck && active.RuntimeMS > 0 && active.Step != "" && !o.activeStuckLogged {
 			o.activeStuckLogged = true
 			o.logLocked(OperationLogEvent{
 				OperationID: active.OperationID,

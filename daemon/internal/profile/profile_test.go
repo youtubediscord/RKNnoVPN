@@ -39,6 +39,73 @@ func TestProfileDocumentMigratesConfigAndPanelWithoutDroppingState(t *testing.T)
 	}
 }
 
+func TestFromConfigDoesNotCreateNodeFromLegacyConfigOnlyState(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Node.Address = "legacy.example"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Profile.Nodes = nil
+	cfg.Profile.ActiveNodeID = ""
+
+	doc := FromConfig(cfg)
+	if len(doc.Nodes) != 0 || doc.ActiveNodeID != "" {
+		t.Fatalf("legacy config-only node must not be projected into profile: %#v", doc)
+	}
+}
+
+func TestDecodeStrictDocumentRejectsUnknownProfileFields(t *testing.T) {
+	raw := []byte(`{
+		"profileSchemaVersion": 2,
+		"id": "main",
+		"name": "Primary",
+		"nodes": [],
+		"runtime": {},
+		"routing": {"mode":"PER_APP"},
+		"dns": {"remoteDns":"https://1.1.1.1/dns-query","directDns":"https://dns.google/dns-query","bootstrapIp":"1.1.1.1","ipv6Mode":"MIRROR","blockQuic":true,"fakeDns":false},
+		"health": {"enabled":true,"intervalSec":30,"threshold":3,"checkUrl":"https://www.gstatic.com/generate_204","timeoutSec":5,"dnsIsHardReadiness":false},
+		"sharing": {"enabled":false},
+		"tun": {"enabled":false,"mtu":9000,"ipv4Address":"172.19.0.1/30","ipv6":false,"autoRoute":true,"strictRoute":true},
+		"inbounds": {"socksPort":0,"httpPort":0,"allowLan":false},
+		"unexpected": true
+	}`)
+
+	if _, err := DecodeStrictDocument(raw); err == nil {
+		t.Fatalf("unknown profile field should be rejected")
+	}
+}
+
+func TestDecodeStrictDocumentRejectsUnknownNodeFieldsButAllowsOutboundAndExtra(t *testing.T) {
+	raw := []byte(`{
+		"profileSchemaVersion": 2,
+		"id": "main",
+		"name": "Primary",
+		"activeNodeId": "node-1",
+		"nodes": [{
+			"id":"node-1",
+			"name":"Node",
+			"protocol":"vless",
+			"server":"example.com",
+			"port":443,
+			"outbound":{"protocol":"vless","settings":{"x":1}},
+			"source":{"type":"MANUAL"},
+			"extra":{"ui":"ok"},
+			"legacyField":"nope"
+		}],
+		"runtime": {},
+		"routing": {"mode":"PER_APP"},
+		"dns": {"remoteDns":"https://1.1.1.1/dns-query","directDns":"https://dns.google/dns-query","bootstrapIp":"1.1.1.1","ipv6Mode":"MIRROR","blockQuic":true,"fakeDns":false},
+		"health": {"enabled":true,"intervalSec":30,"threshold":3,"checkUrl":"https://www.gstatic.com/generate_204","timeoutSec":5,"dnsIsHardReadiness":false},
+		"sharing": {"enabled":false},
+		"tun": {"enabled":false,"mtu":9000,"ipv4Address":"172.19.0.1/30","ipv6":false,"autoRoute":true,"strictRoute":true},
+		"inbounds": {"socksPort":0,"httpPort":0,"allowLan":false}
+	}`)
+
+	if _, err := DecodeStrictDocument(raw); err == nil {
+		t.Fatalf("unknown node field should be rejected")
+	}
+}
+
 func TestProfileValidationRejectsAllowLanAndRepairsStaleActive(t *testing.T) {
 	doc := Document{
 		ID:           "main",

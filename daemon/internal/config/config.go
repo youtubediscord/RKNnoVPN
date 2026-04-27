@@ -393,35 +393,6 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := DefaultConfig()
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", path, err)
-	}
-
-	// Older module defaults stored `node` as an empty array. Accept that legacy
-	// shape and normalize it to the current single-node object form.
-	if nodeRaw, ok := raw["node"]; ok {
-		trimmed := bytes.TrimSpace(nodeRaw)
-		if len(trimmed) > 0 && trimmed[0] == '[' {
-			var legacy []NodeConfig
-			if err := json.Unmarshal(trimmed, &legacy); err != nil {
-				return nil, fmt.Errorf("config: parse legacy node field in %s: %w", path, err)
-			}
-			normalized := NodeConfig{}
-			if len(legacy) > 0 {
-				normalized = legacy[0]
-			}
-			nodeObj, err := json.Marshal(normalized)
-			if err != nil {
-				return nil, fmt.Errorf("config: normalize legacy node field in %s: %w", path, err)
-			}
-			raw["node"] = nodeObj
-			data, err = json.Marshal(raw)
-			if err != nil {
-				return nil, fmt.Errorf("config: rebuild normalized config %s: %w", path, err)
-			}
-		}
-	}
 
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
@@ -902,9 +873,6 @@ func normalizeProfileNodes(nodes []json.RawMessage) []json.RawMessage {
 
 func normalizedProfileNodeSource(stale bool, source *ProfileNodeSourceConfig) ProfileNodeSourceConfig {
 	if source == nil {
-		if stale {
-			return ProfileNodeSourceConfig{Type: "SUBSCRIPTION", ProviderKey: "legacy"}
-		}
 		return ProfileNodeSourceConfig{Type: "MANUAL"}
 	}
 	normalized := *source

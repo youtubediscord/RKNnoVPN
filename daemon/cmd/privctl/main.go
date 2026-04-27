@@ -27,6 +27,7 @@ var commands = map[string]string{
 	"audit":                     "Run privacy/security audit",
 	"doctor":                    "Collect redacted diagnostics for support",
 	"self-check":                "Return concise health/privacy/compatibility summary",
+	"ipc.contract":              "Print the daemon IPC method/capability contract",
 	"app.list":                  "List installed apps known to the daemon",
 	"app.resolveUid":            "Resolve a UID to package metadata: privctl app.resolveUid '{\"uid\":10123}'",
 	"profile.get":               "Get daemon-owned profile document",
@@ -187,7 +188,7 @@ func printUsage() {
 	order := []string{
 		"backend.status", "backend.start", "backend.stop", "backend.restart", "backend.reset", "backend.applyDesiredState",
 		"diagnostics.health", "diagnostics.testNodes",
-		"audit", "doctor", "self-check",
+		"audit", "doctor", "self-check", "ipc.contract",
 		"app.list", "app.resolveUid",
 		"profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode",
 		"subscription.preview", "subscription.refresh",
