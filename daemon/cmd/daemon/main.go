@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
@@ -494,19 +495,7 @@ func (d *daemon) registerHandlers() error {
 		"update-install":            d.handleUpdateInstall,
 		"version":                   d.handleVersion,
 	}
-	var missing []string
-	for _, contract := range ipc.MethodContracts() {
-		handler, ok := handlers[contract.Method]
-		if !ok {
-			missing = append(missing, contract.Method)
-			continue
-		}
-		d.ipcServer.Register(contract.Method, handler)
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("contract method(s) without daemon handlers: %s", strings.Join(missing, ", "))
-	}
-	return nil
+	return control.RegisterContractHandlers(d.ipcServer, handlers)
 }
 
 // --------------------------------------------------------------------------

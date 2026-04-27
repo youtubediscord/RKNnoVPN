@@ -14,6 +14,13 @@ import (
 )
 
 func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
+	return d.applyConfigWithOperation(newCfg, reload, runtimev2.OperationReload)
+}
+
+func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, operation runtimev2.OperationKind) error {
+	if operation == "" {
+		operation = runtimev2.OperationReload
+	}
 	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
 		d.coreMgr.GetState() == core.StateDegraded
 
@@ -69,7 +76,7 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 	}
 
 	if reload && wasRunning {
-		if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(generation int64) error {
+		if _, err := d.runtimeV2.RunOperation(operation, runtimev2.PhaseStarting, func(generation int64) error {
 			return d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved", generation, needsFullRestart)
 		}); err != nil {
 			return fmt.Errorf("config saved: %w", err)
@@ -172,6 +179,19 @@ func (d *daemon) reapplyRuntimeRules(cfg *config.Config) error {
 }
 
 func (d *daemon) reapplyRuntimeRulesReport(cfg *config.Config) (netstack.Report, error) {
+	if err := core.VerifyChainedProxyOwnerPackages(cfg); err != nil {
+		report := netstack.Report{
+			Operation: "apply",
+			Status:    "failed",
+			Steps: []netstack.Step{{
+				Name:   "verify-chain-proxy-owners",
+				Status: "failed",
+				Detail: err.Error(),
+			}},
+			Errors: []string{err.Error()},
+		}
+		return report, &netstack.Error{Operation: "apply", Code: "LOCAL_PROXY_OWNER_MISMATCH", Report: report}
+	}
 	manager := netstack.New(d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript)
 	report := manager.Apply()
 	if err := report.Err(); err != nil {

@@ -148,6 +148,8 @@ func runtimeUserMessage(code string) string {
 		return "RKNnoVPN network rules were applied but did not pass verification."
 	case "NETSTACK_CLEANUP_FAILED":
 		return "Previous RKNnoVPN network rules could not be cleaned up."
+	case "LOCAL_PROXY_OWNER_MISMATCH":
+		return "Local proxy port is not owned by the configured app."
 	default:
 		return "Runtime stage failed."
 	}
@@ -458,6 +460,13 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	}
 
 	// 5-6. Apply RKNnoVPN-owned iptables and DNS interception.
+	if err := VerifyChainedProxyOwnerPackages(m.config); err != nil {
+		m.logger.Printf("local proxy owner verification failed: %v — rolling back", err)
+		rollbackStarted(syscall.SIGTERM, false, false)
+		return failStage("verify-chain-proxy-owners", "verify local proxy owners", "LOCAL_PROXY_OWNER_MISMATCH", err, true)
+	}
+	recordStage("verify-chain-proxy-owners", "ok", "", "", false)
+
 	netReport := m.netstack().Apply()
 	if err := netReport.Err(); err != nil {
 		code := "RULES_NOT_APPLIED"

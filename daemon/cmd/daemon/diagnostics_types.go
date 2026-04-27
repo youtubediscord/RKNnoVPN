@@ -2,8 +2,9 @@ package main
 
 import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
-	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
+
+const controlProtocolVersion = 5
 
 type diagnosticCommandResult struct {
 	Command string   `json:"command"`

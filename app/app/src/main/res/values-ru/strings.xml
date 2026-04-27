@@ -261,6 +261,8 @@
     <string name="operation_start">запуск</string>
     <string name="operation_stop">остановка</string>
     <string name="operation_reload">перезагрузка</string>
+    <string name="operation_profile_apply">применение профиля</string>
+    <string name="operation_config_import">импорт конфигурации</string>
     <string name="operation_runtime">runtime-операция</string>
     <string name="log_level_debug">DEBUG</string>
     <string name="log_level_info">INFO</string>
@@ -323,6 +325,7 @@
     <!-- Настройки runtime -->
     <string name="url_test_endpoint_required">URL для проверки не должен быть пустым</string>
     <string name="daemon_status_restarting">Перезапуск службы…</string>
+    <string name="daemon_status_applying">Применение настроек…</string>
     <string name="daemon_status_restarted">Служба перезапущена</string>
     <string name="daemon_status_resetting">Сброс службы…</string>
     <string name="daemon_status_stopped">Остановлено</string>

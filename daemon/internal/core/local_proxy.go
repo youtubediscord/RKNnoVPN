@@ -13,6 +13,54 @@ import (
 
 var procNetTCPFiles = []string{"/proc/net/tcp", "/proc/net/tcp6"}
 
+// VerifyChainedProxyOwnerPackages checks that declared loopback proxy owners
+// resolve to Android UIDs and, when a matching port is already listening, that
+// the listener belongs to the declared package.
+func VerifyChainedProxyOwnerPackages(cfg *config.Config) error {
+	profiles := localOutboundProxyProfiles(cfg)
+	if len(profiles) == 0 {
+		return nil
+	}
+	ports := make([]int, 0, len(profiles))
+	for _, profile := range profiles {
+		if strings.TrimSpace(profile.OwnerPackage) != "" {
+			ports = append(ports, profile.Port)
+		}
+	}
+	if len(ports) == 0 {
+		return nil
+	}
+	owners := tcpListenerOwnersByPort(ports)
+	var problems []string
+	for _, profile := range profiles {
+		ownerPackage := strings.TrimSpace(profile.OwnerPackage)
+		if ownerPackage == "" {
+			continue
+		}
+		resolution := ResolvePackageUIDsDetailed([]string{ownerPackage})
+		expected := map[int]bool{}
+		for _, uid := range resolution.UIDs {
+			parsed, err := strconv.Atoi(uid)
+			if err == nil {
+				expected[parsed] = true
+			}
+		}
+		if len(expected) == 0 {
+			problems = append(problems, fmt.Sprintf("local proxy port %d owner package %s did not resolve to a UID", profile.Port, ownerPackage))
+			continue
+		}
+		for _, actualUID := range owners[profile.Port] {
+			if !expected[actualUID] {
+				problems = append(problems, fmt.Sprintf("local proxy port %d is owned by UID %d, expected package %s", profile.Port, actualUID, ownerPackage))
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
 // BuildChainedProxyProtectionEnv returns ports of local proxy outbounds and
 // the owner UIDs that may reach those ports. The third return value contains
 // per-port allow rules in "port:uid" form for stricter iptables rendering.

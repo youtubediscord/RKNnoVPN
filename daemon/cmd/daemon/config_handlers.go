@@ -93,7 +93,7 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		}
 	}
 
-	mutation, err := d.persistProfileConfigMutation(newCfg, true)
+	mutation, err := d.persistProfileConfigMutationForAction(newCfg, true, "config-import")
 	if err != nil {
 		return nil, d.configApplyRPCErrorSaved("config-import", err, mutation.ConfigSaved)
 	}

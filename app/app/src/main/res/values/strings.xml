@@ -261,6 +261,8 @@
     <string name="operation_start">Start</string>
     <string name="operation_stop">Stop</string>
     <string name="operation_reload">Reload</string>
+    <string name="operation_profile_apply">Apply profile</string>
+    <string name="operation_config_import">Import config</string>
     <string name="operation_runtime">Runtime operation</string>
     <string name="log_level_debug">Debug</string>
     <string name="log_level_info">Info</string>
@@ -323,6 +325,7 @@
     <!-- Settings runtime -->
     <string name="url_test_endpoint_required">URL test endpoint must not be empty</string>
     <string name="daemon_status_restarting">Restarting backend…</string>
+    <string name="daemon_status_applying">Applying settings…</string>
     <string name="daemon_status_restarted">Backend restarted</string>
     <string name="daemon_status_resetting">Resetting backend…</string>
     <string name="daemon_status_stopped">Stopped</string>

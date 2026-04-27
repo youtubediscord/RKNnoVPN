@@ -1,6 +1,52 @@
 package applytx
 
-import "reflect"
+import (
+	"fmt"
+	"reflect"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+)
+
+type ConfigTransactionResult struct {
+	ConfigSaved       bool
+	RuntimeWasRunning bool
+}
+
+type ConfigTransaction struct {
+	EnsureIdle     func() error
+	SaveProfile    func(*config.Config) error
+	ApplyConfig    func(*config.Config, bool) error
+	RuntimeRunning func() bool
+}
+
+func (tx ConfigTransaction) Run(nextCfg *config.Config, reload bool) (ConfigTransactionResult, error) {
+	var result ConfigTransactionResult
+	if nextCfg == nil {
+		return result, fmt.Errorf("config is nil")
+	}
+	if tx.EnsureIdle != nil {
+		if err := tx.EnsureIdle(); err != nil {
+			return result, err
+		}
+	}
+	if tx.SaveProfile == nil {
+		return result, fmt.Errorf("profile persistence is not configured")
+	}
+	if err := tx.SaveProfile(nextCfg); err != nil {
+		return result, fmt.Errorf("persist profile: %w", err)
+	}
+	result.ConfigSaved = true
+	if tx.RuntimeRunning != nil {
+		result.RuntimeWasRunning = tx.RuntimeRunning()
+	}
+	if tx.ApplyConfig == nil {
+		return result, fmt.Errorf("config apply is not configured")
+	}
+	if err := tx.ApplyConfig(nextCfg, reload); err != nil {
+		return result, err
+	}
+	return result, nil
+}
 
 type Warning struct {
 	Code    string

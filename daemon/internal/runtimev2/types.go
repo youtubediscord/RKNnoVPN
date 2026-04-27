@@ -30,14 +30,16 @@ const (
 type OperationKind string
 
 const (
-	OperationStart         OperationKind = "start"
-	OperationStop          OperationKind = "stop"
-	OperationRestart       OperationKind = "restart"
-	OperationReset         OperationKind = "reset"
-	OperationReload        OperationKind = "reload"
-	OperationNetworkChange OperationKind = "network-change"
-	OperationRescue        OperationKind = "rescue"
-	OperationUpdateInstall OperationKind = "update-install"
+	OperationStart          OperationKind = "start"
+	OperationStop           OperationKind = "stop"
+	OperationRestart        OperationKind = "restart"
+	OperationReset          OperationKind = "reset"
+	OperationReload         OperationKind = "reload"
+	OperationConfigMutation OperationKind = "config-mutation"
+	OperationProfileApply   OperationKind = "profile-apply"
+	OperationNetworkChange  OperationKind = "network-change"
+	OperationRescue         OperationKind = "rescue"
+	OperationUpdateInstall  OperationKind = "update-install"
 )
 
 type FallbackPolicy string

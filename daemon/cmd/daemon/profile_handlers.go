@@ -232,7 +232,7 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 		}
 	}
 
-	mutation, err := d.persistProfileConfigMutation(nextCfg, reload)
+	mutation, err := d.persistProfileConfigMutationForAction(nextCfg, reload, action)
 	if err != nil {
 		rpcErr := d.configApplyRPCError(action, err)
 		status := d.runtimeV2.Status()

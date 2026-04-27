@@ -993,7 +993,7 @@ func (d *daemon) persistDesiredStateV2(desired runtimev2.DesiredState) error {
 	if err != nil {
 		return err
 	}
-	if _, err := d.persistProfileConfigMutation(nextCfg, false); err != nil {
+	if _, err := d.persistProfileConfigMutationForAction(nextCfg, false, "backend.applyDesiredState"); err != nil {
 		return err
 	}
 	return nil

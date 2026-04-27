@@ -936,6 +936,8 @@ class SettingsViewModel @Inject constructor(
                         messages.get(com.rknnovpn.panel.R.string.daemon_status_resetting)
                     status.activeOperation?.kind == "restart" || status.activeOperation?.kind == "reload" ->
                         messages.get(com.rknnovpn.panel.R.string.daemon_status_restarting)
+                    status.activeOperation?.kind == "profile-apply" || status.activeOperation?.kind == "config-mutation" ->
+                        messages.get(com.rknnovpn.panel.R.string.daemon_status_applying)
                     else ->
                         messages.get(com.rknnovpn.panel.R.string.state_connecting)
                 }

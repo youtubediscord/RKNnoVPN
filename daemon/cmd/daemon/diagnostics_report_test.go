@@ -473,7 +473,7 @@ func TestDiagnosticPortRolesDoNotExpectDisabledLocalHelpers(t *testing.T) {
 	roles := diagnosticLocalPortRoles(cfg)
 	for _, port := range []int{10808, 10809, 9090} {
 		if len(roles[port]) != 0 {
-			t.Fatalf("disabled localhost helper/API port %d must not have diagnostics_report roles: %#v", port, roles)
+			t.Fatalf("disabled localhost helper/API port %d must not have diagnostics report roles: %#v", port, roles)
 		}
 	}
 }
