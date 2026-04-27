@@ -1,4 +1,4 @@
-package com.privstack.panel.model
+package com.rknnovpn.panel.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

@@ -1,4 +1,4 @@
-package com.privstack.panel
+package com.rknnovpn.panel
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -12,12 +12,12 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.privstack.panel.repository.ProfileRepository
-import com.privstack.panel.repository.StatusRepository
-import com.privstack.panel.ui.navigation.BottomNavBar
-import com.privstack.panel.ui.navigation.NavGraph
-import com.privstack.panel.ui.navigation.TopLevelRoute
-import com.privstack.panel.ui.theme.PrivStackTheme
+import com.rknnovpn.panel.repository.ProfileRepository
+import com.rknnovpn.panel.repository.StatusRepository
+import com.rknnovpn.panel.ui.navigation.BottomNavBar
+import com.rknnovpn.panel.ui.navigation.NavGraph
+import com.rknnovpn.panel.ui.navigation.TopLevelRoute
+import com.rknnovpn.panel.ui.theme.RKNnoVPNTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            PrivStackTheme {
+            RKNnoVPNTheme {
                 val navController = rememberNavController()
                 val backStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = backStackEntry?.destination?.route

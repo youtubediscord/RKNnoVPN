@@ -1,4 +1,4 @@
-package com.privstack.panel.ipc
+package com.rknnovpn.panel.ipc
 
 import kotlinx.serialization.json.JsonElement
 

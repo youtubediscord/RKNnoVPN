@@ -283,8 +283,8 @@ func DefaultConfig() *Config {
 		Routing: RoutingConfig{
 			Mode:        "whitelist",
 			BypassLAN:   true,
-			GeoIPPath:   "/data/adb/privstack/data/geoip.db",
-			GeoSitePath: "/data/adb/privstack/data/geosite.db",
+			GeoIPPath:   "/data/adb/rknnovpn/data/geoip.db",
+			GeoSitePath: "/data/adb/rknnovpn/data/geosite.db",
 		},
 		Apps: AppsConfig{
 			Mode: "whitelist",
@@ -375,8 +375,8 @@ func (c *Config) ResolveProfileInbounds() ProfileInboundsConfig {
 	if decoded.HTTPPort > 0 {
 		result.HTTPPort = decoded.HTTPPort
 	}
-	// Helper inbounds are diagnostics/local-control surfaces. Keep them
-	// localhost-only even if older APK state still carries allowLan=true.
+	// Helper inbounds are diagnostics/local-control surfaces and are always
+	// localhost-only in the root runtime.
 	result.AllowLAN = false
 	return result
 }
@@ -397,10 +397,6 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
-	if cfg.SchemaVersion == 0 {
-		cfg.SchemaVersion = CurrentSchemaVersion
-	}
-	cfg.Migrate()
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config: validate: %w", err)
@@ -429,15 +425,6 @@ func (c *Config) Save(path string) error {
 		return err
 	}
 	return nil
-}
-
-// Migrate normalizes older config shapes to the current canonical schema.
-// DefaultConfig is unmarshaled first by callers, so this only needs to apply
-// semantic migrations that cannot be represented as missing-field defaults.
-func (c *Config) Migrate() {
-	if c.SchemaVersion < CurrentSchemaVersion {
-		c.SchemaVersion = CurrentSchemaVersion
-	}
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode, label string) error {
@@ -489,6 +476,20 @@ func validateProfileProjectionConfig(profile ProfileProjectionConfig) error {
 			return fmt.Errorf("profile.inbounds.allowLan is not supported by root helper inbounds")
 		}
 	}
+	subscriptionProviderKeys := make(map[string]bool, len(profile.Subscriptions))
+	for index, raw := range profile.Subscriptions {
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return fmt.Errorf("profile.subscriptions[%d] is empty", index)
+		}
+		var subscription ProfileSubscriptionConfig
+		if err := json.Unmarshal(raw, &subscription); err != nil {
+			return fmt.Errorf("profile.subscriptions[%d] invalid: %w", index, err)
+		}
+		key := strings.TrimSpace(subscription.ProviderKey)
+		if key != "" {
+			subscriptionProviderKeys[key] = true
+		}
+	}
 	for index, raw := range profile.Nodes {
 		if len(bytes.TrimSpace(raw)) == 0 {
 			return fmt.Errorf("profile.nodes[%d] is empty", index)
@@ -513,6 +514,9 @@ func validateProfileProjectionConfig(profile ProfileProjectionConfig) error {
 			if strings.TrimSpace(source.ProviderKey) == "" {
 				return fmt.Errorf("profile.nodes[%d].source.providerKey is required for subscription nodes", index)
 			}
+			if !subscriptionProviderKeys[source.ProviderKey] {
+				return fmt.Errorf("profile.nodes[%d].source.providerKey %q is missing from profile.subscriptions", index, source.ProviderKey)
+			}
 			if source.LastSeenAt < 0 {
 				return fmt.Errorf("profile.nodes[%d].source.lastSeenAt must be >= 0", index)
 			}
@@ -521,13 +525,8 @@ func validateProfileProjectionConfig(profile ProfileProjectionConfig) error {
 		}
 	}
 	for index, raw := range profile.Subscriptions {
-		if len(bytes.TrimSpace(raw)) == 0 {
-			return fmt.Errorf("profile.subscriptions[%d] is empty", index)
-		}
 		var subscription ProfileSubscriptionConfig
-		if err := json.Unmarshal(raw, &subscription); err != nil {
-			return fmt.Errorf("profile.subscriptions[%d] invalid: %w", index, err)
-		}
+		_ = json.Unmarshal(raw, &subscription)
 		if strings.TrimSpace(subscription.ProviderKey) == "" {
 			return fmt.Errorf("profile.subscriptions[%d].providerKey is required", index)
 		}
@@ -567,11 +566,8 @@ func syncDirBestEffort(dir string) {
 
 // Validate checks the Config for obvious misconfigurations.
 func (c *Config) Validate() error {
-	if c.SchemaVersion < 1 {
-		return fmt.Errorf("schema_version must be >= 1, got %d", c.SchemaVersion)
-	}
-	if c.SchemaVersion > CurrentSchemaVersion {
-		return fmt.Errorf("schema_version %d is newer than daemon supports (%d)", c.SchemaVersion, CurrentSchemaVersion)
+	if c.SchemaVersion != CurrentSchemaVersion {
+		return fmt.Errorf("schema_version must be %d, got %d", CurrentSchemaVersion, c.SchemaVersion)
 	}
 	if err := validateProfileProjectionConfig(c.Profile); err != nil {
 		return err
@@ -733,15 +729,6 @@ func normalizeProfileProjectionConfig(profile ProfileProjectionConfig) ProfilePr
 		profile.Subscriptions = []json.RawMessage{}
 	}
 	profile.Subscriptions = normalizeProfileSubscriptions(profile.Subscriptions)
-	if len(profile.Inbounds) > 0 {
-		var inbounds ProfileInboundsConfig
-		if err := json.Unmarshal(profile.Inbounds, &inbounds); err == nil && inbounds.AllowLAN {
-			inbounds.AllowLAN = false
-			if raw, marshalErr := json.Marshal(inbounds); marshalErr == nil {
-				profile.Inbounds = raw
-			}
-		}
-	}
 	return profile
 }
 

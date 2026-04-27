@@ -1,16 +1,16 @@
-package com.privstack.panel.ui.dashboard
+package com.rknnovpn.panel.ui.dashboard
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.privstack.panel.i18n.UserMessageFormatter
-import com.privstack.panel.model.BackendPhase
-import com.privstack.panel.model.ConnectionState
-import com.privstack.panel.model.DaemonConnectionState
-import com.privstack.panel.model.DaemonStatus
-import com.privstack.panel.model.TrafficStats
-import com.privstack.panel.repository.CommandOutcome
-import com.privstack.panel.repository.StatusRepository
+import com.rknnovpn.panel.i18n.UserMessageFormatter
+import com.rknnovpn.panel.model.BackendPhase
+import com.rknnovpn.panel.model.ConnectionState
+import com.rknnovpn.panel.model.DaemonConnectionState
+import com.rknnovpn.panel.model.DaemonStatus
+import com.rknnovpn.panel.model.TrafficStats
+import com.rknnovpn.panel.repository.CommandOutcome
+import com.rknnovpn.panel.repository.StatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -281,19 +281,19 @@ class DashboardViewModel @Inject constructor(
     private fun formatStuckOperation(stepDetail: String, step: String): String {
         val currentStep = stepDetail.ifBlank { step }.trim()
         return if (currentStep.isBlank()) {
-            messages.get(com.privstack.panel.R.string.daemon_status_operation_stuck)
+            messages.get(com.rknnovpn.panel.R.string.daemon_status_operation_stuck)
         } else {
-            messages.get(com.privstack.panel.R.string.daemon_status_operation_stuck_with_step, currentStep)
+            messages.get(com.rknnovpn.panel.R.string.daemon_status_operation_stuck_with_step, currentStep)
         }
     }
 
     private fun formatActiveNodeSubtitle(status: DaemonStatus): String? {
         return when (status.activeNodeMode) {
-            "auto_selector" -> messages.get(com.privstack.panel.R.string.active_node_mode_auto)
+            "auto_selector" -> messages.get(com.rknnovpn.panel.R.string.active_node_mode_auto)
             "manual" -> status.activeNodeProtocol?.let {
-                messages.get(com.privstack.panel.R.string.active_node_mode_manual, it)
+                messages.get(com.rknnovpn.panel.R.string.active_node_mode_manual, it)
             }
-            "manual_missing" -> messages.get(com.privstack.panel.R.string.active_node_mode_missing)
+            "manual_missing" -> messages.get(com.rknnovpn.panel.R.string.active_node_mode_missing)
             "single_node" -> status.activeNodeProtocol
             else -> status.activeNodeProtocol
         }
@@ -312,11 +312,11 @@ class DashboardViewModel @Inject constructor(
 }
 
 private fun String.operationNameRes(): Int = when (this) {
-    "start" -> com.privstack.panel.R.string.operation_start
-    "stop" -> com.privstack.panel.R.string.operation_stop
-    "restart", "reload" -> com.privstack.panel.R.string.operation_reload
-    "reset" -> com.privstack.panel.R.string.reset_network_rules
-    else -> com.privstack.panel.R.string.operation_runtime
+    "start" -> com.rknnovpn.panel.R.string.operation_start
+    "stop" -> com.rknnovpn.panel.R.string.operation_stop
+    "restart", "reload" -> com.rknnovpn.panel.R.string.operation_reload
+    "reset" -> com.rknnovpn.panel.R.string.reset_network_rules
+    else -> com.rknnovpn.panel.R.string.operation_runtime
 }
 
 private val TRANSIENT_OR_STOPPED_PHASES = setOf(

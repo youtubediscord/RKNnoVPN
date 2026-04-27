@@ -8,11 +8,11 @@ plugins {
 }
 
 android {
-    namespace = "com.privstack.panel"
+    namespace = "com.rknnovpn.panel"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.privstack.panel"
+        applicationId = "com.rknnovpn.panel"
         minSdk = 26
         targetSdk = 35
         versionCode = 1800

@@ -1,11 +1,11 @@
-package com.privstack.panel.i18n
+package com.rknnovpn.panel.i18n
 
 import android.content.Context
 import androidx.annotation.StringRes
-import com.privstack.panel.R
-import com.privstack.panel.ipc.ConfigMutationInfo
-import com.privstack.panel.ipc.DaemonClientResult
-import com.privstack.panel.model.RuntimeStageReport
+import com.rknnovpn.panel.R
+import com.rknnovpn.panel.ipc.ConfigMutationInfo
+import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.model.RuntimeStageReport
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull

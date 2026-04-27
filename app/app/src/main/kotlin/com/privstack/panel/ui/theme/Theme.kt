@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.theme
+package com.rknnovpn.panel.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -102,7 +102,7 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 @Composable
-fun PrivStackTheme(
+fun RKNnoVPNTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,

@@ -313,6 +313,28 @@ func Normalize(doc Document) (Document, []Warning, error) {
 			return doc, warnings, fmt.Errorf("profile.nodes[%d].source.type must be MANUAL or SUBSCRIPTION", i)
 		}
 	}
+	subscriptionProviderKeys := make(map[string]bool, len(doc.Subscriptions))
+	for i := range doc.Subscriptions {
+		sub := &doc.Subscriptions[i]
+		sub.ProviderKey = strings.TrimSpace(sub.ProviderKey)
+		sub.URL = strings.TrimSpace(sub.URL)
+		sub.Name = strings.TrimSpace(sub.Name)
+		if sub.ProviderKey == "" {
+			return doc, warnings, fmt.Errorf("profile.subscriptions[%d].providerKey is required", i)
+		}
+		if sub.URL == "" {
+			return doc, warnings, fmt.Errorf("profile.subscriptions[%d].url is required", i)
+		}
+		subscriptionProviderKeys[sub.ProviderKey] = true
+	}
+	for i, node := range doc.Nodes {
+		if node.Source.Type != "SUBSCRIPTION" {
+			continue
+		}
+		if !subscriptionProviderKeys[node.Source.ProviderKey] {
+			return doc, warnings, fmt.Errorf("profile.nodes[%d].source.providerKey %q is missing from profile.subscriptions", i, node.Source.ProviderKey)
+		}
+	}
 
 	liveIDs := make(map[string]bool)
 	for _, node := range doc.Nodes {
@@ -630,7 +652,7 @@ func decodeSubscriptionBody(body string) string {
 func normalizeSubscriptions(subscriptions []Subscription, nodes []Node) []Subscription {
 	byKey := make(map[string]Subscription)
 	for _, sub := range subscriptions {
-		sub.ProviderKey = firstNonEmpty(strings.TrimSpace(sub.ProviderKey), ProviderKeyFor(sub.URL))
+		sub.ProviderKey = strings.TrimSpace(sub.ProviderKey)
 		sub.URL = strings.TrimSpace(sub.URL)
 		if sub.ProviderKey == "" || sub.URL == "" {
 			continue
@@ -645,8 +667,7 @@ func normalizeSubscriptions(subscriptions []Subscription, nodes []Node) []Subscr
 		}
 		sub := byKey[node.Source.ProviderKey]
 		if sub.ProviderKey == "" {
-			sub.ProviderKey = node.Source.ProviderKey
-			sub.URL = firstNonEmpty(node.Source.URL, node.Source.ProviderKey)
+			continue
 		}
 		if node.Stale {
 			sub.StaleNodeCount++

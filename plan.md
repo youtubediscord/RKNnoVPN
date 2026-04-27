@@ -1,4 +1,4 @@
-# План развития PrivStack / RKNnoVPN
+# План развития RKNnoVPN / RKNnoVPN
 
 Документ описывает актуальный roadmap проекта после перехода на `sing-box`, `urltest` outbounds и root-only TPROXY архитектуру.
 
@@ -139,7 +139,7 @@ netstack report
 
 Acceptance:
 
-- cleanup удаляет только PrivStack-owned artifacts;
+- cleanup удаляет только RKNnoVPN-owned artifacts;
 - проверка остатков смотрит IPv4/IPv6 и raw/mangle/nat/filter;
 - `netstack verify` вызывает `iptables.sh status`/`dns.sh status` и
   отличает `NETSTACK_VERIFY_FAILED` от apply/cleanup ошибок;

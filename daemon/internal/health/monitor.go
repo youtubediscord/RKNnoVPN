@@ -355,12 +355,12 @@ func (h *HealthMonitor) checkPortListening(port int) CheckResult {
 	return CheckResult{Pass: true, Detail: fmt.Sprintf("порт %d открыт", port)}
 }
 
-// checkIptablesIntact verifies the PRIVSTACK_PRE chain is still hooked in
+// checkIptablesIntact verifies the RKNNOVPN_PRE chain is still hooked in
 // the mangle PREROUTING chain.
 func (h *HealthMonitor) checkIptablesIntact() CheckResult {
-	err := core.ExecIptables("-t", "mangle", "-C", "PREROUTING", "-j", "PRIVSTACK_PRE")
+	err := core.ExecIptables("-t", "mangle", "-C", "PREROUTING", "-j", "RKNNOVPN_PRE")
 	if err != nil {
-		return CheckResult{Pass: false, Detail: "цепочка PRIVSTACK_PRE не подключена к PREROUTING", Code: "RULES_NOT_APPLIED"}
+		return CheckResult{Pass: false, Detail: "цепочка RKNNOVPN_PRE не подключена к PREROUTING", Code: "RULES_NOT_APPLIED"}
 	}
 	return CheckResult{Pass: true, Detail: "цепочка iptables на месте"}
 }

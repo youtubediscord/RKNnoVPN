@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate a PrivStack doctor JSON bundle.")
+    parser = argparse.ArgumentParser(description="Validate a RKNnoVPN doctor JSON bundle.")
     parser.add_argument("path", type=Path)
     parser.add_argument("--strict-package-resolution", action="store_true")
     args = parser.parse_args()

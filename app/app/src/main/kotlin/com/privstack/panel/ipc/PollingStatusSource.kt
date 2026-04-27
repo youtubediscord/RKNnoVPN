@@ -1,11 +1,11 @@
-package com.privstack.panel.ipc
+package com.rknnovpn.panel.ipc
 
 import android.util.Log
-import com.privstack.panel.i18n.UserMessageFormatter
-import com.privstack.panel.model.BackendStatusV2
-import com.privstack.panel.model.ConnectionState
-import com.privstack.panel.model.DaemonConnectionState
-import com.privstack.panel.model.DaemonStatus
+import com.rknnovpn.panel.i18n.UserMessageFormatter
+import com.rknnovpn.panel.model.BackendStatusV2
+import com.rknnovpn.panel.model.ConnectionState
+import com.rknnovpn.panel.model.DaemonConnectionState
+import com.rknnovpn.panel.model.DaemonStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -119,14 +119,14 @@ class PollingStatusSource @Inject constructor(
             is DaemonClientResult.RootDenied -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = messages.get(com.privstack.panel.R.string.error_root_access_denied)
+                _lastError.value = messages.get(com.rknnovpn.panel.R.string.error_root_access_denied)
                 Log.w(TAG, "Root denied during status poll")
             }
             is DaemonClientResult.Timeout -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
                 _lastError.value = messages.get(
-                    com.privstack.panel.R.string.error_request_timed_out_with_method,
+                    com.rknnovpn.panel.R.string.error_request_timed_out_with_method,
                     result.method,
                 )
                 Log.w(TAG, "Status poll timed out")
@@ -134,7 +134,7 @@ class PollingStatusSource @Inject constructor(
             is DaemonClientResult.DaemonNotFound -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = messages.get(com.privstack.panel.R.string.error_daemon_not_found)
+                _lastError.value = messages.get(com.rknnovpn.panel.R.string.error_daemon_not_found)
                 Log.w(TAG, "Daemon binary not found")
             }
             is DaemonClientResult.DaemonError -> {
@@ -146,7 +146,7 @@ class PollingStatusSource @Inject constructor(
             is DaemonClientResult.ParseError -> {
                 consecutiveFailures++
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
-                _lastError.value = messages.get(com.privstack.panel.R.string.error_invalid_daemon_response)
+                _lastError.value = messages.get(com.rknnovpn.panel.R.string.error_invalid_daemon_response)
                 Log.w(TAG, "Failed to parse status response", result.cause)
             }
             is DaemonClientResult.Failure -> {
@@ -154,7 +154,7 @@ class PollingStatusSource @Inject constructor(
                 _connectionState.value = DaemonConnectionState.UNREACHABLE
                 _lastError.value = messages.formatControlPlaneFailure(
                     result.throwable.message,
-                    com.privstack.panel.R.string.error_unexpected_with_reason,
+                    com.rknnovpn.panel.R.string.error_unexpected_with_reason,
                 )
                 Log.e(TAG, "Unexpected failure during poll", result.throwable)
             }

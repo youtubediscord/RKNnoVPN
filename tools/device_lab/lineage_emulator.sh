@@ -176,7 +176,7 @@ adb_shell_probe() {
 describe_adb_shell_failure() {
     {
         printf 'adb transport is online, but adb shell service failed.\n'
-        printf 'This emulator image is not usable for PrivStack lab checks until adb shell works.\n'
+        printf 'This emulator image is not usable for RKNnoVPN lab checks until adb shell works.\n'
         printf 'Last adb shell error:\n'
         adb_base shell true
     } 2>&1
@@ -219,7 +219,7 @@ prepare_insecure_adb() {
     command -v qemu-nbd >/dev/null 2>&1 || die "qemu-nbd not found"
     [ "$(id -u)" = "0" ] || die "prepare-insecure-adb must run as root because qemu-nbd and mount need privileges"
 
-    mount_dir="/tmp/privstack_lineage_persist"
+    mount_dir="/tmp/rknnovpn_lineage_persist"
     backup_path="$VM_DIR/grubenv.before-insecure-adb.bak"
 
     cleanup_prepare() {
@@ -258,7 +258,7 @@ start_vm() {
     esac
     launcher="$RUN_VM"
     if [ "$EMU_ADB_PORT" != "5555" ] || [ "$EMU_FASTBOOT_PORT" != "5554" ]; then
-        launcher=".privstack_$RUN_VM"
+        launcher=".rknnovpn_$RUN_VM"
         sed \
             -e "s/hostfwd=tcp::5554-:5554/hostfwd=tcp::$EMU_FASTBOOT_PORT-:5554/g" \
             -e "s/hostfwd=tcp::5555-:5555/hostfwd=tcp::$EMU_ADB_PORT-:5555/g" \
@@ -321,7 +321,7 @@ install_artifacts() {
         [ "$ALLOW_MODULE_INSTALL" = "1" ] || die "module install is mutating; pass --allow-module-install"
         ensure_root_shell
         adb_su "command -v magisk >/dev/null 2>&1" || die "magisk command not found on emulator"
-        remote_zip="/data/local/tmp/privstack-module.zip"
+        remote_zip="/data/local/tmp/rknnovpn-module.zip"
         note "pushing module ZIP to $remote_zip"
         adb_base push "$MODULE_ZIP" "$remote_zip"
         note "installing Magisk module"

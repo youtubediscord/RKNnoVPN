@@ -3,8 +3,8 @@ set -u
 
 ADB="${ADB:-adb}"
 ADB_SERIAL="${ADB_SERIAL:-}"
-PRIVSTACK_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}"
-PRIVCTL_PATH="${PRIVCTL_PATH:-$PRIVSTACK_DIR/bin/privctl}"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/rknnovpn}"
+PRIVCTL_PATH="${PRIVCTL_PATH:-$RKNNOVPN_DIR/bin/privctl}"
 OUT_ROOT="${OUT_ROOT:-lab-artifacts/device_lab}"
 
 die() {

@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PrivStackPanel"
+rootProject.name = "RKNnoVPNPanel"
 include(":app")

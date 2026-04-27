@@ -1,18 +1,18 @@
-package com.privstack.panel.ui.nodes
+package com.rknnovpn.panel.ui.nodes
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.privstack.panel.`import`.ClipboardWatcher
-import com.privstack.panel.`import`.LinkParser
-import com.privstack.panel.i18n.UserMessageFormatter
-import com.privstack.panel.ipc.DaemonClient
-import com.privstack.panel.ipc.DaemonClientResult
-import com.privstack.panel.model.Node
-import com.privstack.panel.model.NodeSourceType
-import com.privstack.panel.model.ProfileConfig
-import com.privstack.panel.repository.ProfileRepository
-import com.privstack.panel.repository.SubscriptionImportPreview
+import com.rknnovpn.panel.`import`.ClipboardWatcher
+import com.rknnovpn.panel.`import`.LinkParser
+import com.rknnovpn.panel.i18n.UserMessageFormatter
+import com.rknnovpn.panel.ipc.DaemonClient
+import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.model.Node
+import com.rknnovpn.panel.model.NodeSourceType
+import com.rknnovpn.panel.model.ProfileConfig
+import com.rknnovpn.panel.repository.ProfileRepository
+import com.rknnovpn.panel.repository.SubscriptionImportPreview
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.net.URI
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -94,7 +94,7 @@ class NodeListViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         activeNodeId = previousNodeId,
-                        errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_set_active_failed),
+                        errorMessage = err ?: messages.get(com.rknnovpn.panel.R.string.node_set_active_failed),
                         statusMessage = null,
                     )
                 }
@@ -120,7 +120,7 @@ class NodeListViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         activeNodeId = previousNodeId,
-                        errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_set_active_failed),
+                        errorMessage = err ?: messages.get(com.rknnovpn.panel.R.string.node_set_active_failed),
                         statusMessage = null,
                     )
                 }
@@ -152,7 +152,7 @@ class NodeListViewModel @Inject constructor(
                 val err = profileRepository.error.value
                 _uiState.update {
                     it.copy(
-                        errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_delete_failed),
+                        errorMessage = err ?: messages.get(com.rknnovpn.panel.R.string.node_delete_failed),
                         statusMessage = null,
                     )
                 }
@@ -167,7 +167,7 @@ class NodeListViewModel @Inject constructor(
         if (cleanName.isBlank()) {
             _uiState.update {
                 it.copy(
-                    errorMessage = messages.get(com.privstack.panel.R.string.node_name_required),
+                    errorMessage = messages.get(com.rknnovpn.panel.R.string.node_name_required),
                     statusMessage = null,
                 )
             }
@@ -180,7 +180,7 @@ class NodeListViewModel @Inject constructor(
             if (current == null) {
                 _uiState.update {
                     it.copy(
-                        errorMessage = messages.get(com.privstack.panel.R.string.node_not_found),
+                        errorMessage = messages.get(com.rknnovpn.panel.R.string.node_not_found),
                         statusMessage = null,
                     )
                 }
@@ -197,7 +197,7 @@ class NodeListViewModel @Inject constructor(
                 val err = profileRepository.error.value
                 _uiState.update {
                     it.copy(
-                        errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_update_failed),
+                        errorMessage = err ?: messages.get(com.rknnovpn.panel.R.string.node_update_failed),
                         statusMessage = null,
                     )
                 }
@@ -239,19 +239,19 @@ class NodeListViewModel @Inject constructor(
                                     throughputBps = test.throughputBps,
                                     testStatus = when {
                                         test.tcpError != null -> messages.get(
-                                            com.privstack.panel.R.string.node_test_status_tcp_error,
+                                            com.rknnovpn.panel.R.string.node_test_status_tcp_error,
                                             messages.formatNodeTestIssue(test.tcpError),
                                         )
                                         test.urlError != null -> messages.get(
-                                            com.privstack.panel.R.string.node_test_status_url_error,
+                                            com.rknnovpn.panel.R.string.node_test_status_url_error,
                                             messages.formatNodeTestIssue(test.urlError),
                                         )
                                         test.verdict == "unusable" ->
-                                            messages.get(com.privstack.panel.R.string.node_test_status_unusable)
+                                            messages.get(com.rknnovpn.panel.R.string.node_test_status_unusable)
                                         test.urlMs != null ->
-                                            messages.get(com.privstack.panel.R.string.node_test_status_ok)
+                                            messages.get(com.rknnovpn.panel.R.string.node_test_status_ok)
                                         else ->
-                                            messages.get(com.privstack.panel.R.string.node_test_status_tcp_ok)
+                                            messages.get(com.rknnovpn.panel.R.string.node_test_status_tcp_ok)
                                     },
                                 )
                             },
@@ -348,7 +348,7 @@ class NodeListViewModel @Inject constructor(
                     importCandidates = emptyList(),
                     pendingSubscriptionPreview = null,
                     errorMessage = messages.get(
-                        com.privstack.panel.R.string.node_no_valid_proxy_uris_detected
+                        com.rknnovpn.panel.R.string.node_no_valid_proxy_uris_detected
                     ),
                     statusMessage = null,
                 )
@@ -363,7 +363,7 @@ class NodeListViewModel @Inject constructor(
                     importCandidates = emptyList(),
                     pendingSubscriptionPreview = null,
                     errorMessage = messages.get(
-                        com.privstack.panel.R.string.node_detected_uris_unparsed
+                        com.rknnovpn.panel.R.string.node_detected_uris_unparsed
                     ),
                     statusMessage = null,
                 )
@@ -417,7 +417,7 @@ class NodeListViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             errorMessage = err ?: messages.get(
-                                com.privstack.panel.R.string.node_import_failed
+                                com.rknnovpn.panel.R.string.node_import_failed
                             ),
                             statusMessage = null,
                             isLoading = false,
@@ -446,7 +446,7 @@ class NodeListViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         errorMessage = messages.get(
-                            com.privstack.panel.R.string.node_no_valid_links_to_import
+                            com.rknnovpn.panel.R.string.node_no_valid_links_to_import
                         ),
                         statusMessage = null,
                         isLoading = false,
@@ -470,7 +470,7 @@ class NodeListViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         errorMessage = err ?: messages.get(
-                            com.privstack.panel.R.string.subscription_fetch_failed
+                            com.rknnovpn.panel.R.string.subscription_fetch_failed
                         ),
                         statusMessage = null,
                         isLoading = false,
@@ -490,7 +490,7 @@ class NodeListViewModel @Inject constructor(
                         isLoading = false,
                         errorMessage = null,
                         statusMessage = messages.get(
-                            com.privstack.panel.R.string.subscription_preview_summary,
+                            com.rknnovpn.panel.R.string.subscription_preview_summary,
                             preview.addedCount,
                             preview.updatedCount,
                             preview.removedCount,
@@ -511,7 +511,7 @@ class NodeListViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         errorMessage = err ?: messages.get(
-                            com.privstack.panel.R.string.subscription_fetch_failed
+                            com.rknnovpn.panel.R.string.subscription_fetch_failed
                         ),
                         statusMessage = null,
                         isLoading = false,
@@ -625,7 +625,7 @@ class NodeListViewModel @Inject constructor(
                 providerKey = subscription.providerKey,
                 displayName = subscription.name.ifBlank {
                     hostLabel(subscription.url).ifBlank {
-                        subscription.providerKey.take(8).ifBlank { messages.get(com.privstack.panel.R.string.subscription_provider_fallback) }
+                        subscription.providerKey.take(8).ifBlank { messages.get(com.rknnovpn.panel.R.string.subscription_provider_fallback) }
                     }
                 },
                 activeNodeCount = providerNodes.count { !it.stale },
@@ -642,7 +642,7 @@ class NodeListViewModel @Inject constructor(
         return name.split(Regex("[\\s-]")).firstOrNull()?.lowercase() ?: ""
     }
     private fun <T> describeError(result: DaemonClientResult<T>): String = when (result) {
-        is DaemonClientResult.Ok -> messages.get(com.privstack.panel.R.string.node_test_status_ok)
+        is DaemonClientResult.Ok -> messages.get(com.rknnovpn.panel.R.string.node_test_status_ok)
         else -> messages.formatDaemonFailure(result)
     }
 }

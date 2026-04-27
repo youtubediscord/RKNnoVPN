@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.navigation
+package com.rknnovpn.panel.ui.navigation
 
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar

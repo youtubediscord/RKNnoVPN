@@ -1074,8 +1074,8 @@ func fileStatus(path string, executable bool) doctorFileStatus {
 
 func readModuleVersion() map[string]string {
 	paths := []string{
-		"/data/adb/modules/privstack/module.prop",
-		"/data/adb/modules_update/privstack/module.prop",
+		"/data/adb/modules/rknnovpn/module.prop",
+		"/data/adb/modules_update/rknnovpn/module.prop",
 	}
 	for _, path := range paths {
 		data, err := os.ReadFile(path)

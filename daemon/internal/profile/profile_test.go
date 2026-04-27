@@ -7,7 +7,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 )
 
-func TestProfileDocumentMigratesConfigAndPanelWithoutDroppingState(t *testing.T) {
+func TestProfileDocumentProjectsConfigProfileWithoutDroppingState(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Profile.ID = "main"
 	cfg.Profile.Name = "Primary"
@@ -26,16 +26,16 @@ func TestProfileDocumentMigratesConfigAndPanelWithoutDroppingState(t *testing.T)
 		t.Fatalf("profile schema version not exposed: got %d want %d", doc.SchemaVersion, CurrentSchemaVersion)
 	}
 	if doc.ID != "main" || doc.Name != "Primary" || doc.ActiveNodeID != "node-a" {
-		t.Fatalf("profile identity not migrated: %#v", doc)
+		t.Fatalf("profile identity not projected: %#v", doc)
 	}
 	if len(doc.Nodes) != 2 || len(doc.Subscriptions) != 1 {
-		t.Fatalf("profile collections not migrated: nodes=%d subscriptions=%d", len(doc.Nodes), len(doc.Subscriptions))
+		t.Fatalf("profile collections not projected: nodes=%d subscriptions=%d", len(doc.Nodes), len(doc.Subscriptions))
 	}
 	if !doc.Nodes[1].Stale || doc.Nodes[1].Source.Type != "SUBSCRIPTION" {
 		t.Fatalf("stale subscription metadata was not preserved: %#v", doc.Nodes[1])
 	}
 	if doc.Inbounds.SocksPort != 10808 || doc.Inbounds.HTTPPort != 10809 || doc.Inbounds.AllowLAN {
-		t.Fatalf("inbounds not migrated safely: %#v", doc.Inbounds)
+		t.Fatalf("inbounds not projected safely: %#v", doc.Inbounds)
 	}
 }
 
@@ -112,6 +112,9 @@ func TestProfileValidationRejectsAllowLanAndRepairsStaleActive(t *testing.T) {
 		Name:         "Primary",
 		ActiveNodeID: "stale",
 		Inbounds:     InboundsConfig{AllowLAN: true},
+		Subscriptions: []Subscription{
+			{ProviderKey: "sub", URL: "https://sub.example/list"},
+		},
 		Nodes: []Node{
 			{ID: "stale", Name: "Stale", Protocol: "vless", Server: "old.example", Port: 443, Stale: true, Outbound: json.RawMessage(`{}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
 			{ID: "live", Name: "Live", Protocol: "vless", Server: "live.example", Port: 443, Outbound: json.RawMessage(`{}`), Source: NodeSource{Type: "MANUAL"}},

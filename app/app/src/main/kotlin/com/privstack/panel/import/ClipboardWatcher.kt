@@ -1,8 +1,8 @@
-package com.privstack.panel.`import`
+package com.rknnovpn.panel.`import`
 
 import android.content.ClipboardManager
 import android.content.Context
-import com.privstack.panel.model.Node
+import com.rknnovpn.panel.model.Node
 
 /**
  * Monitors the system clipboard for proxy URIs.

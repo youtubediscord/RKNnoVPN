@@ -242,9 +242,9 @@ func TestBuildHealthPayloadIncludesStableLastCode(t *testing.T) {
 
 func TestPortProtectionOutputRequiresProtocolAndDropRule(t *testing.T) {
 	output := strings.Join([]string{
-		"-A PRIVSTACK_OUT -p tcp -m tcp --dport 10853 -m owner ! --uid-owner 0 ! --gid-owner 23333 -j DROP",
-		"-A PRIVSTACK_OUT -p udp -m udp --dport 10853 -m owner ! --uid-owner 0 ! --gid-owner 23333 -j DROP",
-		"-A PRIVSTACK_OUT -p tcp -m tcp --dport 10856 -j RETURN",
+		"-A RKNNOVPN_OUT -p tcp -m tcp --dport 10853 -m owner ! --uid-owner 0 ! --gid-owner 23333 -j DROP",
+		"-A RKNNOVPN_OUT -p udp -m udp --dport 10853 -m owner ! --uid-owner 0 ! --gid-owner 23333 -j DROP",
+		"-A RKNNOVPN_OUT -p tcp -m tcp --dport 10856 -j RETURN",
 	}, "\n")
 
 	if !portProtectionOutputContains(output, "tcp", 10853) {
@@ -810,7 +810,7 @@ func TestResetNetworkStateReportSuccessIsStructuredAndIdempotent(t *testing.T) {
 }
 
 func TestResetNetworkStateReportLeftoversAreWarningsAndRequireReboot(t *testing.T) {
-	d := newTestResetDaemon(t, []string{"iptables mangle rule remains: -A PRIVSTACK_PRE"}, true)
+	d := newTestResetDaemon(t, []string{"iptables mangle rule remains: -A RKNNOVPN_PRE"}, true)
 
 	report := d.resetNetworkStateReport(9, runtimev2.BackendRootTProxy)
 	if report.Status != "clean_with_warnings" {

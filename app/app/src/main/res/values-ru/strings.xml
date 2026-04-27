@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">PrivStack Panel</string>
+    <string name="app_name">RKNnoVPN Panel</string>
 
     <!-- Navigation -->
     <string name="nav_dashboard">Главная</string>
@@ -174,8 +174,8 @@
     <string name="urltest_url">URL для проверки</string>
     <string name="always_direct_apps">Всегда напрямую</string>
     <string name="always_direct_apps_desc">Имена пакетов, по одному в строке. Эти приложения обходят TPROXY и DNS-перехват до маршрутизации.</string>
-    <string name="sharing_mode">Раздача через PrivStack</string>
-    <string name="sharing_mode_desc">Направлять трафик клиентов хотспота через PrivStack. Оставьте выключенным, если не раздаёте прокси другим устройствам.</string>
+    <string name="sharing_mode">Раздача через RKNnoVPN</string>
+    <string name="sharing_mode_desc">Направлять трафик клиентов хотспота через RKNnoVPN. Оставьте выключенным, если не раздаёте прокси другим устройствам.</string>
     <string name="sharing_interfaces">Интерфейсы раздачи</string>
     <string name="sharing_interfaces_desc">Необязательные имена интерфейсов, по одному в строке. Пусто — автоопределение ap, wlan, rndis, usb, bt-pan и swlan.</string>
     <string name="settings_module">Модуль</string>
@@ -184,9 +184,9 @@
     <string name="settings_audit">Аудит безопасности</string>
     <string name="restart_daemon">Перезапустить</string>
     <string name="reset_network_rules">Сбросить сеть</string>
-    <string name="reset_network_rules_desc">Остановить core и убрать правила PrivStack из iptables, DNS и маршрутизации.</string>
+    <string name="reset_network_rules_desc">Остановить core и убрать правила RKNnoVPN из iptables, DNS и маршрутизации.</string>
     <string name="runtime_logs">Логи runtime</string>
-    <string name="runtime_logs_desc">Показывает /data/adb/privstack/logs/privd.log и /data/adb/privstack/logs/sing-box.log.</string>
+    <string name="runtime_logs_desc">Показывает /data/adb/rknnovpn/logs/privd.log и /data/adb/rknnovpn/logs/sing-box.log.</string>
     <string name="show_logs">Показать логи</string>
     <string name="loading_logs">Загрузка…</string>
     <string name="share_logs_telegram">Отправить в Telegram</string>
@@ -404,13 +404,13 @@
     <string name="audit_check_api_port_protected_detail">В production-режиме Clash API отключен; включенные локальные управляющие порты доступны только root/core.</string>
     <string name="audit_check_api_port_protected_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_dns_leak_title">DNS-запросы могут уходить в системный резолвер</string>
-    <string name="audit_check_dns_leak_detail">Часть запросов обходит DNS PrivStack и попадает к DNS-резолверу провайдера напрямую.</string>
+    <string name="audit_check_dns_leak_detail">Часть запросов обходит DNS RKNnoVPN и попадает к DNS-резолверу провайдера напрямую.</string>
     <string name="audit_check_dns_leak_remediation">Оставьте DNS interception включённым для proxied-приложений и направляйте их DNS через настроенный удалённый резолвер.</string>
     <string name="audit_check_package_visibility_title">Пакет прокси виден другим приложениям</string>
     <string name="audit_check_package_visibility_detail">Приложения могут через PackageManager определить, что proxy-приложение установлено.</string>
     <string name="audit_check_package_visibility_remediation">Используйте случайное имя пакета или включите фильтрацию package visibility на Android 11+.</string>
     <string name="audit_check_iptables_loop_safe_title">Правила iptables предотвращают петли маршрутизации</string>
-    <string name="audit_check_iptables_loop_safe_detail">Цепочка OUTPUT помечает пакеты демона, чтобы они не маршрутизировались через PrivStack повторно.</string>
+    <string name="audit_check_iptables_loop_safe_detail">Цепочка OUTPUT помечает пакеты демона, чтобы они не маршрутизировались через RKNnoVPN повторно.</string>
     <string name="audit_check_iptables_loop_safe_remediation">Ничего делать не нужно.</string>
     <string name="audit_check_proc_net_leak_title">/proc/net раскрывает proxy-соединения</string>
     <string name="audit_check_proc_net_leak_detail">Файлы tcp/tcp6 показывают входящий SOCKS-порт, и другие приложения могут это увидеть.</string>
@@ -466,7 +466,7 @@
     <string name="advisor_reason_browser">Браузерам полезно идти через proxy, чтобы обходить ограничения.</string>
     <string name="advisor_reason_social">Мессенджеры и соцсети лучше держать под proxy для устойчивости к блокировкам.</string>
     <string name="advisor_reason_streaming">Стриминговым приложениям proxy может понадобиться для доступа к контенту по регионам.</string>
-    <string name="advisor_reason_vpn_proxy">VPN и proxy-инструменты лучше держать рядом с панелью PrivStack и не добавлять в proxied-набор.</string>
+    <string name="advisor_reason_vpn_proxy">VPN и proxy-инструменты лучше держать рядом с панелью RKNnoVPN и не добавлять в proxied-набор.</string>
     <string name="advisor_reason_system">Системными приложениями управляет Android, обычно их не стоит переносить.</string>
     <string name="advisor_reason_other">Явного риска не найдено. По умолчанию подходит личный профиль.</string>
     <string name="advisor_setup_guide_title">Как настроить рабочий профиль</string>
@@ -477,7 +477,7 @@
     <string name="advisor_setup_step_2">2. Создайте рабочий профиль, когда приложение предложит это сделать.</string>
     <string name="advisor_setup_step_3">3. Клонируйте банковские и государственные приложения в рабочий профиль.</string>
     <string name="advisor_setup_step_4">4. Не устанавливайте proxy или VPN-приложение внутри рабочего профиля.</string>
-    <string name="advisor_setup_step_5">5. Приложения в рабочем профиле будут использовать системное прямое подключение и останутся изолированными от приложений личного профиля, маршрутизируемых PrivStack.</string>
+    <string name="advisor_setup_step_5">5. Приложения в рабочем профиле будут использовать системное прямое подключение и останутся изолированными от приложений личного профиля, маршрутизируемых RKNnoVPN.</string>
     <string name="advisor_setup_step_6">6. Проверьте это, открыв банковское приложение в рабочем профиле: оно должно перестать видеть VPN.</string>
     <string name="advisor_setup_tip">Подсказка: Shelter открытый и лёгкий. Он создаёт стандартный рабочий профиль Android без device owner и без root.</string>
 </resources>

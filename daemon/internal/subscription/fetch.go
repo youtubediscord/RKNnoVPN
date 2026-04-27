@@ -39,7 +39,23 @@ type Client struct {
 	Now     func() time.Time
 }
 
+type SubscriptionSource struct {
+	ProviderKey string `json:"providerKey"`
+	URL         string `json:"url"`
+}
+
+type ManualNode struct {
+	Node profiledoc.Node `json:"node"`
+}
+
+type SubscriptionNode struct {
+	Node   profiledoc.Node    `json:"node"`
+	Source SubscriptionSource `json:"source"`
+	Stale  bool               `json:"stale"`
+}
+
 type PreviewResult struct {
+	Source        SubscriptionSource      `json:"source"`
 	Subscription  profiledoc.Subscription `json:"subscription"`
 	Nodes         []profiledoc.Node       `json:"nodes"`
 	Added         int                     `json:"added"`
@@ -52,13 +68,14 @@ type PreviewResult struct {
 }
 
 type RefreshResult struct {
-	Profile       profiledoc.Document
-	Subscription  profiledoc.Subscription
-	Nodes         []profiledoc.Node
-	Merge         map[string]int
-	ParseFailures int
-	FetchStatus   int
-	FetchHeaders  map[string]string
+	Source        SubscriptionSource      `json:"source"`
+	Profile       profiledoc.Document     `json:"profile"`
+	Subscription  profiledoc.Subscription `json:"subscription"`
+	Nodes         []profiledoc.Node       `json:"nodes"`
+	Merge         map[string]int          `json:"merge"`
+	ParseFailures int                     `json:"parseFailures"`
+	FetchStatus   int                     `json:"-"`
+	FetchHeaders  map[string]string       `json:"-"`
 }
 
 func NewClient(fetcher Fetcher) Client {
@@ -69,12 +86,13 @@ func NewClient(fetcher Fetcher) Client {
 }
 
 func (c Client) Preview(rawURL string, current profiledoc.Document) (PreviewResult, error) {
-	nodes, sub, failures, fetched, err := c.fetchAndParse(rawURL)
+	source, nodes, sub, failures, fetched, err := c.fetchAndParse(rawURL)
 	if err != nil {
-		return PreviewResult{FetchStatus: fetched.Status, FetchHeaders: fetched.Headers}, err
+		return PreviewResult{Source: source, FetchStatus: fetched.Status, FetchHeaders: fetched.Headers}, err
 	}
 	_, stats := profiledoc.MergeSubscriptionNodes(current, sub, nodes)
 	return PreviewResult{
+		Source:        source,
 		Subscription:  sub,
 		Nodes:         nodes,
 		Added:         stats["added"],
@@ -88,9 +106,9 @@ func (c Client) Preview(rawURL string, current profiledoc.Document) (PreviewResu
 }
 
 func (c Client) ApplyRefresh(rawURL string, current profiledoc.Document) (RefreshResult, error) {
-	nodes, sub, failures, fetched, err := c.fetchAndParse(rawURL)
+	source, nodes, sub, failures, fetched, err := c.fetchAndParse(rawURL)
 	if err != nil {
-		return RefreshResult{FetchStatus: fetched.Status, FetchHeaders: fetched.Headers}, err
+		return RefreshResult{Source: source, FetchStatus: fetched.Status, FetchHeaders: fetched.Headers}, err
 	}
 	next, stats := profiledoc.MergeSubscriptionNodes(current, sub, nodes)
 	replaced := false
@@ -106,6 +124,7 @@ func (c Client) ApplyRefresh(rawURL string, current profiledoc.Document) (Refres
 		next.Subscriptions = append(next.Subscriptions, sub)
 	}
 	return RefreshResult{
+		Source:        source,
 		Profile:       next,
 		Subscription:  sub,
 		Nodes:         nodes,
@@ -116,7 +135,11 @@ func (c Client) ApplyRefresh(rawURL string, current profiledoc.Document) (Refres
 	}, nil
 }
 
-func (c Client) fetchAndParse(rawURL string) ([]profiledoc.Node, profiledoc.Subscription, int, FetchResult, error) {
+func (c Client) fetchAndParse(rawURL string) (SubscriptionSource, []profiledoc.Node, profiledoc.Subscription, int, FetchResult, error) {
+	source, err := NewSubscriptionSource(rawURL)
+	if err != nil {
+		return source, nil, profiledoc.Subscription{}, 0, FetchResult{}, err
+	}
 	if c.Fetcher == nil {
 		c.Fetcher = FetcherFunc(FetchURL)
 	}
@@ -124,27 +147,31 @@ func (c Client) fetchAndParse(rawURL string) ([]profiledoc.Node, profiledoc.Subs
 	if c.Now != nil {
 		now = c.Now()
 	}
-	fetched, err := c.Fetcher.FetchURL(rawURL)
+	fetched, err := c.Fetcher.FetchURL(source.URL)
 	if err != nil {
-		return nil, profiledoc.Subscription{}, 0, fetched, err
+		return source, nil, profiledoc.Subscription{}, 0, fetched, err
 	}
-	nodes, sub, failures := profiledoc.ParseSubscription(fetched.Body, fetched.Headers, rawURL, now.UnixMilli())
+	nodes, sub, failures := profiledoc.ParseSubscription(fetched.Body, fetched.Headers, source.URL, now.UnixMilli())
+	sub.ProviderKey = source.ProviderKey
+	sub.URL = source.URL
+	for i := range nodes {
+		nodes[i].Source.ProviderKey = source.ProviderKey
+		nodes[i].Source.URL = source.URL
+	}
 	if len(nodes) == 0 && failures > 0 {
-		return nil, sub, failures, fetched, ErrNoSupportedNodes
+		return source, nil, sub, failures, fetched, ErrNoSupportedNodes
 	}
-	return nodes, sub, failures, fetched, nil
+	return source, nodes, sub, failures, fetched, nil
 }
 
 func FetchURL(rawURL string) (FetchResult, error) {
 	var result FetchResult
-	if rawURL == "" {
-		return result, fmt.Errorf("url is required")
-	}
-	if err := ValidateFetchURL(rawURL); err != nil {
+	source, err := NewSubscriptionSource(rawURL)
+	if err != nil {
 		return result, err
 	}
 
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	req, err := http.NewRequest(http.MethodGet, source.URL, nil)
 	if err != nil {
 		return result, fmt.Errorf("invalid URL: %w", err)
 	}
@@ -186,21 +213,35 @@ func FetchURL(rawURL string) (FetchResult, error) {
 }
 
 func ValidateFetchURL(rawURL string) error {
+	_, err := NewSubscriptionSource(rawURL)
+	return err
+}
+
+func NewSubscriptionSource(rawURL string) (SubscriptionSource, error) {
+	var source SubscriptionSource
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return source, fmt.Errorf("url is required")
+	}
 	parsed, err := neturl.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
+		return source, fmt.Errorf("invalid URL: %w", err)
 	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("subscription URL scheme must be http or https")
+		return source, fmt.Errorf("subscription URL scheme must be http or https")
 	}
 	host := strings.TrimSpace(parsed.Hostname())
 	if host == "" {
-		return fmt.Errorf("subscription URL host is required")
+		return source, fmt.Errorf("subscription URL host is required")
 	}
 	if IsDisallowedHost(host) {
-		return fmt.Errorf("subscription URL host is local or private")
+		return source, fmt.Errorf("subscription URL host is local or private")
 	}
-	return nil
+	source.URL = parsed.String()
+	source.ProviderKey = profiledoc.ProviderKeyFor(source.URL)
+	return source, nil
 }
 
 func fetchDialContext(ctx context.Context, network string, address string) (net.Conn, error) {

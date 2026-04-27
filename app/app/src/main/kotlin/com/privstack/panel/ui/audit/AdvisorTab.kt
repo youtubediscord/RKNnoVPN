@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.audit
+package com.rknnovpn.panel.ui.audit
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -48,11 +48,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.privstack.panel.R
-import com.privstack.panel.advisor.AppCategory
-import com.privstack.panel.advisor.PlacementRecommendation
-import com.privstack.panel.advisor.PlacementUrgency
-import com.privstack.panel.advisor.ProfilePlacement
+import com.rknnovpn.panel.R
+import com.rknnovpn.panel.advisor.AppCategory
+import com.rknnovpn.panel.advisor.PlacementRecommendation
+import com.rknnovpn.panel.advisor.PlacementUrgency
+import com.rknnovpn.panel.advisor.ProfilePlacement
 
 // ───────────────────────────────────────────────────────────────────── //
 //  Color helpers

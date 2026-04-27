@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.audit
+package com.rknnovpn.panel.ui.audit
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -65,7 +65,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.privstack.panel.R
+import com.rknnovpn.panel.R
 import kotlinx.coroutines.launch
 
 // ───────────────────────────────────────────────────────────────────── //

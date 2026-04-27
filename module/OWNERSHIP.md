@@ -1,4 +1,4 @@
-# PrivStack Module Ownership
+# RKNnoVPN Module Ownership
 
 This module is split by root-runtime responsibility, not by historical script
 entrypoint.
@@ -10,7 +10,7 @@ entrypoint.
 - `post-fs-data.sh` is early boot only: create the data skeleton, apply basic
   permissions, and set kernel toggles. It must not clean runtime markers.
 - `service.sh` is late boot only: wait for boot completion, ask
-  `privstack_env.sh` whether boot cleanup markers exist, run canonical boot
+  `rknnovpn_env.sh` whether boot cleanup markers exist, run canonical boot
   cleanup, and launch `privd`. It must not implement its own stale
   process/socket/PID cleanup.
 - `scripts/rescue_reset.sh` is the canonical root cleanup API.
@@ -21,16 +21,16 @@ entrypoint.
 
 Module scripts should use the shared files under `scripts/lib/`:
 
-- `privstack_env.sh` owns canonical paths, marker helpers, and shared
+- `rknnovpn_env.sh` owns canonical paths, marker helpers, and shared
   permission/layout helpers.
-- `privstack_install.sh` owns install/release-catalog helper behavior shared by
+- `rknnovpn_install.sh` owns install/release-catalog helper behavior shared by
   Magisk/KSU/APatch installation and staged module updates.
-- `privstack_installer_flow.sh` owns the Magisk/KSU/APatch install flow:
+- `rknnovpn_installer_flow.sh` owns the Magisk/KSU/APatch install flow:
   preflight, config preservation, binary/script copy, release catalog, and
   permissions. `customize.sh` must stay a thin entrypoint.
-- `privstack_netstack.sh` owns generic PrivStack netfilter/policy-routing
+- `rknnovpn_netstack.sh` owns generic RKNnoVPN netfilter/policy-routing
   cleanup helpers used by rescue/uninstall paths.
-- `privstack_iptables_rules.sh` owns TPROXY rule rendering and listener
+- `rknnovpn_iptables_rules.sh` owns TPROXY rule rendering and listener
   protection verification. `scripts/iptables.sh` must stay orchestration:
   validate env, snapshot, apply, teardown, and status dispatch.
 
@@ -39,7 +39,7 @@ installer must treat all `scripts/lib/*.sh` files as required module files.
 
 The library owns these path names:
 
-- `PRIVSTACK_DIR=/data/adb/privstack`
+- `RKNNOVPN_DIR=/data/adb/rknnovpn`
 - `BIN_DIR`, `CONFIG_DIR`, `SCRIPTS_DIR`, `RUN_DIR`, `LOG_DIR`
 - `RESET_LOCK`, `ACTIVE_FILE`, `MANUAL_FLAG`
 - `PRIVD_PID_FILE`, `SINGBOX_PID_FILE`, `PRIVD_SOCK`
@@ -68,7 +68,7 @@ The library owns these path names:
 ## Cleanup Ownership
 
 `scripts/rescue_reset.sh` is the only script that should implement complete
-PrivStack-owned cleanup of processes, DNS rules, iptables chains, policy
+RKNnoVPN-owned cleanup of processes, DNS rules, iptables chains, policy
 routing, and runtime snapshots.
 
 Other entrypoints may call it, but should not grow a parallel netfilter cleanup
@@ -80,5 +80,5 @@ marker, or netfilter cleanup.
 
 - `scripts/iptables.sh` owns applying/removing mangle rules, policy routing,
   and runtime snapshots in `run/env.sh`; rule text and listener verification
-  belong in `scripts/lib/privstack_iptables_rules.sh`.
+  belong in `scripts/lib/rknnovpn_iptables_rules.sh`.
 - `scripts/dns.sh` owns classic DNS nat interception.

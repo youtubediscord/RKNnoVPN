@@ -88,7 +88,7 @@ func TestPrivctlCommandsMatchIPCContract(t *testing.T) {
 }
 
 func TestKotlinRequiredMethodsStayWithinIPCContract(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "app", "app", "src", "main", "kotlin", "com", "privstack", "panel", "ipc", "DaemonClient.kt"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "app", "app", "src", "main", "kotlin", "com", "rknnovpn", "panel", "ipc", "DaemonClient.kt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,8 +319,8 @@ func TestDoctorSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
 		map[string]string{"version": "v1.6.4"},
 		doctorCommandResult{},
 		doctorReleaseIntegrity{
-			CurrentPath:  "/data/adb/privstack/current",
-			ReleasePath:  "/data/adb/privstack/releases/v1.6.4",
+			CurrentPath:  "/data/adb/rknnovpn/current",
+			ReleasePath:  "/data/adb/rknnovpn/releases/v1.6.4",
 			Version:      "v1.6.4",
 			CheckedFiles: 2,
 			Mismatches:   []string{"bin/privd"},

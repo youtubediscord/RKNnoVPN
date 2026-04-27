@@ -1,16 +1,16 @@
-package com.privstack.panel.ui.apps
+package com.rknnovpn.panel.ui.apps
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.util.Log
-import com.privstack.panel.i18n.UserMessageFormatter
+import com.rknnovpn.panel.i18n.UserMessageFormatter
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.privstack.panel.advisor.AlwaysDirectApps
-import com.privstack.panel.model.ProfileConfig
-import com.privstack.panel.model.RoutingMode
-import com.privstack.panel.repository.ProfileRepository
+import com.rknnovpn.panel.advisor.AlwaysDirectApps
+import com.rknnovpn.panel.model.ProfileConfig
+import com.rknnovpn.panel.model.RoutingMode
+import com.rknnovpn.panel.repository.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -263,7 +263,7 @@ class AppPickerViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         errorMessage = messages.get(
-                            com.privstack.panel.R.string.app_picker_error_selection_unavailable
+                            com.rknnovpn.panel.R.string.app_picker_error_selection_unavailable
                         )
                     )
                 }
@@ -286,7 +286,7 @@ class AppPickerViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         errorMessage = err ?: messages.get(
-                            com.privstack.panel.R.string.app_picker_error_save_selection
+                            com.rknnovpn.panel.R.string.app_picker_error_save_selection
                         )
                     )
                 }
@@ -346,8 +346,8 @@ class AppPickerViewModel @Inject constructor(
                     it.copy(
                         isLoading = false,
                         errorMessage = messages.get(
-                            com.privstack.panel.R.string.app_picker_error_load_apps,
-                            e.message ?: messages.get(com.privstack.panel.R.string.daemon_status_unknown_text),
+                            com.rknnovpn.panel.R.string.app_picker_error_load_apps,
+                            e.message ?: messages.get(com.rknnovpn.panel.R.string.daemon_status_unknown_text),
                         ),
                     )
                 }
@@ -393,7 +393,7 @@ class AppPickerViewModel @Inject constructor(
         if (err != null) {
             Log.w(TAG, "Could not load proxied apps from daemon: $err")
         }
-        throw IllegalStateException(err ?: messages.get(com.privstack.panel.R.string.error_no_profile_loaded))
+        throw IllegalStateException(err ?: messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded))
     }
 
     private fun observeProfile() {

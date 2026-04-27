@@ -1,4 +1,4 @@
-package com.privstack.panel.model
+package com.rknnovpn.panel.model
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -66,7 +66,7 @@ data class RoutingConfig(
     val proxyIps: List<String> = emptyList(),
     /** IP CIDR rules that should be blocked. */
     val blockIps: List<String> = emptyList(),
-    /** Package names that must always bypass PrivStack before TPROXY/DNS interception. */
+    /** Package names that must always bypass RKNnoVPN before TPROXY/DNS interception. */
     val alwaysDirectAppList: List<String> = emptyList()
 )
 

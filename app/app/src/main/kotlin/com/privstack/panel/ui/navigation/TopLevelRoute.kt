@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.navigation
+package com.rknnovpn.panel.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
@@ -10,7 +10,7 @@ import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
-import com.privstack.panel.R
+import com.rknnovpn.panel.R
 
 /**
  * Top-level navigation destinations shown in the bottom bar.

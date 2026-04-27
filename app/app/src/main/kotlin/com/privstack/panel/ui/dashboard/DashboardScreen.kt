@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.dashboard
+package com.rknnovpn.panel.ui.dashboard
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -39,11 +39,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.privstack.panel.R
-import com.privstack.panel.model.BackendPhase
-import com.privstack.panel.model.ConnectionState
-import com.privstack.panel.ui.common.ConnectionIndicator
-import com.privstack.panel.ui.common.TrafficSparkline
+import com.rknnovpn.panel.R
+import com.rknnovpn.panel.model.BackendPhase
+import com.rknnovpn.panel.model.ConnectionState
+import com.rknnovpn.panel.ui.common.ConnectionIndicator
+import com.rknnovpn.panel.ui.common.TrafficSparkline
 
 @Composable
 fun DashboardScreen(

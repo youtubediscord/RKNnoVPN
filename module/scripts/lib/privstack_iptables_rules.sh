@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# PrivStack iptables rule rendering and listener-protection verification.
+# RKNnoVPN iptables rule rendering and listener-protection verification.
 # Sourced by scripts/iptables.sh after environment validation/defaulting.
 
 http_port_enabled() {

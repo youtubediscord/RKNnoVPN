@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.PrivStackPanel" parent="Theme.Material3.DayNight.NoActionBar" />
+    <style name="Theme.RKNnoVPNPanel" parent="Theme.Material3.DayNight.NoActionBar" />
 </resources>

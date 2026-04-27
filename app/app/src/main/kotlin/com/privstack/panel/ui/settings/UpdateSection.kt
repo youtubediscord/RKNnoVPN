@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.settings
+package com.rknnovpn.panel.ui.settings
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
@@ -34,7 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.privstack.panel.R
+import com.rknnovpn.panel.R
 
 private const val GITHUB_RELEASES_URL =
     "https://github.com/youtubediscord/RKNnoVPN/releases/latest"

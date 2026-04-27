@@ -42,7 +42,7 @@ capture_host adb_devices "$ADB" devices -l || true
 capture_shell shell_id "id" || true
 capture_su su_id "id" || true
 capture_shell getprop_basic "getprop ro.product.manufacturer; getprop ro.product.model; getprop ro.build.version.release; getprop ro.build.version.sdk; getprop ro.product.cpu.abi" || true
-capture_su root_stack_listing "ls -la /data/adb /data/adb/modules /data/adb/modules/privstack '$PRIVSTACK_DIR' '$PRIVSTACK_DIR/bin' '$PRIVSTACK_DIR/run' '$PRIVSTACK_DIR/logs' 2>&1" || true
+capture_su root_stack_listing "ls -la /data/adb /data/adb/modules /data/adb/modules/rknnovpn '$RKNNOVPN_DIR' '$RKNNOVPN_DIR/bin' '$RKNNOVPN_DIR/run' '$RKNNOVPN_DIR/logs' 2>&1" || true
 capture_su package_source_status "ls -l /data/system/packages.list 2>&1; cmd package list packages -U 2>&1 | wc -l; su -lp 2000 -c 'cmd package list packages -U' 2>&1 | wc -l" || true
 capture_su network_rules "ip rule show; ip -6 rule show; ip route show table 2023; ip -6 route show table 2024" || true
 capture_su iptables_mangle "iptables-save -t mangle; ip6tables-save -t mangle" || true

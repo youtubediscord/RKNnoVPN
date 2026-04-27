@@ -1,7 +1,7 @@
-package com.privstack.panel.advisor
+package com.rknnovpn.panel.advisor
 
 /**
- * Built-in package policy for apps that should stay outside PrivStack even
+ * Built-in package policy for apps that should stay outside RKNnoVPN even
  * when the rest of the device is proxied.
  */
 object AlwaysDirectApps {

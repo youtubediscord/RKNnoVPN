@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"time"
 
 	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
@@ -148,6 +149,7 @@ func (d *daemon) handleSubscriptionPreview(params *json.RawMessage) (interface{}
 		return nil, subscriptionRPCError(rawURL, preview.FetchStatus, preview.FetchHeaders, err)
 	}
 	return map[string]interface{}{
+		"source":        preview.Source,
 		"subscription":  preview.Subscription,
 		"nodes":         preview.Nodes,
 		"added":         preview.Added,
@@ -175,6 +177,7 @@ func (d *daemon) handleSubscriptionRefresh(params *json.RawMessage) (interface{}
 		return nil, applyErr
 	}
 	if obj, ok := result.(map[string]interface{}); ok {
+		obj["source"] = refresh.Source
 		obj["subscription"] = refresh.Subscription
 		obj["imported"] = len(refresh.Nodes)
 		obj["parseFailures"] = refresh.ParseFailures

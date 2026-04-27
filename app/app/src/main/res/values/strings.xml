@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">PrivStack Panel</string>
+    <string name="app_name">RKNnoVPN Panel</string>
 
     <!-- Navigation -->
     <string name="nav_dashboard">Dashboard</string>
@@ -175,7 +175,7 @@
     <string name="always_direct_apps">Always-direct apps</string>
     <string name="always_direct_apps_desc">Package names, one per line. These apps bypass TPROXY and DNS interception before routing.</string>
     <string name="sharing_mode">Hotspot sharing</string>
-    <string name="sharing_mode_desc">Route tethered client traffic through PrivStack. Leave off unless you explicitly share the proxy to other devices.</string>
+    <string name="sharing_mode_desc">Route tethered client traffic through RKNnoVPN. Leave off unless you explicitly share the proxy to other devices.</string>
     <string name="sharing_interfaces">Sharing interfaces</string>
     <string name="sharing_interfaces_desc">Optional interface names, one per line. Empty means auto-detect ap, wlan, rndis, usb, bt-pan and swlan tethering interfaces.</string>
     <string name="settings_module">Module</string>
@@ -184,9 +184,9 @@
     <string name="settings_audit">Security Audit</string>
     <string name="restart_daemon">Restart</string>
     <string name="reset_network_rules">Reset network</string>
-    <string name="reset_network_rules_desc">Stop the core and remove PrivStack iptables, DNS and routing rules.</string>
+    <string name="reset_network_rules_desc">Stop the core and remove RKNnoVPN iptables, DNS and routing rules.</string>
     <string name="runtime_logs">Runtime logs</string>
-    <string name="runtime_logs_desc">Shows /data/adb/privstack/logs/privd.log and /data/adb/privstack/logs/sing-box.log.</string>
+    <string name="runtime_logs_desc">Shows /data/adb/rknnovpn/logs/privd.log and /data/adb/rknnovpn/logs/sing-box.log.</string>
     <string name="show_logs">Show logs</string>
     <string name="loading_logs">Loading…</string>
     <string name="share_logs_telegram">Send to Telegram</string>
@@ -404,13 +404,13 @@
     <string name="audit_check_api_port_protected_detail">Production mode keeps the Clash API disabled; any enabled local control ports are root/core protected.</string>
     <string name="audit_check_api_port_protected_remediation">No action required.</string>
     <string name="audit_check_dns_leak_title">DNS queries may leak to system resolver</string>
-    <string name="audit_check_dns_leak_detail">Some queries bypass PrivStack DNS and reach the ISP resolver directly.</string>
+    <string name="audit_check_dns_leak_detail">Some queries bypass RKNnoVPN DNS and reach the ISP resolver directly.</string>
     <string name="audit_check_dns_leak_remediation">Keep DNS interception enabled for proxied apps and route their DNS through the configured remote resolver.</string>
     <string name="audit_check_package_visibility_title">Proxy package visible to other apps</string>
     <string name="audit_check_package_visibility_detail">Apps can query PackageManager and discover the proxy app is installed.</string>
     <string name="audit_check_package_visibility_remediation">Use a randomized package name or enable Android 11+ package visibility filtering.</string>
     <string name="audit_check_iptables_loop_safe_title">iptables rules prevent routing loops</string>
-    <string name="audit_check_iptables_loop_safe_detail">OUTPUT chain marks daemon packets to skip re-routing through PrivStack.</string>
+    <string name="audit_check_iptables_loop_safe_detail">OUTPUT chain marks daemon packets to skip re-routing through RKNnoVPN.</string>
     <string name="audit_check_iptables_loop_safe_remediation">No action required.</string>
     <string name="audit_check_proc_net_leak_title">/proc/net exposes proxy connections</string>
     <string name="audit_check_proc_net_leak_detail">tcp/tcp6 files show the SOCKS inbound port, detectable by other apps.</string>
@@ -466,7 +466,7 @@
     <string name="advisor_reason_browser">Browsers benefit from proxy coverage for bypassing restrictions.</string>
     <string name="advisor_reason_social">Messaging apps should be proxied for censorship resistance.</string>
     <string name="advisor_reason_streaming">Streaming apps may need the proxy to access geo-restricted content.</string>
-    <string name="advisor_reason_vpn_proxy">Proxy and VPN tools should stay with the PrivStack control app and remain outside the proxied app set.</string>
+    <string name="advisor_reason_vpn_proxy">Proxy and VPN tools should stay with the RKNnoVPN control app and remain outside the proxied app set.</string>
     <string name="advisor_reason_system">System apps are managed by Android and usually should not be moved.</string>
     <string name="advisor_reason_other">No specific risk detected. Personal profile is the default.</string>
     <string name="advisor_setup_guide_title">Work Profile Setup Guide</string>
@@ -477,7 +477,7 @@
     <string name="advisor_setup_step_2">2. Create a Work Profile when the app prompts you.</string>
     <string name="advisor_setup_step_3">3. Clone banking and government apps into the Work Profile.</string>
     <string name="advisor_setup_step_4">4. Do not install the proxy or VPN app inside the Work Profile.</string>
-    <string name="advisor_setup_step_5">5. Apps inside the Work Profile will use the system direct connection and stay isolated from PrivStack-routed apps in the Personal profile.</string>
+    <string name="advisor_setup_step_5">5. Apps inside the Work Profile will use the system direct connection and stay isolated from RKNnoVPN-routed apps in the Personal profile.</string>
     <string name="advisor_setup_step_6">6. Verify by opening a banking app in the Work Profile. It should stop detecting a VPN.</string>
     <string name="advisor_setup_tip">Tip: Shelter is open-source and lightweight. It creates a standard Android Work Profile without requiring device owner or root.</string>
 </resources>

@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.nodes
+package com.rknnovpn.panel.ui.nodes
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -58,7 +58,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
-import com.privstack.panel.R
+import com.rknnovpn.panel.R
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage

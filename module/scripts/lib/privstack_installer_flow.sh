@@ -1,9 +1,9 @@
 #!/system/bin/sh
-# Shared PrivStack module installer flow for Magisk/KSU/APatch installs.
+# Shared RKNnoVPN module installer flow for Magisk/KSU/APatch installs.
 # Keep customize.sh thin; release/update code validates this file as required.
 
-PRIVSTACK_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}"
-PRIVSTACK_GID="${PRIVSTACK_GID:-23333}"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/rknnovpn}"
+RKNNOVPN_GID="${RKNNOVPN_GID:-23333}"
 SUBDIRS="${SUBDIRS:-bin config config/rendered scripts run logs backup profiles releases}"
 
 abort_install() {
@@ -12,8 +12,8 @@ abort_install() {
 }
 
 module_version() {
-    if command -v privstack_module_version >/dev/null 2>&1; then
-        privstack_module_version "$MODPATH"
+    if command -v rknnovpn_module_version >/dev/null 2>&1; then
+        rknnovpn_module_version "$MODPATH"
         return $?
     fi
     if [ -f "${MODPATH}/module.prop" ]; then
@@ -26,7 +26,7 @@ ui_print_header() {
     [ -n "$HEADER_VERSION" ] || HEADER_VERSION="unknown"
     ui_print ""
     ui_print "  ==========================================="
-    ui_print "   PrivStack ${HEADER_VERSION} — Transparent Proxy"
+    ui_print "   RKNnoVPN ${HEADER_VERSION} — Transparent Proxy"
     ui_print "   tproxy + iptables + sing-box"
     ui_print "  ==========================================="
     ui_print ""
@@ -152,25 +152,25 @@ check_tproxy_support() {
 
 create_directory_structure() {
     ui_print "  [*] Creating directory structure..."
-    if command -v privstack_ensure_layout >/dev/null 2>&1; then
-        privstack_ensure_layout || abort_install "Failed to create ${PRIVSTACK_DIR} layout"
+    if command -v rknnovpn_ensure_layout >/dev/null 2>&1; then
+        rknnovpn_ensure_layout || abort_install "Failed to create ${RKNNOVPN_DIR} layout"
     else
         for subdir in $SUBDIRS; do
-            mkdir -p "${PRIVSTACK_DIR}/${subdir}" 2>/dev/null
-            if [ ! -d "${PRIVSTACK_DIR}/${subdir}" ]; then
-                abort_install "Failed to create ${PRIVSTACK_DIR}/${subdir}"
+            mkdir -p "${RKNNOVPN_DIR}/${subdir}" 2>/dev/null
+            if [ ! -d "${RKNNOVPN_DIR}/${subdir}" ]; then
+                abort_install "Failed to create ${RKNNOVPN_DIR}/${subdir}"
             fi
         done
     fi
-    ui_print "  [*] Directories created under ${PRIVSTACK_DIR}/"
+    ui_print "  [*] Directories created under ${RKNNOVPN_DIR}/"
 }
 
 preserve_existing_config() {
-    CONFIG_FILE="${PRIVSTACK_DIR}/config/config.json"
+    CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
 
     if [ -f "$CONFIG_FILE" ]; then
         ui_print "  [*] Existing config.json found — preserving"
-        cp -f "$CONFIG_FILE" "${PRIVSTACK_DIR}/backup/config.json.pre-upgrade" 2>/dev/null
+        cp -f "$CONFIG_FILE" "${RKNNOVPN_DIR}/backup/config.json.pre-upgrade" 2>/dev/null
         PRESERVE_CONFIG=1
     else
         PRESERVE_CONFIG=0
@@ -179,7 +179,7 @@ preserve_existing_config() {
 }
 
 install_default_config() {
-    CONFIG_FILE="${PRIVSTACK_DIR}/config/config.json"
+    CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
 
     if [ "$PRESERVE_CONFIG" -eq 0 ]; then
         if [ -f "${MODPATH}/defaults/config.json" ]; then
@@ -191,19 +191,19 @@ install_default_config() {
     fi
 
     if [ -f "${MODPATH}/defaults/config.json" ]; then
-        cp -f "${MODPATH}/defaults/config.json" "${PRIVSTACK_DIR}/config/config.defaults.json"
+        cp -f "${MODPATH}/defaults/config.json" "${RKNNOVPN_DIR}/config/config.defaults.json"
     fi
 
     # New installs let privd create canonical profile.json from config.json.
 }
 
 mark_manual_start_required() {
-    if command -v privstack_set_manual_mode >/dev/null 2>&1; then
-        privstack_set_manual_mode
+    if command -v rknnovpn_set_manual_mode >/dev/null 2>&1; then
+        rknnovpn_set_manual_mode
     else
-        mkdir -p "${PRIVSTACK_DIR}/config" "${PRIVSTACK_DIR}/run" 2>/dev/null
-        touch "${PRIVSTACK_DIR}/config/manual" 2>/dev/null
-        rm -f "${PRIVSTACK_DIR}/run/active" 2>/dev/null
+        mkdir -p "${RKNNOVPN_DIR}/config" "${RKNNOVPN_DIR}/run" 2>/dev/null
+        touch "${RKNNOVPN_DIR}/config/manual" 2>/dev/null
+        rm -f "${RKNNOVPN_DIR}/run/active" 2>/dev/null
     fi
     ui_print "  [*] Boot autostart disabled until the app starts the proxy"
 }
@@ -218,7 +218,7 @@ install_binaries() {
     for bin_file in "$SRC_BIN"/*; do
         [ ! -f "$bin_file" ] && continue
         bin_name="$(basename "$bin_file")"
-        cp -f "$bin_file" "${PRIVSTACK_DIR}/bin/${bin_name}"
+        cp -f "$bin_file" "${RKNNOVPN_DIR}/bin/${bin_name}"
         ui_print "  [*]   -> ${bin_name}"
     done
 }
@@ -232,13 +232,13 @@ install_scripts() {
     fi
 
     ui_print "  [*] Installing scripts..."
-    if command -v privstack_install_copy_tree >/dev/null 2>&1; then
-        privstack_install_copy_tree "$SRC_SCRIPTS" "${PRIVSTACK_DIR}/scripts"
+    if command -v rknnovpn_install_copy_tree >/dev/null 2>&1; then
+        rknnovpn_install_copy_tree "$SRC_SCRIPTS" "${RKNNOVPN_DIR}/scripts"
     else
         find "$SRC_SCRIPTS" -type f 2>/dev/null | while IFS= read -r script_file; do
             [ ! -f "$script_file" ] && continue
             script_rel="${script_file#$SRC_SCRIPTS/}"
-            script_dst="${PRIVSTACK_DIR}/scripts/${script_rel}"
+            script_dst="${RKNNOVPN_DIR}/scripts/${script_rel}"
             mkdir -p "$(dirname "$script_dst")" 2>/dev/null
             cp -f "$script_file" "$script_dst"
         done
@@ -250,8 +250,8 @@ install_scripts() {
 
 file_sha256() {
     file="$1"
-    if command -v privstack_install_file_sha256 >/dev/null 2>&1; then
-        privstack_install_file_sha256 "$file"
+    if command -v rknnovpn_install_file_sha256 >/dev/null 2>&1; then
+        rknnovpn_install_file_sha256 "$file"
         return $?
     fi
     if command -v sha256sum >/dev/null 2>&1; then
@@ -270,8 +270,8 @@ file_sha256() {
 }
 
 safe_release_name() {
-    if command -v privstack_safe_release_name >/dev/null 2>&1; then
-        privstack_safe_release_name "$1"
+    if command -v rknnovpn_safe_release_name >/dev/null 2>&1; then
+        rknnovpn_safe_release_name "$1"
         return $?
     fi
     raw="$1"
@@ -281,8 +281,8 @@ safe_release_name() {
 }
 
 copy_if_present() {
-    if command -v privstack_copy_if_present >/dev/null 2>&1; then
-        privstack_copy_if_present "$1" "$2"
+    if command -v rknnovpn_copy_if_present >/dev/null 2>&1; then
+        rknnovpn_copy_if_present "$1" "$2"
         return $?
     fi
     src="$1"
@@ -294,8 +294,8 @@ copy_if_present() {
 }
 
 append_manifest_hash() {
-    if command -v privstack_manifest_hash_entry >/dev/null 2>&1; then
-        privstack_manifest_hash_entry "$1" "$2" "$3"
+    if command -v rknnovpn_manifest_hash_entry >/dev/null 2>&1; then
+        rknnovpn_manifest_hash_entry "$1" "$2" "$3"
         return $?
     fi
     rel="$1"
@@ -339,11 +339,11 @@ write_install_manifest() {
         module/scripts/iptables.sh \
         module/scripts/rescue_reset.sh \
         module/scripts/routing.sh \
-        module/scripts/lib/privstack_env.sh \
-        module/scripts/lib/privstack_install.sh \
-        module/scripts/lib/privstack_installer_flow.sh \
-        module/scripts/lib/privstack_netstack.sh \
-        module/scripts/lib/privstack_iptables_rules.sh \
+        module/scripts/lib/rknnovpn_env.sh \
+        module/scripts/lib/rknnovpn_install.sh \
+        module/scripts/lib/rknnovpn_installer_flow.sh \
+        module/scripts/lib/rknnovpn_netstack.sh \
+        module/scripts/lib/rknnovpn_iptables_rules.sh \
         module/defaults/config.json; do
         append_manifest_hash "$rel" "${release_dir}/${rel}" "$tmp_manifest" || return 1
     done
@@ -358,8 +358,8 @@ write_install_manifest() {
 
 update_current_release_link() {
     release_dir="$1"
-    current="${PRIVSTACK_DIR}/current"
-    backup_dir="${PRIVSTACK_DIR}/releases"
+    current="${RKNNOVPN_DIR}/current"
+    backup_dir="${RKNNOVPN_DIR}/releases"
 
     if [ -e "$current" ] && [ ! -L "$current" ]; then
         mkdir -p "$backup_dir" 2>/dev/null
@@ -388,7 +388,7 @@ install_release_catalog() {
     version="$(module_version)"
     [ -n "$version" ] || version="unknown"
     safe_version="$(safe_release_name "$version")"
-    release_dir="${PRIVSTACK_DIR}/releases/${safe_version}"
+    release_dir="${RKNNOVPN_DIR}/releases/${safe_version}"
     if [ -e "$release_dir" ]; then
         suffix="$(date +%s 2>/dev/null || echo $$)"
         release_dir="${release_dir}-${suffix}"
@@ -401,7 +401,7 @@ install_release_catalog() {
     }
 
     for bin_name in sing-box privd privctl; do
-        copy_if_present "${PRIVSTACK_DIR}/bin/${bin_name}" "${release_dir}/bin/${bin_name}"
+        copy_if_present "${RKNNOVPN_DIR}/bin/${bin_name}" "${release_dir}/bin/${bin_name}"
     done
     for name in OWNERSHIP.md module.prop service.sh post-fs-data.sh uninstall.sh customize.sh sepolicy.rule; do
         copy_if_present "${MODPATH}/${name}" "${release_dir}/module/${name}"
@@ -432,8 +432,8 @@ set_capabilities() {
         SETCAP="setcap"
     elif [ -x "/system/bin/setcap" ]; then
         SETCAP="/system/bin/setcap"
-    elif [ -x "${PRIVSTACK_DIR}/bin/setcap" ]; then
-        SETCAP="${PRIVSTACK_DIR}/bin/setcap"
+    elif [ -x "${RKNNOVPN_DIR}/bin/setcap" ]; then
+        SETCAP="${RKNNOVPN_DIR}/bin/setcap"
     fi
 
     if [ -z "$SETCAP" ]; then
@@ -446,7 +446,7 @@ set_capabilities() {
     CAPS="cap_net_admin,cap_net_raw,cap_net_bind_service+ep"
 
     for bin_name in sing-box privd; do
-        bin_path="${PRIVSTACK_DIR}/bin/${bin_name}"
+        bin_path="${RKNNOVPN_DIR}/bin/${bin_name}"
         if [ -f "$bin_path" ]; then
             $SETCAP "$CAPS" "$bin_path" 2>/dev/null
             if [ $? -eq 0 ]; then
@@ -460,16 +460,16 @@ set_capabilities() {
 
 set_permissions_and_caps() {
     ui_print "  [*] Setting permissions..."
-    if command -v privstack_apply_data_permissions >/dev/null 2>&1; then
-        privstack_apply_data_permissions
+    if command -v rknnovpn_apply_data_permissions >/dev/null 2>&1; then
+        rknnovpn_apply_data_permissions
     else
-        chown -R 0:${PRIVSTACK_GID} "${PRIVSTACK_DIR}/bin" 2>/dev/null
-        chmod 0750 "${PRIVSTACK_DIR}/bin" 2>/dev/null
-        chown -R 0:0 "${PRIVSTACK_DIR}/scripts" "${PRIVSTACK_DIR}/config" "${PRIVSTACK_DIR}/logs" 2>/dev/null
-        chmod 0755 "${PRIVSTACK_DIR}/scripts" 2>/dev/null
-        chmod 0700 "${PRIVSTACK_DIR}/config" "${PRIVSTACK_DIR}/logs" 2>/dev/null
-        chown -R 0:${PRIVSTACK_GID} "${PRIVSTACK_DIR}/run" 2>/dev/null
-        chmod 0750 "${PRIVSTACK_DIR}/run" 2>/dev/null
+        chown -R 0:${RKNNOVPN_GID} "${RKNNOVPN_DIR}/bin" 2>/dev/null
+        chmod 0750 "${RKNNOVPN_DIR}/bin" 2>/dev/null
+        chown -R 0:0 "${RKNNOVPN_DIR}/scripts" "${RKNNOVPN_DIR}/config" "${RKNNOVPN_DIR}/logs" 2>/dev/null
+        chmod 0755 "${RKNNOVPN_DIR}/scripts" 2>/dev/null
+        chmod 0700 "${RKNNOVPN_DIR}/config" "${RKNNOVPN_DIR}/logs" 2>/dev/null
+        chown -R 0:${RKNNOVPN_GID} "${RKNNOVPN_DIR}/run" 2>/dev/null
+        chmod 0750 "${RKNNOVPN_DIR}/run" 2>/dev/null
     fi
     ui_print "  [*] Permissions set"
     set_capabilities
@@ -482,7 +482,7 @@ set_module_permissions() {
     done
 }
 
-privstack_installer_run() {
+rknnovpn_installer_run() {
     ui_print_header
 
     detect_root_manager
@@ -507,16 +507,16 @@ privstack_installer_run() {
     ui_print ""
     ui_print "  --- Installation complete ---"
     ui_print ""
-    ui_print "  Data directory: ${PRIVSTACK_DIR}/"
-    ui_print "  Config file:    ${PRIVSTACK_DIR}/config/config.json"
-    ui_print "  Daemon binary:  ${PRIVSTACK_DIR}/bin/privd"
-    ui_print "  Core binary:    ${PRIVSTACK_DIR}/bin/sing-box"
+    ui_print "  Data directory: ${RKNNOVPN_DIR}/"
+    ui_print "  Config file:    ${RKNNOVPN_DIR}/config/config.json"
+    ui_print "  Daemon binary:  ${RKNNOVPN_DIR}/bin/privd"
+    ui_print "  Core binary:    ${RKNNOVPN_DIR}/bin/sing-box"
     ui_print ""
     if [ "$PRESERVE_CONFIG" -eq 1 ]; then
         ui_print "  [*] Existing config was preserved."
-        ui_print "  [*] Backup at: ${PRIVSTACK_DIR}/backup/config.json.pre-upgrade"
+        ui_print "  [*] Backup at: ${RKNNOVPN_DIR}/backup/config.json.pre-upgrade"
     fi
     ui_print ""
-    ui_print "  Reboot to activate PrivStack."
+    ui_print "  Reboot to activate RKNnoVPN."
     ui_print ""
 }

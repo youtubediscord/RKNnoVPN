@@ -7,11 +7,15 @@ import (
 	"testing"
 )
 
-func TestValidateRejectsNewerSchemaVersion(t *testing.T) {
+func TestValidateRejectsUnsupportedSchemaVersion(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.SchemaVersion = CurrentSchemaVersion + 1
 	if err := cfg.Validate(); err == nil {
 		t.Fatalf("newer schema version should be rejected")
+	}
+	cfg.SchemaVersion = CurrentSchemaVersion - 1
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("older schema version should be rejected")
 	}
 }
 
@@ -26,27 +30,15 @@ func TestValidateChecksProfileProjectionSchema(t *testing.T) {
 	}
 }
 
-func TestNormalizeProfileNodesAddsManualSource(t *testing.T) {
+func TestNormalizeProfileNodesDoesNotAddManualSource(t *testing.T) {
 	profile := defaultProfileProjectionConfig()
 	profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443}`),
 	}
 
 	normalized := normalizeProfileProjectionConfig(profile)
-	if err := validateProfileProjectionConfig(normalized); err != nil {
-		t.Fatalf("normalized profile projection should validate: %v", err)
-	}
-
-	var node map[string]json.RawMessage
-	if err := json.Unmarshal(normalized.Nodes[0], &node); err != nil {
-		t.Fatalf("parse normalized node: %v", err)
-	}
-	var source ProfileNodeSourceConfig
-	if err := json.Unmarshal(node["source"], &source); err != nil {
-		t.Fatalf("parse normalized source: %v", err)
-	}
-	if source.Type != "MANUAL" {
-		t.Fatalf("expected manual source default, got %#v", source)
+	if err := validateProfileProjectionConfig(normalized); err == nil {
+		t.Fatalf("missing node source should be rejected")
 	}
 }
 
@@ -73,27 +65,19 @@ func TestValidateProfileProjectionConfigRejectsManualStaleNode(t *testing.T) {
 	}
 }
 
-func TestNormalizeProfileSubscriptionsBackfillsProviderKey(t *testing.T) {
+func TestNormalizeProfileSubscriptionsDoesNotBackfillProviderKey(t *testing.T) {
 	profile := defaultProfileProjectionConfig()
 	profile.Subscriptions = []json.RawMessage{
 		json.RawMessage(`{"url":"HTTPS://Example.com/Sub","lastFetchedAt":1000,"lastSeenNodeCount":2}`),
 	}
 
 	normalized := normalizeProfileProjectionConfig(profile)
-	if err := validateProfileProjectionConfig(normalized); err != nil {
-		t.Fatalf("normalized subscriptions should validate: %v", err)
-	}
-
-	var subscription ProfileSubscriptionConfig
-	if err := json.Unmarshal(normalized.Subscriptions[0], &subscription); err != nil {
-		t.Fatalf("parse normalized subscription: %v", err)
-	}
-	if subscription.ProviderKey != "https://example.com/sub" {
-		t.Fatalf("expected provider key from URL, got %#v", subscription)
+	if err := validateProfileProjectionConfig(normalized); err == nil {
+		t.Fatalf("subscription without provider key should be rejected")
 	}
 }
 
-func TestNormalizeProfileBackfillsSubscriptionsFromNodes(t *testing.T) {
+func TestNormalizeProfileDoesNotBackfillSubscriptionsFromNodes(t *testing.T) {
 	profile := defaultProfileProjectionConfig()
 	profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"source":{"type":"SUBSCRIPTION","url":"https://example.com/sub","providerKey":"https://example.com/sub","lastSeenAt":1000}}`),
@@ -101,22 +85,8 @@ func TestNormalizeProfileBackfillsSubscriptionsFromNodes(t *testing.T) {
 	}
 
 	normalized := normalizeProfileProjectionConfig(profile)
-	if err := validateProfileProjectionConfig(normalized); err != nil {
-		t.Fatalf("backfilled subscription should validate: %v", err)
-	}
-	if len(normalized.Subscriptions) != 1 {
-		t.Fatalf("expected one backfilled subscription, got %d", len(normalized.Subscriptions))
-	}
-
-	var subscription ProfileSubscriptionConfig
-	if err := json.Unmarshal(normalized.Subscriptions[0], &subscription); err != nil {
-		t.Fatalf("parse backfilled subscription: %v", err)
-	}
-	if subscription.ProviderKey != "https://example.com/sub" ||
-		subscription.LastSeenNodeCount != 2 ||
-		subscription.StaleNodeCount != 1 ||
-		subscription.LastFetchedAt != 1000 {
-		t.Fatalf("unexpected backfilled subscription: %#v", subscription)
+	if err := validateProfileProjectionConfig(normalized); err == nil {
+		t.Fatalf("subscription nodes without profile.subscriptions record should be rejected")
 	}
 }
 
@@ -169,7 +139,7 @@ func TestLoadRejectsLegacyNodeArray(t *testing.T) {
 		"transport": {"protocol":"reality","tls_server":"","fingerprint":"chrome","extra":{}},
 		"node": [],
 		"runtime_v2": {"backend_kind":"ROOT_TPROXY","fallback_policy":"OFFER_RESET"},
-		"routing": {"mode":"whitelist","bypass_lan":true,"bypass_china":false,"bypass_russia":false,"block_ads":false,"custom_direct":[],"custom_proxy":[],"custom_block":[],"geoip_path":"/data/adb/privstack/data/geoip.db","geosite_path":"/data/adb/privstack/data/geosite.db"},
+		"routing": {"mode":"whitelist","bypass_lan":true,"bypass_china":false,"bypass_russia":false,"block_ads":false,"custom_direct":[],"custom_proxy":[],"custom_block":[],"geoip_path":"/data/adb/rknnovpn/data/geoip.db","geosite_path":"/data/adb/rknnovpn/data/geosite.db"},
 		"apps": {"mode":"whitelist","list":[],"app_groups":{}},
 		"dns": {"hijack_per_uid":true,"proxy_dns":"https://1.1.1.1/dns-query","direct_dns":"https://dns.google/dns-query","bootstrap_ip":"1.1.1.1","block_quic_dns":true,"fake_ip":false},
 		"ipv6": {"mode":"mirror"},

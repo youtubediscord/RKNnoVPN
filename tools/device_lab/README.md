@@ -1,6 +1,6 @@
 # Device Lab
 
-Safe ADB helpers for testing PrivStack on a rooted Android lab device.
+Safe ADB helpers for testing RKNnoVPN on a rooted Android lab device.
 
 The default commands are intentionally read-only. They collect diagnostics and
 run daemon RPC checks without installing packages, rebooting, deleting files, or
@@ -37,13 +37,13 @@ tools/device_lab/smoke.sh --allow-reset
 tools/device_lab/smoke.sh --allow-start --stop-after-start
 ```
 
-`--allow-start` applies the current PrivStack routing config on the device.
+`--allow-start` applies the current RKNnoVPN routing config on the device.
 `--allow-reset` invokes the daemon reset RPC. Both can affect connectivity while
 the test is running.
 
 ## Lineage/QEMU Emulator
 
-PrivStack can also be tested against the QEMU LineageOS images from
+RKNnoVPN can also be tested against the QEMU LineageOS images from
 `SamuraiArtem/android-lineage-emulator` or its upstream
 `jqssun/android-lineage-qemu`. This is useful for fast root/runtime regressions,
 but it does not replace real vendor phones because the emulator is ARM64 and its
@@ -80,7 +80,7 @@ It also verifies that `adb shell` works, not just that `adb devices` reports
 tools/device_lab/lineage_emulator.sh doctor --serial localhost:5555
 ```
 
-An emulator with a broken shell service is not useful for PrivStack smoke tests,
+An emulator with a broken shell service is not useful for RKNnoVPN smoke tests,
 even when the Android UI has booted.
 
 To install locally built artifacts on a Magisk-enabled emulator:

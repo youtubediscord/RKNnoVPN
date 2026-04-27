@@ -1,4 +1,4 @@
-# PrivStack Panel ProGuard rules
+# RKNnoVPN Panel ProGuard rules
 
 # Keep serialization
 -keepattributes *Annotation*, InnerClasses
@@ -11,11 +11,11 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
--keep,includedescriptorclasses class com.privstack.panel.**$$serializer { *; }
--keepclassmembers class com.privstack.panel.** {
+-keep,includedescriptorclasses class com.rknnovpn.panel.**$$serializer { *; }
+-keepclassmembers class com.rknnovpn.panel.** {
     *** Companion;
 }
--keepclasseswithmembers class com.privstack.panel.** {
+-keepclasseswithmembers class com.rknnovpn.panel.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
 

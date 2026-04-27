@@ -1,17 +1,17 @@
-package com.privstack.panel.ipc
+package com.rknnovpn.panel.ipc
 
-import com.privstack.panel.BuildConfig
-import com.privstack.panel.model.AppInfo
-import com.privstack.panel.model.AuditReport
-import com.privstack.panel.model.BackendHealthSnapshot
-import com.privstack.panel.model.BackendStatusV2
-import com.privstack.panel.model.DaemonStatus
-import com.privstack.panel.model.DesiredStateV2
-import com.privstack.panel.model.Node
-import com.privstack.panel.model.NodeProbeResultV2
-import com.privstack.panel.model.ProfileConfig
-import com.privstack.panel.model.RuntimeCompatibilityStatus
-import com.privstack.panel.model.Subscription
+import com.rknnovpn.panel.BuildConfig
+import com.rknnovpn.panel.model.AppInfo
+import com.rknnovpn.panel.model.AuditReport
+import com.rknnovpn.panel.model.BackendHealthSnapshot
+import com.rknnovpn.panel.model.BackendStatusV2
+import com.rknnovpn.panel.model.DaemonStatus
+import com.rknnovpn.panel.model.DesiredStateV2
+import com.rknnovpn.panel.model.Node
+import com.rknnovpn.panel.model.NodeProbeResultV2
+import com.rknnovpn.panel.model.ProfileConfig
+import com.rknnovpn.panel.model.RuntimeCompatibilityStatus
+import com.rknnovpn.panel.model.Subscription
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.add
@@ -133,7 +133,7 @@ class DaemonClient @Inject constructor(
         }
     }
 
-    /** Force-remove PrivStack network rules and stop the proxy core. */
+    /** Force-remove RKNnoVPN network rules and stop the proxy core. */
     suspend fun networkReset(): DaemonClientResult<BackendStatusV2> {
         return when (val result = backendReset()) {
             is DaemonClientResult.Ok -> result
@@ -1037,34 +1037,34 @@ private fun BackendStatusV2.toDaemonStatus(
     val displayPhase = activeOperation?.phase ?: appliedState.phase
     val lastFailure = lastOperation?.takeIf { !it.succeeded && activeOperation == null }
     val connectionState = if (compatibilityIssue != null) {
-        com.privstack.panel.model.ConnectionState.ERROR
+        com.rknnovpn.panel.model.ConnectionState.ERROR
     } else when (displayPhase) {
-        com.privstack.panel.model.BackendPhase.HEALTHY,
-        com.privstack.panel.model.BackendPhase.RULES_APPLIED,
-        com.privstack.panel.model.BackendPhase.DNS_APPLIED,
-        com.privstack.panel.model.BackendPhase.OUTBOUND_CHECKED,
-        com.privstack.panel.model.BackendPhase.DEGRADED ->
+        com.rknnovpn.panel.model.BackendPhase.HEALTHY,
+        com.rknnovpn.panel.model.BackendPhase.RULES_APPLIED,
+        com.rknnovpn.panel.model.BackendPhase.DNS_APPLIED,
+        com.rknnovpn.panel.model.BackendPhase.OUTBOUND_CHECKED,
+        com.rknnovpn.panel.model.BackendPhase.DEGRADED ->
             if (effectiveHealth.healthy) {
-                com.privstack.panel.model.ConnectionState.CONNECTED
+                com.rknnovpn.panel.model.ConnectionState.CONNECTED
             } else {
-                com.privstack.panel.model.ConnectionState.ERROR
+                com.rknnovpn.panel.model.ConnectionState.ERROR
             }
-        com.privstack.panel.model.BackendPhase.STOPPED -> com.privstack.panel.model.ConnectionState.DISCONNECTED
-        com.privstack.panel.model.BackendPhase.APPLYING,
-        com.privstack.panel.model.BackendPhase.STARTING,
-        com.privstack.panel.model.BackendPhase.CONFIG_CHECKED,
-        com.privstack.panel.model.BackendPhase.CORE_SPAWNED,
-        com.privstack.panel.model.BackendPhase.CORE_LISTENING,
-        com.privstack.panel.model.BackendPhase.STOPPING,
-        com.privstack.panel.model.BackendPhase.RESETTING -> com.privstack.panel.model.ConnectionState.CONNECTING
-        com.privstack.panel.model.BackendPhase.FAILED -> com.privstack.panel.model.ConnectionState.ERROR
+        com.rknnovpn.panel.model.BackendPhase.STOPPED -> com.rknnovpn.panel.model.ConnectionState.DISCONNECTED
+        com.rknnovpn.panel.model.BackendPhase.APPLYING,
+        com.rknnovpn.panel.model.BackendPhase.STARTING,
+        com.rknnovpn.panel.model.BackendPhase.CONFIG_CHECKED,
+        com.rknnovpn.panel.model.BackendPhase.CORE_SPAWNED,
+        com.rknnovpn.panel.model.BackendPhase.CORE_LISTENING,
+        com.rknnovpn.panel.model.BackendPhase.STOPPING,
+        com.rknnovpn.panel.model.BackendPhase.RESETTING -> com.rknnovpn.panel.model.ConnectionState.CONNECTING
+        com.rknnovpn.panel.model.BackendPhase.FAILED -> com.rknnovpn.panel.model.ConnectionState.ERROR
     }
 
     return DaemonStatus(
         state = connectionState,
         activeNodeId = desiredState.activeProfileId,
         uptime = 0L,
-        health = com.privstack.panel.model.HealthResult(
+        health = com.rknnovpn.panel.model.HealthResult(
             healthy = effectiveHealth.healthy,
             coreRunning = effectiveHealth.coreReady,
             tunActive = false,

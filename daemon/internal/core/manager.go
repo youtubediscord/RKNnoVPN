@@ -141,13 +141,13 @@ func runtimeUserMessage(code string) string {
 	case "API_PORT_DOWN":
 		return "sing-box did not open the local API listener."
 	case "RULES_NOT_APPLIED":
-		return "PrivStack routing rules could not be applied."
+		return "RKNnoVPN routing rules could not be applied."
 	case "DNS_APPLY_FAILED":
-		return "PrivStack DNS interception could not be applied."
+		return "RKNnoVPN DNS interception could not be applied."
 	case "NETSTACK_VERIFY_FAILED":
-		return "PrivStack network rules were applied but did not pass verification."
+		return "RKNnoVPN network rules were applied but did not pass verification."
 	case "NETSTACK_CLEANUP_FAILED":
-		return "Previous PrivStack network rules could not be cleaned up."
+		return "Previous RKNnoVPN network rules could not be cleaned up."
 	default:
 		return "Runtime stage failed."
 	}
@@ -297,7 +297,7 @@ type CoreManager struct {
 }
 
 // NewCoreManager creates a CoreManager that stores runtime data under dataDir
-// (normally /data/adb/privstack).
+// (normally /data/adb/rknnovpn).
 func NewCoreManager(cfg *config.Config, dataDir string, logger *log.Logger) *CoreManager {
 	if logger == nil {
 		logger = log.New(os.Stderr, "[core] ", log.LstdFlags)
@@ -457,7 +457,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 		return failStage(spec.Stage, spec.Layer, spec.Code, fmt.Errorf("%s port %d not ready: %w", spec.Label, spec.Port, err), true)
 	}
 
-	// 5-6. Apply PrivStack-owned iptables and DNS interception.
+	// 5-6. Apply RKNnoVPN-owned iptables and DNS interception.
 	netReport := m.netstack().Apply()
 	if err := netReport.Err(); err != nil {
 		code := "RULES_NOT_APPLIED"
@@ -514,7 +514,7 @@ func (m *CoreManager) Stop() error {
 	return m.stopWithMode(true)
 }
 
-// RescueReset tears down PrivStack-owned runtime state even if the in-memory
+// RescueReset tears down RKNnoVPN-owned runtime state even if the in-memory
 // lifecycle already says stopped. Use this for recovery paths where kernel
 // rules can outlive daemon state.
 func (m *CoreManager) RescueReset() error {
@@ -1045,7 +1045,7 @@ func (m *CoreManager) scriptEnv() map[string]string {
 	chainProxyPorts, chainProxyUIDs := BuildChainedProxyProtectionEnv(m.config)
 
 	return map[string]string{
-		"PRIVSTACK_DIR":     m.dataDir,
+		"RKNNOVPN_DIR":     m.dataDir,
 		"CORE_GID":          strconv.Itoa(gid),
 		"TPROXY_PORT":       strconv.Itoa(tproxyPort),
 		"DNS_PORT":          strconv.Itoa(dnsPort),

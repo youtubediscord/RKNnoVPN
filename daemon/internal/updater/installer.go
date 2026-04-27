@@ -23,8 +23,8 @@ const SelfExitDelay = 3 * time.Second
 
 // Default filesystem paths used by the Magisk module layout.
 const (
-	DefaultDataDir   = "/data/adb/privstack"
-	DefaultModuleDir = "/data/adb/modules/privstack"
+	DefaultDataDir   = "/data/adb/rknnovpn"
+	DefaultModuleDir = "/data/adb/modules/rknnovpn"
 )
 
 type ModulePreflight struct {
@@ -74,7 +74,7 @@ func PreflightModuleUpdate(zipPath string, dataDir string) (*ModulePreflight, er
 //
 //  1. Extract the new module.zip to a temp staging directory
 //  2. Validate required binaries/scripts/module metadata before downtime
-//  3. Run canonical runtime cleanup (sing-box + PrivStack netstack teardown)
+//  3. Run canonical runtime cleanup (sing-box + RKNnoVPN netstack teardown)
 //  4. Back up current binaries so we can roll back on failure
 //  5. Atomically replace binaries in <dataDir>/bin/ (unlink+rename)
 //  6. Copy new scripts to <dataDir>/scripts/
@@ -341,10 +341,10 @@ func InstallApkUpdate(apkPath string) error {
 // after the IPC response is sent.
 func stopCurrentProxy(dataDir string) error {
 	// Build a minimal environment so scripts work even if the old daemon
-	// did not set PRIVSTACK_DIR. Old scripts might not need it, but new
+	// did not set RKNNOVPN_DIR. Old scripts might not need it, but new
 	// scripts definitely do.
 	scriptEnv := []string{
-		"PRIVSTACK_DIR=" + dataDir,
+		"RKNNOVPN_DIR=" + dataDir,
 		"PATH=" + os.Getenv("PATH"),
 	}
 	return execScriptWithEnv(filepath.Join(dataDir, "scripts", "rescue_reset.sh"), "update-clean", scriptEnv)
@@ -498,11 +498,11 @@ func validateModuleStaging(staging string, stagedBinDir string) error {
 		"scripts/iptables.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
-		"scripts/lib/privstack_env.sh",
-		"scripts/lib/privstack_install.sh",
-		"scripts/lib/privstack_installer_flow.sh",
-		"scripts/lib/privstack_netstack.sh",
-		"scripts/lib/privstack_iptables_rules.sh",
+		"scripts/lib/rknnovpn_env.sh",
+		"scripts/lib/rknnovpn_install.sh",
+		"scripts/lib/rknnovpn_installer_flow.sh",
+		"scripts/lib/rknnovpn_netstack.sh",
+		"scripts/lib/rknnovpn_iptables_rules.sh",
 		"defaults/config.json",
 	} {
 		fullPath := filepath.Join(staging, path)
@@ -535,7 +535,7 @@ func validateModuleProp(path string) error {
 			return fmt.Errorf("module.prop missing required %s", key)
 		}
 	}
-	if props["id"] != "privstack" {
+	if props["id"] != "rknnovpn" {
 		return fmt.Errorf("module.prop has unexpected id %q", props["id"])
 	}
 	return nil

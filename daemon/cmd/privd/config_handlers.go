@@ -75,7 +75,6 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 			Message: "invalid config: " + err.Error(),
 		}
 	}
-	newCfg.Migrate()
 	d.mu.Lock()
 	newCfg.Profile = d.cfg.Profile
 	d.mu.Unlock()

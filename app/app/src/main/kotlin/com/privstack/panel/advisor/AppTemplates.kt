@@ -1,4 +1,4 @@
-package com.privstack.panel.advisor
+package com.rknnovpn.panel.advisor
 
 /**
  * A pre-built whitelist template grouping package names by purpose.

@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.apps
+package com.rknnovpn.panel.ui.apps
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -54,8 +54,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.privstack.panel.R
-import com.privstack.panel.model.RoutingMode
+import com.rknnovpn.panel.R
+import com.rknnovpn.panel.model.RoutingMode
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable

@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # ============================================================================
-# dns.sh — DNS interception for PrivStack
+# dns.sh — DNS interception for RKNnoVPN
 # ============================================================================
 # Transparently redirects classic DNS traffic so the proxy core resolves it.
 #
@@ -22,17 +22,17 @@
 #   PROXY_UIDS     — UIDs whose DNS should be redirected in uids scope
 #   DIRECT_UIDS    — UIDs whose DNS must stay direct in all_except_uids scope
 #   BYPASS_UIDS    — space-separated list of UIDs that must never be redirected
-#   PRIVSTACK_DIR  — base directory, e.g. /data/adb/privstack
+#   RKNNOVPN_DIR  — base directory, e.g. /data/adb/rknnovpn
 # ============================================================================
 
 # Fail on first error; treat unset variables as errors.
 set -eu
 
-TAG="privstack:dns"
+TAG="rknnovpn:dns"
 SCRIPT_VERSION="v1.8.0"
 SCRIPT_DIR="${0%/*}"
-if [ -f "${SCRIPT_DIR}/lib/privstack_env.sh" ]; then
-    . "${SCRIPT_DIR}/lib/privstack_env.sh"
+if [ -f "${SCRIPT_DIR}/lib/rknnovpn_env.sh" ]; then
+    . "${SCRIPT_DIR}/lib/rknnovpn_env.sh"
 fi
 
 # Sane defaults if the caller omitted something.
@@ -44,12 +44,12 @@ DNS_SCOPE="${DNS_SCOPE:-}"
 PROXY_UIDS="${PROXY_UIDS:-}"
 DIRECT_UIDS="${DIRECT_UIDS:-}"
 BYPASS_UIDS="${BYPASS_UIDS:-}"
-PRIVSTACK_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/rknnovpn}"
 IPT_WAIT="${IPT_WAIT:--w 100}"
 
-# Chain names — keep in sync with the rest of PrivStack.
-NAT4_CHAIN="PRIVSTACK_DNS_NAT"
-NAT6_CHAIN="PRIVSTACK_DNS_NAT6"
+# Chain names — keep in sync with the rest of RKNnoVPN.
+NAT4_CHAIN="RKNNOVPN_DNS_NAT"
+NAT6_CHAIN="RKNNOVPN_DNS_NAT6"
 HAS_IPV6_NAT=0
 
 log() { /system/bin/log -t "$TAG" -p i "$*"; }
@@ -104,7 +104,7 @@ fill_nat_chain() {
         $_ipt $IPT_WAIT -t nat -A "$_chain" -p udp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
         $_ipt $IPT_WAIT -t nat -A "$_chain" -p tcp --dport 53 -j REDIRECT --to-ports "$DNS_PORT"
     elif [ "$DNS_SCOPE" = "uids" ]; then
-        # Whitelist mode: only proxied apps use PrivStack DNS.
+        # Whitelist mode: only proxied apps use RKNnoVPN DNS.
         for uid in $PROXY_UIDS; do
             $_ipt $IPT_WAIT -t nat -A "$_chain" -p udp --dport 53 -m owner --uid-owner "$uid" -j REDIRECT --to-ports "$DNS_PORT"
             $_ipt $IPT_WAIT -t nat -A "$_chain" -p tcp --dport 53 -m owner --uid-owner "$uid" -j REDIRECT --to-ports "$DNS_PORT"

@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.settings
+package com.rknnovpn.panel.ui.settings
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
@@ -65,9 +65,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.privstack.panel.R
-import com.privstack.panel.model.DnsIpv6Mode
-import com.privstack.panel.model.FallbackPolicy
+import com.rknnovpn.panel.R
+import com.rknnovpn.panel.model.DnsIpv6Mode
+import com.rknnovpn.panel.model.FallbackPolicy
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

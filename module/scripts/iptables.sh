@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # ============================================================================
-# PrivStack — iptables.sh
+# RKNnoVPN — iptables.sh
 # Whitelist-mode transparent proxy via TPROXY + iptables.
 # Main orchestration only: env/snapshot/apply/teardown/status.
 # Rule rendering and listener verification live in scripts/lib/.
@@ -9,21 +9,21 @@
 
 set -eu
 
-TAG="PrivStack:iptables"
+TAG="RKNnoVPN:iptables"
 SCRIPT_VERSION="v1.8.0"
 SCRIPT_DIR="${0%/*}"
 
-if [ -f "${SCRIPT_DIR}/lib/privstack_env.sh" ]; then
-    . "${SCRIPT_DIR}/lib/privstack_env.sh"
+if [ -f "${SCRIPT_DIR}/lib/rknnovpn_env.sh" ]; then
+    . "${SCRIPT_DIR}/lib/rknnovpn_env.sh"
 fi
-if [ -f "${SCRIPT_DIR}/lib/privstack_netstack.sh" ]; then
-    . "${SCRIPT_DIR}/lib/privstack_netstack.sh"
+if [ -f "${SCRIPT_DIR}/lib/rknnovpn_netstack.sh" ]; then
+    . "${SCRIPT_DIR}/lib/rknnovpn_netstack.sh"
 fi
-if [ -f "${SCRIPT_DIR}/lib/privstack_iptables_rules.sh" ]; then
-    . "${SCRIPT_DIR}/lib/privstack_iptables_rules.sh"
+if [ -f "${SCRIPT_DIR}/lib/rknnovpn_iptables_rules.sh" ]; then
+    . "${SCRIPT_DIR}/lib/rknnovpn_iptables_rules.sh"
 fi
 
-CHAIN_PREFIX="PRIVSTACK"
+CHAIN_PREFIX="RKNNOVPN"
 CHAIN_OUT="${CHAIN_PREFIX}_OUT"
 CHAIN_PRE="${CHAIN_PREFIX}_PRE"
 CHAIN_APP="${CHAIN_PREFIX}_APP"
@@ -31,7 +31,7 @@ CHAIN_BYPASS="${CHAIN_PREFIX}_BYPASS"
 CHAIN_DNS="${CHAIN_PREFIX}_DNS"
 CHAIN_DIVERT="${CHAIN_PREFIX}_DIVERT"
 
-SNAPSHOT_DIR="${RUN_DIR:-${PRIVSTACK_DIR:-/data/adb/privstack}/run}"
+SNAPSHOT_DIR="${RUN_DIR:-${RKNNOVPN_DIR:-/data/adb/rknnovpn}/run}"
 IPT_WAIT="${IPT_WAIT:--w 100}"
 
 RESERVED_IPV4="
@@ -73,7 +73,7 @@ log_error() {
 
 require_rule_renderer() {
     if ! command -v gen_mangle_v4 >/dev/null 2>&1 || ! command -v check_local_listener_protection >/dev/null 2>&1; then
-        log_error "missing scripts/lib/privstack_iptables_rules.sh"
+        log_error "missing scripts/lib/rknnovpn_iptables_rules.sh"
         exit 1
     fi
 }
@@ -82,7 +82,7 @@ validate_env() {
     missing=""
 
     for var in TPROXY_PORT DNS_PORT API_PORT FWMARK ROUTE_TABLE \
-               ROUTE_TABLE_V6 CORE_GID APP_MODE PRIVSTACK_DIR; do
+               ROUTE_TABLE_V6 CORE_GID APP_MODE RKNNOVPN_DIR; do
         eval "val=\${${var}:-}"
         if [ -z "$val" ]; then
             missing="${missing} ${var}"
@@ -149,7 +149,7 @@ save_snapshot() {
     mkdir -p "${SNAPSHOT_DIR}"
 
     cat > "${SNAPSHOT_DIR}/env.sh" <<SNAPSHOT_EOF
-# PrivStack runtime snapshot — generated at $(date)
+# RKNnoVPN runtime snapshot — generated at $(date)
 TPROXY_PORT=${TPROXY_PORT}
 DNS_PORT=${DNS_PORT}
 API_PORT=${API_PORT}
@@ -194,7 +194,7 @@ setup_policy_routing() {
 }
 
 teardown_policy_routing() {
-    privstack_delete_policy_routes
+    rknnovpn_delete_policy_routes
     log_info "Policy routing removed"
 }
 
@@ -220,7 +220,7 @@ flush_chains() {
 
 do_start() {
     log_info "========================================="
-    log_info "Starting PrivStack iptables ${SCRIPT_VERSION} (mode=${APP_MODE}, proxy=${PROXY_MODE})"
+    log_info "Starting RKNnoVPN iptables ${SCRIPT_VERSION} (mode=${APP_MODE}, proxy=${PROXY_MODE})"
     log_info "  TPROXY_PORT=${TPROXY_PORT}"
     log_info "  DNS_PORT=${DNS_PORT}"
     log_info "  API_PORT=${API_PORT}"
@@ -281,12 +281,12 @@ do_start() {
     fi
 
     log_info "========================================="
-    log_info "PrivStack iptables rules applied successfully"
+    log_info "RKNnoVPN iptables rules applied successfully"
     log_info "========================================="
 }
 
 do_stop() {
-    log_info "Stopping PrivStack iptables..."
+    log_info "Stopping RKNnoVPN iptables..."
 
     if [ -f "${SNAPSHOT_DIR}/env.sh" ]; then
         log_info "Loading runtime snapshot for teardown..."
@@ -310,7 +310,7 @@ do_stop() {
         log_info "Snapshot files cleaned up"
     fi
 
-    log_info "PrivStack iptables rules removed"
+    log_info "RKNnoVPN iptables rules removed"
 }
 
 do_status() {
@@ -380,7 +380,7 @@ do_status() {
     if [ "$missing" -ne 0 ]; then
         exit 1
     fi
-    log_info "PrivStack iptables hooks are present"
+    log_info "RKNnoVPN iptables hooks are present"
 }
 
 case "${1:-}" in
@@ -390,7 +390,7 @@ case "${1:-}" in
         do_start
         ;;
     stop)
-        SNAPSHOT_DIR="${RUN_DIR:-${PRIVSTACK_DIR:-/data/adb/privstack}/run}"
+        SNAPSHOT_DIR="${RUN_DIR:-${RKNNOVPN_DIR:-/data/adb/rknnovpn}/run}"
         if [ -f "${SNAPSHOT_DIR}/env.sh" ]; then
             load_snapshot
         fi

@@ -1,4 +1,4 @@
-package com.privstack.panel
+package com.rknnovpn.panel
 
 import android.app.Application
 import dagger.hilt.android.HiltAndroidApp

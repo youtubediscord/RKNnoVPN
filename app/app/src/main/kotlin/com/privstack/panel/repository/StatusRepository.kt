@@ -1,16 +1,16 @@
-package com.privstack.panel.repository
+package com.rknnovpn.panel.repository
 
-import com.privstack.panel.ipc.DaemonClient
-import com.privstack.panel.ipc.DaemonClientResult
-import com.privstack.panel.ipc.PollingStatusSource
-import com.privstack.panel.ipc.SelfCheckSummary
-import com.privstack.panel.i18n.UserMessageFormatter
-import com.privstack.panel.R
-import com.privstack.panel.model.AuditReport
-import com.privstack.panel.model.BackendStatusV2
-import com.privstack.panel.model.DaemonConnectionState
-import com.privstack.panel.model.DaemonStatus
-import com.privstack.panel.model.HealthResult
+import com.rknnovpn.panel.ipc.DaemonClient
+import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.ipc.PollingStatusSource
+import com.rknnovpn.panel.ipc.SelfCheckSummary
+import com.rknnovpn.panel.i18n.UserMessageFormatter
+import com.rknnovpn.panel.R
+import com.rknnovpn.panel.model.AuditReport
+import com.rknnovpn.panel.model.BackendStatusV2
+import com.rknnovpn.panel.model.DaemonConnectionState
+import com.rknnovpn.panel.model.DaemonStatus
+import com.rknnovpn.panel.model.HealthResult
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -137,7 +137,7 @@ class StatusRepository @Inject constructor(
     /** True if the daemon is currently reachable and the proxy is connected. */
     val isConnected: Boolean
         get() = connectionState.value == DaemonConnectionState.REACHABLE &&
-                status.value?.state == com.privstack.panel.model.ConnectionState.CONNECTED
+                status.value?.state == com.rknnovpn.panel.model.ConnectionState.CONNECTED
 
     private fun <T> toOutcome(result: DaemonClientResult<T>, operationResId: Int): CommandOutcome = when (result) {
         is DaemonClientResult.Ok -> CommandOutcome.Success

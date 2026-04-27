@@ -30,7 +30,7 @@ const (
 // NetworkWatcher monitors filesystem events under /data/misc/net/ via
 // inotifyd and dispatches a daemon-owned callback on changes.
 type NetworkWatcher struct {
-	dataDir string // e.g. /data/adb/privstack
+	dataDir string // e.g. /data/adb/rknnovpn
 	env     map[string]string
 
 	stopCh   chan struct{}

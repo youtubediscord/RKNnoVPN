@@ -101,14 +101,19 @@ func (o *Orchestrator) SetStatusObserver(observer func(Status)) {
 
 func (o *Orchestrator) SetCompatibility(compatibility CompatibilityStatus) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	o.compatibility = cloneCompatibilityStatus(compatibility)
+	status := o.statusLockedWithoutStuckLog()
+	observer := o.statusObserver
+	o.mu.Unlock()
+	if observer != nil {
+		observer(status)
+	}
 }
 
 func (o *Orchestrator) SetActiveOperationStep(generation int64, name, status, code, detail string) bool {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	if o.active == nil || o.active.Generation != generation {
+		o.mu.Unlock()
 		return false
 	}
 	o.active.Step = name
@@ -127,23 +132,36 @@ func (o *Orchestrator) SetActiveOperationStep(generation int64, name, status, co
 		ErrorCode:   code,
 		RuntimeMS:   int64(time.Since(o.active.StartedAt) / time.Millisecond),
 	})
+	snapshot := o.statusLockedWithoutStuckLog()
+	observer := o.statusObserver
+	o.mu.Unlock()
+	if observer != nil {
+		observer(snapshot)
+	}
 	return true
 }
 
 func (o *Orchestrator) ApplyDesiredState(desired DesiredState) error {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 
 	if err := o.busyLocked(); err != nil {
+		o.mu.Unlock()
 		return err
 	}
 	if desired.BackendKind == "" {
 		desired.BackendKind = o.desired.BackendKind
 	}
 	if err := o.validateDesiredLocked(desired); err != nil {
+		o.mu.Unlock()
 		return err
 	}
 	o.desired = desired
+	status := o.statusLockedWithoutStuckLog()
+	observer := o.statusObserver
+	o.mu.Unlock()
+	if observer != nil {
+		observer(status)
+	}
 	return nil
 }
 
@@ -574,7 +592,12 @@ func (o *Orchestrator) RefreshHealth() HealthSnapshot {
 	if err != nil {
 		o.health = HealthSnapshot{LastError: err.Error(), CheckedAt: time.Now()}
 		health := o.health
+		status := o.statusLockedWithoutStuckLog()
+		observer := o.statusObserver
 		o.mu.Unlock()
+		if observer != nil {
+			observer(status)
+		}
 		return health
 	}
 	o.mu.Unlock()
@@ -586,7 +609,12 @@ func (o *Orchestrator) RefreshHealth() HealthSnapshot {
 	if o.active == nil && o.applied.Phase != PhaseStopped {
 		o.applied.Phase = phaseFromHealth(health, o.applied.Phase)
 	}
+	status := o.statusLockedWithoutStuckLog()
+	observer := o.statusObserver
 	o.mu.Unlock()
+	if observer != nil {
+		observer(status)
+	}
 	return health
 }
 

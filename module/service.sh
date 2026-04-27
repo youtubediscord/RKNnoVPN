@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# PrivStack — service.sh
+# RKNnoVPN — service.sh
 # Runs at boot after data is decrypted (non-blocking).
 # Launches the privd daemon that manages sing-box + iptables.
 # POSIX sh compatible (busybox ash).
@@ -9,25 +9,25 @@
 # ============================================================================
 
 MODDIR="${0%/*}"
-PRIVSTACK_DIR="/data/adb/privstack"
-PRIVSTACK_GID=23333
+RKNNOVPN_DIR="/data/adb/rknnovpn"
+RKNNOVPN_GID=23333
 
-PRIVD_BIN="${PRIVSTACK_DIR}/bin/privd"
-PRIVD_PID_FILE="${PRIVSTACK_DIR}/run/privd.pid"
-CONFIG_FILE="${PRIVSTACK_DIR}/config/config.json"
-MANUAL_FLAG="${PRIVSTACK_DIR}/config/manual"
-LOG_FILE="${PRIVSTACK_DIR}/logs/service.log"
+PRIVD_BIN="${RKNNOVPN_DIR}/bin/privd"
+PRIVD_PID_FILE="${RKNNOVPN_DIR}/run/privd.pid"
+CONFIG_FILE="${RKNNOVPN_DIR}/config/config.json"
+MANUAL_FLAG="${RKNNOVPN_DIR}/config/manual"
+LOG_FILE="${RKNNOVPN_DIR}/logs/service.log"
 MODULE_PROP="${MODDIR}/module.prop"
-LOG_VERSION_FILE="${PRIVSTACK_DIR}/logs/.version"
-LOG_ARCHIVE_DIR="${PRIVSTACK_DIR}/logs/archive"
+LOG_VERSION_FILE="${RKNNOVPN_DIR}/logs/.version"
+LOG_ARCHIVE_DIR="${RKNNOVPN_DIR}/logs/archive"
 
-TAG="privstack:service"
+TAG="rknnovpn:service"
 BOOT_TIMEOUT=120
 SETTLE_DELAY=5
-OOM_SCORE_ADJ="${PRIVSTACK_OOM_SCORE_ADJ:-300}"
+OOM_SCORE_ADJ="${RKNNOVPN_OOM_SCORE_ADJ:-300}"
 
-if [ -f "${PRIVSTACK_DIR}/scripts/lib/privstack_env.sh" ]; then
-    . "${PRIVSTACK_DIR}/scripts/lib/privstack_env.sh"
+if [ -f "${RKNNOVPN_DIR}/scripts/lib/rknnovpn_env.sh" ]; then
+    . "${RKNNOVPN_DIR}/scripts/lib/rknnovpn_env.sh"
 fi
 
 # ============================================================================
@@ -63,9 +63,9 @@ module_version() {
 }
 
 rotate_logs_if_version_changed() {
-    mkdir -p "${PRIVSTACK_DIR}/logs" 2>/dev/null || return 0
-    chown 0:0 "${PRIVSTACK_DIR}/logs" 2>/dev/null
-    chmod 0700 "${PRIVSTACK_DIR}/logs" 2>/dev/null
+    mkdir -p "${RKNNOVPN_DIR}/logs" 2>/dev/null || return 0
+    chown 0:0 "${RKNNOVPN_DIR}/logs" 2>/dev/null
+    chmod 0700 "${RKNNOVPN_DIR}/logs" 2>/dev/null
 
     CURRENT_VERSION="$(module_version)"
     [ -n "$CURRENT_VERSION" ] || return 0
@@ -84,7 +84,7 @@ rotate_logs_if_version_changed() {
     MOVED=0
 
     for name in privd.log sing-box.log service.log rescue_reset.log net_change.log; do
-        src="${PRIVSTACK_DIR}/logs/${name}"
+        src="${RKNNOVPN_DIR}/logs/${name}"
         if [ -s "$src" ]; then
             mkdir -p "$ARCHIVE_DIR" 2>/dev/null || continue
             if mv "$src" "${ARCHIVE_DIR}/${name}" 2>/dev/null; then
@@ -181,21 +181,21 @@ sleep "$SETTLE_DELAY"
 # ============================================================================
 
 has_boot_cleanup_markers() {
-    if command -v privstack_has_boot_cleanup_markers >/dev/null 2>&1; then
-        privstack_has_boot_cleanup_markers
+    if command -v rknnovpn_has_boot_cleanup_markers >/dev/null 2>&1; then
+        rknnovpn_has_boot_cleanup_markers
         return $?
     fi
-    log_warn "privstack_env.sh marker helper unavailable; boot cleanup will run as probe"
+    log_warn "rknnovpn_env.sh marker helper unavailable; boot cleanup will run as probe"
     return 1
 }
 
-if [ -x "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" ]; then
+if [ -x "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" ]; then
     if has_boot_cleanup_markers; then
         log_info "Running boot rescue cleanup"
     else
         log_info "Running boot rescue cleanup probe without stale runtime markers"
     fi
-    if "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
+    if "${RKNNOVPN_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
         log_info "Boot rescue cleanup completed"
     else
         log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
@@ -215,14 +215,14 @@ fi
 # Check that the daemon binary exists
 if [ ! -x "$PRIVD_BIN" ]; then
     log_error "Daemon binary not found or not executable: ${PRIVD_BIN}"
-    log_error "Install sing-box/privd to ${PRIVSTACK_DIR}/bin/ and reboot"
+    log_error "Install sing-box/privd to ${RKNNOVPN_DIR}/bin/ and reboot"
     exit 1
 fi
 
 # Check that config exists
 if [ ! -f "$CONFIG_FILE" ]; then
     log_error "Config file not found: ${CONFIG_FILE}"
-    log_error "Copy config.json to ${PRIVSTACK_DIR}/config/ and reboot"
+    log_error "Copy config.json to ${RKNNOVPN_DIR}/config/ and reboot"
     exit 1
 fi
 
@@ -262,12 +262,12 @@ launch_daemon() {
     log_info "  PID file: ${PRIVD_PID_FILE}"
 
     # Ensure log directory is writable
-    mkdir -p "${PRIVSTACK_DIR}/logs" 2>/dev/null
-    chown 0:0 "${PRIVSTACK_DIR}/logs" 2>/dev/null
-    chmod 0700 "${PRIVSTACK_DIR}/logs" 2>/dev/null
-    touch "${PRIVSTACK_DIR}/logs/privd.log" 2>/dev/null
-    chown 0:0 "${PRIVSTACK_DIR}/logs/privd.log" 2>/dev/null
-    chmod 0600 "${PRIVSTACK_DIR}/logs/privd.log" 2>/dev/null
+    mkdir -p "${RKNNOVPN_DIR}/logs" 2>/dev/null
+    chown 0:0 "${RKNNOVPN_DIR}/logs" 2>/dev/null
+    chmod 0700 "${RKNNOVPN_DIR}/logs" 2>/dev/null
+    touch "${RKNNOVPN_DIR}/logs/privd.log" 2>/dev/null
+    chown 0:0 "${RKNNOVPN_DIR}/logs/privd.log" 2>/dev/null
+    chmod 0600 "${RKNNOVPN_DIR}/logs/privd.log" 2>/dev/null
 
     # Launch daemon with nohup + setsid to fully detach from init
     # - nohup: ignore SIGHUP when terminal closes
@@ -275,8 +275,8 @@ launch_daemon() {
     # stdout/stderr go to daemon log file
     nohup setsid "${PRIVD_BIN}" \
         --config "${CONFIG_FILE}" \
-        --data-dir "${PRIVSTACK_DIR}" \
-        >> "${PRIVSTACK_DIR}/logs/privd.log" 2>&1 &
+        --data-dir "${RKNNOVPN_DIR}" \
+        >> "${RKNNOVPN_DIR}/logs/privd.log" 2>&1 &
 
     DAEMON_PID=$!
 
@@ -288,7 +288,7 @@ launch_daemon() {
         # Process died — try to find the actual PID (setsid may have forked)
         DAEMON_PID="$(first_pid_by_cmd_path "$PRIVD_BIN" 2>/dev/null)"
         if [ -z "$DAEMON_PID" ]; then
-            log_error "Daemon failed to start — check ${PRIVSTACK_DIR}/logs/privd.log"
+            log_error "Daemon failed to start — check ${RKNNOVPN_DIR}/logs/privd.log"
             return 1
         fi
     fi
@@ -304,14 +304,14 @@ launch_daemon
 LAUNCH_RESULT=$?
 
 # ============================================================================
-# 7. Set OOM score — keep Android UI preferred over PrivStack workers
+# 7. Set OOM score — keep Android UI preferred over RKNnoVPN workers
 # ============================================================================
 
 if [ "$LAUNCH_RESULT" -eq 0 ]; then
     DAEMON_PID="$(cat "$PRIVD_PID_FILE" 2>/dev/null)"
     if [ -n "$DAEMON_PID" ] && [ -d "/proc/${DAEMON_PID}" ]; then
         # oom_score_adj range: -1000 to 1000
-        # Positive values make PrivStack easier to reclaim than SystemUI.
+        # Positive values make RKNnoVPN easier to reclaim than SystemUI.
         echo "$OOM_SCORE_ADJ" > "/proc/${DAEMON_PID}/oom_score_adj" 2>/dev/null
         if [ $? -eq 0 ]; then
             log_info "Set oom_score_adj=${OOM_SCORE_ADJ} for PID ${DAEMON_PID}"
@@ -321,7 +321,7 @@ if [ "$LAUNCH_RESULT" -eq 0 ]; then
 
         # Apply the same non-critical priority to sing-box if it exists.
         sleep 3
-        SINGBOX_PID="$(first_pid_by_cmd_path "${PRIVSTACK_DIR}/bin/sing-box" 2>/dev/null)"
+        SINGBOX_PID="$(first_pid_by_cmd_path "${RKNNOVPN_DIR}/bin/sing-box" 2>/dev/null)"
         if [ -n "$SINGBOX_PID" ] && [ -d "/proc/${SINGBOX_PID}" ]; then
             echo "$OOM_SCORE_ADJ" > "/proc/${SINGBOX_PID}/oom_score_adj" 2>/dev/null
             log_info "Set oom_score_adj=${OOM_SCORE_ADJ} for sing-box PID ${SINGBOX_PID}"
@@ -337,15 +337,15 @@ if [ "$LAUNCH_RESULT" -eq 0 ]; then
     # Final check after OOM adjustment
     DAEMON_PID="$(cat "$PRIVD_PID_FILE" 2>/dev/null)"
     if [ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
-        log_info "PrivStack daemon is running (PID ${DAEMON_PID})"
+        log_info "RKNnoVPN daemon is running (PID ${DAEMON_PID})"
         log_info "service.sh completed successfully"
     else
         log_error "Daemon PID ${DAEMON_PID} is no longer running"
-        log_error "Check logs at ${PRIVSTACK_DIR}/logs/privd.log"
+        log_error "Check logs at ${RKNNOVPN_DIR}/logs/privd.log"
         exit 1
     fi
 else
     log_error "Failed to launch daemon"
-    log_error "Check logs at ${PRIVSTACK_DIR}/logs/privd.log"
+    log_error "Check logs at ${RKNNOVPN_DIR}/logs/privd.log"
     exit 1
 fi

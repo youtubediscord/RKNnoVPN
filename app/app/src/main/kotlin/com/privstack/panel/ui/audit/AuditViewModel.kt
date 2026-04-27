@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.audit
+package com.rknnovpn.panel.ui.audit
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
@@ -6,16 +6,16 @@ import android.content.pm.PackageManager
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.privstack.panel.R
-import com.privstack.panel.advisor.AppCategory
-import com.privstack.panel.advisor.PlacementAdvisor
-import com.privstack.panel.advisor.PlacementRecommendation
-import com.privstack.panel.ipc.DaemonClientResult
-import com.privstack.panel.model.AuditCategory as DaemonAuditCategory
-import com.privstack.panel.model.AuditFinding as DaemonAuditFinding
-import com.privstack.panel.model.AuditReport as DaemonAuditReport
-import com.privstack.panel.model.Severity as DaemonSeverity
-import com.privstack.panel.repository.StatusRepository
+import com.rknnovpn.panel.R
+import com.rknnovpn.panel.advisor.AppCategory
+import com.rknnovpn.panel.advisor.PlacementAdvisor
+import com.rknnovpn.panel.advisor.PlacementRecommendation
+import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.model.AuditCategory as DaemonAuditCategory
+import com.rknnovpn.panel.model.AuditFinding as DaemonAuditFinding
+import com.rknnovpn.panel.model.AuditReport as DaemonAuditReport
+import com.rknnovpn.panel.model.Severity as DaemonSeverity
+import com.rknnovpn.panel.repository.StatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers

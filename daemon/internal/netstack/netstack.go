@@ -180,7 +180,7 @@ func (m Manager) CollectLeftovers() []string {
 			}
 			continue
 		}
-		if line := firstLineContaining(out, "PRIVSTACK"); line != "" {
+		if line := firstLineContaining(out, "RKNNOVPN"); line != "" {
 			add("%s %s rule remains: %s", spec.bin, spec.table, line)
 		}
 	}
@@ -360,8 +360,8 @@ func isMissingRouteTableOutput(output string) bool {
 }
 
 // RuleLineMatches reports whether an `ip rule show` line belongs to the
-// PrivStack fwmark/table contract. It intentionally avoids substring matches
-// so unrelated marks such as 0x20230 do not look like PrivStack leftovers.
+// RKNnoVPN fwmark/table contract. It intentionally avoids substring matches
+// so unrelated marks such as 0x20230 do not look like RKNnoVPN leftovers.
 func RuleLineMatches(line string, mark string, table string) bool {
 	fields := strings.Fields(strings.ToLower(line))
 	wantMark := strings.ToLower(strings.TrimSpace(mark))

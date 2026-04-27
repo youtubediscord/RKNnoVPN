@@ -14,7 +14,7 @@
 - Fixed APK compatibility gating so a damaged `current` release catalog is shown as a repair warning instead of blocking start/restart when APK, daemon, and module versions match.
 - Fixed Settings log sharing and diagnostic copy actions by using explicit one-shot UI events, Android clipboard APIs, and visible feedback.
 - Rejected localhost TPROXY destinations inside the rendered sing-box route to avoid self-looping listener probes.
-- Made module updates boot-safe by default: fresh configs no longer autostart, upgrades set the manual start guard until the app starts the proxy, boot cleanup only runs when stale runtime markers exist, and PrivStack workers no longer get stronger OOM priority than SystemUI.
+- Made module updates boot-safe by default: fresh configs no longer autostart, upgrades set the manual start guard until the app starts the proxy, boot cleanup only runs when stale runtime markers exist, and RKNnoVPN workers no longer get stronger OOM priority than SystemUI.
 - Hardened release catalog updates so a stale non-symlink `current` directory is moved aside and replaced with a valid release symlink in both module install and in-app update flows.
 
 ## v1.7.1
@@ -39,7 +39,7 @@
 
 - Split hard runtime readiness from soft DNS and egress diagnostics so cold-start DNS timeouts leave the runtime connected but degraded.
 - Added deterministic readiness/operational diagnostics and clearer node-test reasons for runtime, proxy DNS, and HTTP helper failures.
-- Added in-app display and sharing for `/data/adb/privstack/logs/privd.log` and `/data/adb/privstack/logs/sing-box.log`.
+- Added in-app display and sharing for `/data/adb/rknnovpn/logs/privd.log` and `/data/adb/rknnovpn/logs/sing-box.log`.
 
 ## v1.6.3
 

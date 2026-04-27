@@ -169,16 +169,16 @@ func TestValidateModuleStagingAcceptsCompleteBundle(t *testing.T) {
 		"scripts/iptables.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
-		"scripts/lib/privstack_env.sh",
-		"scripts/lib/privstack_install.sh",
-		"scripts/lib/privstack_installer_flow.sh",
-		"scripts/lib/privstack_netstack.sh",
-		"scripts/lib/privstack_iptables_rules.sh",
+		"scripts/lib/rknnovpn_env.sh",
+		"scripts/lib/rknnovpn_install.sh",
+		"scripts/lib/rknnovpn_installer_flow.sh",
+		"scripts/lib/rknnovpn_netstack.sh",
+		"scripts/lib/rknnovpn_iptables_rules.sh",
 		"defaults/config.json",
 	} {
 		writeTestFile(t, filepath.Join(staging, path), 0644)
 	}
-	writeTestFile(t, filepath.Join(staging, "module.prop"), 0644, "id=privstack\nversion=v1.6.4\nversionCode=164\n")
+	writeTestFile(t, filepath.Join(staging, "module.prop"), 0644, "id=rknnovpn\nversion=v1.6.4\nversionCode=164\n")
 
 	if err := validateModuleStaging(staging, binDir); err != nil {
 		t.Fatalf("expected complete staged module to pass: %v", err)
@@ -204,11 +204,11 @@ func TestValidateModuleStagingRejectsBadModuleProp(t *testing.T) {
 		"scripts/iptables.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
-		"scripts/lib/privstack_env.sh",
-		"scripts/lib/privstack_install.sh",
-		"scripts/lib/privstack_installer_flow.sh",
-		"scripts/lib/privstack_netstack.sh",
-		"scripts/lib/privstack_iptables_rules.sh",
+		"scripts/lib/rknnovpn_env.sh",
+		"scripts/lib/rknnovpn_install.sh",
+		"scripts/lib/rknnovpn_installer_flow.sh",
+		"scripts/lib/rknnovpn_netstack.sh",
+		"scripts/lib/rknnovpn_iptables_rules.sh",
 		"defaults/config.json",
 	} {
 		writeTestFile(t, filepath.Join(staging, path), 0644)
@@ -224,7 +224,7 @@ func TestPreflightModuleUpdateRejectsIncompleteZip(t *testing.T) {
 	dataDir := t.TempDir()
 	zipPath := filepath.Join(dataDir, "module.zip")
 	writeZipForTest(t, zipPath, map[string]zipTestFile{
-		"module.prop": {mode: 0644, body: "id=privstack\nversion=v1.7.4\nversionCode=174\n"},
+		"module.prop": {mode: 0644, body: "id=rknnovpn\nversion=v1.7.4\nversionCode=174\n"},
 	})
 
 	if _, err := PreflightModuleUpdate(zipPath, dataDir); err == nil {
@@ -266,16 +266,16 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		"scripts/iptables.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
-		"scripts/lib/privstack_env.sh",
-		"scripts/lib/privstack_install.sh",
-		"scripts/lib/privstack_installer_flow.sh",
-		"scripts/lib/privstack_netstack.sh",
-		"scripts/lib/privstack_iptables_rules.sh",
+		"scripts/lib/rknnovpn_env.sh",
+		"scripts/lib/rknnovpn_install.sh",
+		"scripts/lib/rknnovpn_installer_flow.sh",
+		"scripts/lib/rknnovpn_netstack.sh",
+		"scripts/lib/rknnovpn_iptables_rules.sh",
 		"defaults/config.json",
 	} {
 		writeTestFile(t, filepath.Join(staging, path), 0644)
 	}
-	writeTestFile(t, filepath.Join(staging, "module.prop"), 0644, "id=privstack\nversion=V1.6.4\nversionCode=164\n")
+	writeTestFile(t, filepath.Join(staging, "module.prop"), 0644, "id=rknnovpn\nversion=V1.6.4\nversionCode=164\n")
 
 	releaseDir, err := prepareVersionedRelease(staging, binDir, dataDir, "V1.6.4")
 	if err != nil {
@@ -288,11 +288,11 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		filepath.Join(releaseDir, "module", "module.prop"),
 		filepath.Join(releaseDir, "module", "OWNERSHIP.md"),
 		filepath.Join(releaseDir, "module", "scripts", "rescue_reset.sh"),
-		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_env.sh"),
-		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_install.sh"),
-		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_installer_flow.sh"),
-		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_netstack.sh"),
-		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_iptables_rules.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "rknnovpn_env.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "rknnovpn_install.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "rknnovpn_installer_flow.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "rknnovpn_netstack.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "rknnovpn_iptables_rules.sh"),
 		filepath.Join(releaseDir, "install-manifest.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
@@ -329,11 +329,11 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		"module/module.prop",
 		"module/OWNERSHIP.md",
 		"module/scripts/rescue_reset.sh",
-		"module/scripts/lib/privstack_env.sh",
-		"module/scripts/lib/privstack_install.sh",
-		"module/scripts/lib/privstack_installer_flow.sh",
-		"module/scripts/lib/privstack_netstack.sh",
-		"module/scripts/lib/privstack_iptables_rules.sh",
+		"module/scripts/lib/rknnovpn_env.sh",
+		"module/scripts/lib/rknnovpn_install.sh",
+		"module/scripts/lib/rknnovpn_installer_flow.sh",
+		"module/scripts/lib/rknnovpn_netstack.sh",
+		"module/scripts/lib/rknnovpn_iptables_rules.sh",
 	} {
 		got := manifest.Files[rel]
 		if got == "" {
@@ -389,7 +389,7 @@ func TestStopCurrentProxyUsesCanonicalRescueReset(t *testing.T) {
 	dataDir := t.TempDir()
 	logPath := filepath.Join(dataDir, "called.txt")
 	scriptPath := filepath.Join(dataDir, "scripts", "rescue_reset.sh")
-	writeTestFile(t, scriptPath, 0755, "#!/bin/sh\nprintf '%s:%s\\n' \"$1\" \"$PRIVSTACK_DIR\" > \"$PRIVSTACK_DIR/called.txt\"\n")
+	writeTestFile(t, scriptPath, 0755, "#!/bin/sh\nprintf '%s:%s\\n' \"$1\" \"$RKNNOVPN_DIR\" > \"$RKNNOVPN_DIR/called.txt\"\n")
 
 	if err := stopCurrentProxy(dataDir); err != nil {
 		t.Fatal(err)
@@ -542,18 +542,18 @@ func writeCompleteModuleZipForTest(t *testing.T, zipPath string, version string)
 		"scripts/iptables.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
-		"scripts/lib/privstack_env.sh",
-		"scripts/lib/privstack_install.sh",
-		"scripts/lib/privstack_installer_flow.sh",
-		"scripts/lib/privstack_netstack.sh",
-		"scripts/lib/privstack_iptables_rules.sh",
+		"scripts/lib/rknnovpn_env.sh",
+		"scripts/lib/rknnovpn_install.sh",
+		"scripts/lib/rknnovpn_installer_flow.sh",
+		"scripts/lib/rknnovpn_netstack.sh",
+		"scripts/lib/rknnovpn_iptables_rules.sh",
 		"defaults/config.json",
 	} {
 		files[path] = zipTestFile{mode: 0644, body: "test\n"}
 	}
 	files["module.prop"] = zipTestFile{
 		mode: 0644,
-		body: "id=privstack\nversion=" + version + "\nversionCode=174\n",
+		body: "id=rknnovpn\nversion=" + version + "\nversionCode=174\n",
 	}
 	writeZipForTest(t, zipPath, files)
 }

@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # ============================================================================
-# routing.sh — Policy routing setup for PrivStack
+# routing.sh — Policy routing setup for RKNnoVPN
 # ============================================================================
 # Creates the ip-rule and ip-route entries that make TPROXY work.
 #
@@ -22,13 +22,13 @@
 
 set -eu
 
-TAG="privstack:routing"
+TAG="rknnovpn:routing"
 SCRIPT_DIR="${0%/*}"
-if [ -f "${SCRIPT_DIR}/lib/privstack_env.sh" ]; then
-    . "${SCRIPT_DIR}/lib/privstack_env.sh"
+if [ -f "${SCRIPT_DIR}/lib/rknnovpn_env.sh" ]; then
+    . "${SCRIPT_DIR}/lib/rknnovpn_env.sh"
 fi
-if [ -f "${SCRIPT_DIR}/lib/privstack_netstack.sh" ]; then
-    . "${SCRIPT_DIR}/lib/privstack_netstack.sh"
+if [ -f "${SCRIPT_DIR}/lib/rknnovpn_netstack.sh" ]; then
+    . "${SCRIPT_DIR}/lib/rknnovpn_netstack.sh"
 fi
 
 FWMARK="${FWMARK:-0x2023}"
@@ -42,8 +42,8 @@ log() { /system/bin/log -t "$TAG" -p i "$*"; }
 start() {
     log "setting up policy routing (mark=$FWMARK, table=$ROUTE_TABLE/$ROUTE_TABLE_V6)"
 
-    if command -v privstack_delete_policy_routes >/dev/null 2>&1; then
-        privstack_delete_policy_routes
+    if command -v rknnovpn_delete_policy_routes >/dev/null 2>&1; then
+        rknnovpn_delete_policy_routes
     else
         ip rule del fwmark "$FWMARK" table "$ROUTE_TABLE" 2>/dev/null || true
         ip -6 rule del fwmark "$FWMARK" table "$ROUTE_TABLE_V6" 2>/dev/null || true
@@ -83,8 +83,8 @@ start() {
 stop() {
     log "tearing down policy routing"
 
-    if command -v privstack_delete_policy_routes >/dev/null 2>&1; then
-        privstack_delete_policy_routes
+    if command -v rknnovpn_delete_policy_routes >/dev/null 2>&1; then
+        rknnovpn_delete_policy_routes
     else
         ip rule del fwmark "$FWMARK" table "$ROUTE_TABLE" 2>/dev/null || true
         ip route flush table "$ROUTE_TABLE" 2>/dev/null || true

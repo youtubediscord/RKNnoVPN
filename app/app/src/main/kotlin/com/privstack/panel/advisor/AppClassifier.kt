@@ -1,4 +1,4 @@
-package com.privstack.panel.advisor
+package com.rknnovpn.panel.advisor
 
 import javax.inject.Inject
 import javax.inject.Singleton

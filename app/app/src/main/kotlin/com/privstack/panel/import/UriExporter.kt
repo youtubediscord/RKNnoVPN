@@ -1,8 +1,8 @@
-package com.privstack.panel.`import`
+package com.rknnovpn.panel.`import`
 
 import android.util.Base64
-import com.privstack.panel.model.Node
-import com.privstack.panel.model.Protocol
+import com.rknnovpn.panel.model.Node
+import com.rknnovpn.panel.model.Protocol
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject

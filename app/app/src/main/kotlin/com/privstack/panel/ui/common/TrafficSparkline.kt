@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.common
+package com.rknnovpn.panel.ui.common
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth

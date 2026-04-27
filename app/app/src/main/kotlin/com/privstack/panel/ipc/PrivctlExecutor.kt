@@ -1,4 +1,4 @@
-package com.privstack.panel.ipc
+package com.rknnovpn.panel.ipc
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
@@ -45,7 +45,7 @@ import kotlin.coroutines.resume
 @Singleton
 class PrivctlExecutor @Inject constructor() {
 
-    private val privctlPath = "/data/adb/privstack/bin/privctl"
+    private val privctlPath = "/data/adb/rknnovpn/bin/privctl"
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -99,7 +99,7 @@ class PrivctlExecutor @Inject constructor() {
                 paramsJson.toByteArray(StandardCharsets.UTF_8).size > INLINE_PARAMS_LIMIT
             val commandString = when {
                 params.isEmpty() -> "$privctlPath $method"
-                useStdin -> "PRIVSTACK_STDIN_PARAMS=1 $privctlPath $method"
+                useStdin -> "RKNNOVPN_STDIN_PARAMS=1 $privctlPath $method"
                 else -> "$privctlPath $method ${shellQuote(paramsJson)}"
             }
             val command = arrayOf(

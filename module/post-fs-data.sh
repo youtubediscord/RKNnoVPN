@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# PrivStack — post-fs-data.sh
+# RKNnoVPN — post-fs-data.sh
 # Runs early in boot (blocking, before zygote).
 # Keep this FAST — heavy work goes in service.sh.
 # POSIX sh compatible (busybox ash).
@@ -9,12 +9,12 @@
 # ============================================================================
 
 MODDIR="${0%/*}"
-PRIVSTACK_DIR="/data/adb/privstack"
-PRIVSTACK_GID=23333
-TAG="privstack:post-fs-data"
+RKNNOVPN_DIR="/data/adb/rknnovpn"
+RKNNOVPN_GID=23333
+TAG="rknnovpn:post-fs-data"
 
-if [ -f "${MODDIR}/scripts/lib/privstack_env.sh" ]; then
-    . "${MODDIR}/scripts/lib/privstack_env.sh"
+if [ -f "${MODDIR}/scripts/lib/rknnovpn_env.sh" ]; then
+    . "${MODDIR}/scripts/lib/rknnovpn_env.sh"
 fi
 
 # Subdirectories that must exist
@@ -43,7 +43,7 @@ log_error() {
 log_info "Starting post-fs-data initialization"
 
 for subdir in $SUBDIRS; do
-    target="${PRIVSTACK_DIR}/${subdir}"
+    target="${RKNNOVPN_DIR}/${subdir}"
     if [ ! -d "$target" ]; then
         mkdir -p "$target" 2>/dev/null
         if [ -d "$target" ]; then
@@ -59,22 +59,22 @@ done
 # ============================================================================
 
 # Binaries: 0750 root:23333
-if [ -d "${PRIVSTACK_DIR}/bin" ]; then
-    chown 0:${PRIVSTACK_GID} "${PRIVSTACK_DIR}/bin" 2>/dev/null
-    chmod 0750 "${PRIVSTACK_DIR}/bin" 2>/dev/null
-    for f in "${PRIVSTACK_DIR}/bin"/*; do
+if [ -d "${RKNNOVPN_DIR}/bin" ]; then
+    chown 0:${RKNNOVPN_GID} "${RKNNOVPN_DIR}/bin" 2>/dev/null
+    chmod 0750 "${RKNNOVPN_DIR}/bin" 2>/dev/null
+    for f in "${RKNNOVPN_DIR}/bin"/*; do
         if [ -f "$f" ]; then
-            chown 0:${PRIVSTACK_GID} "$f" 2>/dev/null
+            chown 0:${RKNNOVPN_GID} "$f" 2>/dev/null
             chmod 0750 "$f" 2>/dev/null
         fi
     done
 fi
 
 # Config: 0600 root:root (sensitive)
-if [ -d "${PRIVSTACK_DIR}/config" ]; then
-    chown 0:0 "${PRIVSTACK_DIR}/config" 2>/dev/null
-    chmod 0700 "${PRIVSTACK_DIR}/config" 2>/dev/null
-    for f in "${PRIVSTACK_DIR}/config"/*; do
+if [ -d "${RKNNOVPN_DIR}/config" ]; then
+    chown 0:0 "${RKNNOVPN_DIR}/config" 2>/dev/null
+    chmod 0700 "${RKNNOVPN_DIR}/config" 2>/dev/null
+    for f in "${RKNNOVPN_DIR}/config"/*; do
         if [ -f "$f" ]; then
             chown 0:0 "$f" 2>/dev/null
             chmod 0600 "$f" 2>/dev/null
@@ -83,10 +83,10 @@ if [ -d "${PRIVSTACK_DIR}/config" ]; then
 fi
 
 # Scripts: 0755 root:root
-if [ -d "${PRIVSTACK_DIR}/scripts" ]; then
-    chown 0:0 "${PRIVSTACK_DIR}/scripts" 2>/dev/null
-    chmod 0755 "${PRIVSTACK_DIR}/scripts" 2>/dev/null
-    for f in "${PRIVSTACK_DIR}/scripts"/*; do
+if [ -d "${RKNNOVPN_DIR}/scripts" ]; then
+    chown 0:0 "${RKNNOVPN_DIR}/scripts" 2>/dev/null
+    chmod 0755 "${RKNNOVPN_DIR}/scripts" 2>/dev/null
+    for f in "${RKNNOVPN_DIR}/scripts"/*; do
         if [ -f "$f" ]; then
             chown 0:0 "$f" 2>/dev/null
             chmod 0755 "$f" 2>/dev/null
@@ -95,13 +95,13 @@ if [ -d "${PRIVSTACK_DIR}/scripts" ]; then
 fi
 
 # Run: 0750 root:23333
-chown 0:${PRIVSTACK_GID} "${PRIVSTACK_DIR}/run" 2>/dev/null
-chmod 0750 "${PRIVSTACK_DIR}/run" 2>/dev/null
+chown 0:${RKNNOVPN_GID} "${RKNNOVPN_DIR}/run" 2>/dev/null
+chmod 0750 "${RKNNOVPN_DIR}/run" 2>/dev/null
 
 # Logs: 0700 root:root — may contain proxy endpoints and diagnostics.
-chown 0:0 "${PRIVSTACK_DIR}/logs" 2>/dev/null
-chmod 0700 "${PRIVSTACK_DIR}/logs" 2>/dev/null
-for f in "${PRIVSTACK_DIR}/logs"/*; do
+chown 0:0 "${RKNNOVPN_DIR}/logs" 2>/dev/null
+chmod 0700 "${RKNNOVPN_DIR}/logs" 2>/dev/null
+for f in "${RKNNOVPN_DIR}/logs"/*; do
     [ -f "$f" ] && chmod 0600 "$f" 2>/dev/null
 done
 
@@ -155,7 +155,7 @@ log_info "rp_filter disabled for TPROXY"
 MISSING_BIN=0
 
 for bin_name in sing-box privd; do
-    bin_path="${PRIVSTACK_DIR}/bin/${bin_name}"
+    bin_path="${RKNNOVPN_DIR}/bin/${bin_name}"
     if [ ! -f "$bin_path" ]; then
         log_warn "Binary missing: ${bin_path}"
         MISSING_BIN=1

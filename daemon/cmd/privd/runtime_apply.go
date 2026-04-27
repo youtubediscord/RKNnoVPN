@@ -246,7 +246,7 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 	chainProxyPorts, chainProxyUIDs := core.BuildChainedProxyProtectionEnv(cfg)
 
 	return map[string]string{
-		"PRIVSTACK_DIR":     dataDir,
+		"RKNNOVPN_DIR":     dataDir,
 		"CORE_GID":          strconv.Itoa(gid),
 		"TPROXY_PORT":       strconv.Itoa(tproxyPort),
 		"DNS_PORT":          strconv.Itoa(dnsPort),

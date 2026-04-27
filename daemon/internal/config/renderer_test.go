@@ -615,7 +615,7 @@ func TestRenderAppGroupRouteRules(t *testing.T) {
 	cfg.Node.Address = ""
 	cfg.Node.UUID = ""
 	cfg.Routing.CustomDirect = []string{"example.org"}
-	cfg.Routing.AlwaysDirectApps = []string{"com.privstack.panel"}
+	cfg.Routing.AlwaysDirectApps = []string{"com.rknnovpn.panel"}
 	cfg.Apps.AppGroups = map[string]string{
 		"com.chat.app":  "Europe",
 		"com.video.app": "Europe",
@@ -664,7 +664,7 @@ func TestRenderAppGroupRouteRules(t *testing.T) {
 		rule := rawRule.(map[string]any)
 		switch rule["outbound"] {
 		case "direct":
-			if packages, ok := rule["package_name"].([]any); ok && len(packages) == 1 && packages[0] == "com.privstack.panel" {
+			if packages, ok := rule["package_name"].([]any); ok && len(packages) == 1 && packages[0] == "com.rknnovpn.panel" {
 				directRule = rule
 			}
 		case "group-europe":

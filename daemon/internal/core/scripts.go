@@ -27,7 +27,7 @@ var SelfTestProtectedPackages = []string{
 }
 
 var builtInAlwaysDirectExact = map[string]bool{
-	// Sensitive Russian apps that should never be routed through PrivStack.
+	// Sensitive Russian apps that should never be routed through RKNnoVPN.
 	"ru.oneme.app":                   true, // MAX
 	"ru.vtb24.mobilebanking.android": true,
 	"com.avito.android":              true,
@@ -194,11 +194,11 @@ func ExecScript(scriptPath string, command string, env map[string]string) error 
 // ExecIptables is a convenience wrapper that runs a single iptables command
 // with the -w (wait-for-lock) flag so concurrent callers do not race.
 //
-//	ExecIptables("-t", "mangle", "-C", "PREROUTING", "-j", "PRIVSTACK_PRE")
+//	ExecIptables("-t", "mangle", "-C", "PREROUTING", "-j", "RKNNOVPN_PRE")
 //
 // is equivalent to:
 //
-//	iptables -w 100 -t mangle -C PREROUTING -j PRIVSTACK_PRE
+//	iptables -w 100 -t mangle -C PREROUTING -j RKNNOVPN_PRE
 func ExecIptables(args ...string) error {
 	fullArgs := append([]string{"-w", "100"}, args...)
 	cmd := exec.Command("iptables", fullArgs...)
@@ -259,7 +259,7 @@ func ResolvePackageUIDs(packages []string) string {
 }
 
 // ResolveAlwaysDirectUIDs resolves user-configured and built-in packages that
-// must bypass PrivStack before TPROXY/DNS interception.
+// must bypass RKNnoVPN before TPROXY/DNS interception.
 func ResolveAlwaysDirectUIDs(packages []string) string {
 	return ResolveAlwaysDirectUIDsDetailed(packages).UIDString
 }
@@ -279,7 +279,7 @@ func ResolvePackageUIDsDetailed(packages []string) PackageUIDResolution {
 }
 
 // ResolveAlwaysDirectUIDsDetailed resolves user-configured and built-in
-// packages that must bypass PrivStack, with structured diagnostics.
+// packages that must bypass RKNnoVPN, with structured diagnostics.
 func ResolveAlwaysDirectUIDsDetailed(packages []string) PackageUIDResolution {
 	userPackages := packageSet(packages)
 	return resolvePackageUIDsFromSources(userPackages.values(), func(pkgName string) bool {

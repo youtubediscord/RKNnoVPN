@@ -1,4 +1,4 @@
-# PrivStack — Local Build Commands
+# RKNnoVPN — Local Build Commands
 # Requires: Go 1.22+, Android SDK, JDK 17
 
 SINGBOX_VERSION ?= stable
@@ -7,8 +7,8 @@ VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 VERSION_CODE := $(shell echo "$(VERSION)" | awk -F. '{gsub(/^v/,"",$$1); printf "%d\n", $$1 * 1000 + $$2 * 100 + $$3}')
 OUT_DIR := out
 MODULE_DIR := module
-LAB_APK ?= $(OUT_DIR)/privstack-$(VERSION)-panel.apk
-LAB_MODULE ?= $(OUT_DIR)/privstack-$(VERSION)-module.zip
+LAB_APK ?= $(OUT_DIR)/rknnovpn-$(VERSION)-panel.apk
+LAB_MODULE ?= $(OUT_DIR)/rknnovpn-$(VERSION)-module.zip
 SINGBOX_SRC_DIR := /tmp/sing-box-$(SINGBOX_RESOLVED_VERSION)
 SINGBOX_TAGS := with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0
 SINGBOX_LDFLAGS := -X 'github.com/sagernet/sing-box/constant.Version=$(SINGBOX_RESOLVED_VERSION)' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0 -s -w -buildid=
@@ -105,16 +105,16 @@ module: daemon singbox
 	chmod 755 $(MODULE_DIR)/binaries/armv7/*
 	sed -i "s/^version=.*/version=$(VERSION)/" $(MODULE_DIR)/module.prop
 	sed -i "s/^versionCode=.*/versionCode=$(VERSION_CODE)/" $(MODULE_DIR)/module.prop
-	cd $(MODULE_DIR) && zip -r ../$(OUT_DIR)/privstack-$(VERSION)-module.zip . \
+	cd $(MODULE_DIR) && zip -r ../$(OUT_DIR)/rknnovpn-$(VERSION)-module.zip . \
 		-x "*.git*" "*.DS_Store"
-	@echo "  -> $(OUT_DIR)/privstack-$(VERSION)-module.zip"
+	@echo "  -> $(OUT_DIR)/rknnovpn-$(VERSION)-module.zip"
 
 # === Android APK ===
 apk:
 	@echo "=== Building APK ==="
 	cd app && ./gradlew assembleDebug --no-daemon
-	cp app/app/build/outputs/apk/debug/*.apk $(OUT_DIR)/privstack-$(VERSION)-panel.apk
-	@echo "  -> $(OUT_DIR)/privstack-$(VERSION)-panel.apk"
+	cp app/app/build/outputs/apk/debug/*.apk $(OUT_DIR)/rknnovpn-$(VERSION)-panel.apk
+	@echo "  -> $(OUT_DIR)/rknnovpn-$(VERSION)-panel.apk"
 
 # === Test daemon (host arch, for development) ===
 daemon-host:

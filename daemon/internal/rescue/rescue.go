@@ -6,7 +6,7 @@
 //  2. Re-apply iptables + DNS rules
 //  3. Full teardown + cold start
 //
-// If all strategies are exhausted, Rollback tears down PrivStack-owned
+// If all strategies are exhausted, Rollback tears down RKNnoVPN-owned
 // runtime state without restoring stale whole-table iptables backups.
 package rescue
 
@@ -150,7 +150,7 @@ func (r *RescueManager) Attempt(canProceed RecoveryGate) error {
 	return nil
 }
 
-// Rollback tears down all PrivStack-owned network state. This is the last
+// Rollback tears down all RKNnoVPN-owned network state. This is the last
 // resort when all recovery strategies have failed.
 func (r *RescueManager) Rollback() error {
 	r.mu.Lock()
@@ -158,7 +158,7 @@ func (r *RescueManager) Rollback() error {
 
 	r.logger.Println("rollback: tearing down all proxy state")
 
-	// 1. Forced stop (DNS, PrivStack-only iptables cleanup, sing-box).
+	// 1. Forced stop (DNS, RKNnoVPN-only iptables cleanup, sing-box).
 	if err := r.core.RescueReset(); err != nil {
 		r.logger.Printf("rollback: stop failed: %v", err)
 		return fmt.Errorf("rescue: rollback stop: %w", err)
@@ -169,7 +169,7 @@ func (r *RescueManager) Rollback() error {
 		r.logger.Printf("rollback: rescue cleanup script failed: %v", err)
 	}
 
-	// 3. Explicitly flush PRIVSTACK chains as a final safety net.
+	// 3. Explicitly flush RKNNOVPN chains as a final safety net.
 	r.flushPrivstackChains()
 	_ = os.Remove(filepath.Join(r.dataDir, "run", "reset.lock"))
 
@@ -319,7 +319,7 @@ func (r *RescueManager) scriptEnv() map[string]string {
 	chainProxyPorts, chainProxyUIDs := core.BuildChainedProxyProtectionEnv(r.cfg)
 
 	return map[string]string{
-		"PRIVSTACK_DIR":     r.dataDir,
+		"RKNNOVPN_DIR":     r.dataDir,
 		"CORE_GID":          fmt.Sprintf("%d", gid),
 		"TPROXY_PORT":       fmt.Sprintf("%d", tproxyPort),
 		"DNS_PORT":          fmt.Sprintf("%d", dnsPort),
@@ -343,18 +343,18 @@ func (r *RescueManager) scriptEnv() map[string]string {
 	}
 }
 
-// flushPrivstackChains removes all PRIVSTACK-prefixed chains from
+// flushPrivstackChains removes all RKNNOVPN-prefixed chains from
 // iptables as a safety net during rollback.
 func (r *RescueManager) flushPrivstackChains() {
 	mangleChains := []string{
-		"PRIVSTACK_PRE",
-		"PRIVSTACK_OUT",
-		"PRIVSTACK_APP",
-		"PRIVSTACK_BYPASS",
-		"PRIVSTACK_DIVERT",
+		"RKNNOVPN_PRE",
+		"RKNNOVPN_OUT",
+		"RKNNOVPN_APP",
+		"RKNNOVPN_BYPASS",
+		"RKNNOVPN_DIVERT",
 	}
-	natChains4 := []string{"PRIVSTACK_DNS", "PRIVSTACK_DNS_NAT"}
-	natChains6 := []string{"PRIVSTACK_DNS", "PRIVSTACK_DNS_NAT6"}
+	natChains4 := []string{"RKNNOVPN_DNS", "RKNNOVPN_DNS_NAT"}
+	natChains6 := []string{"RKNNOVPN_DNS", "RKNNOVPN_DNS_NAT6"}
 
 	for _, chain := range mangleChains {
 		flushChain(core.ExecIptables, "mangle", chain)

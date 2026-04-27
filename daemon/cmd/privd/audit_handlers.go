@@ -164,7 +164,7 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 				"Интерфейсы tun/wg/tap/ppp/ipsec являются прямым детектируемым признаком VPN-подобного стека.",
 				"HIGH",
 				"LEAK",
-				"Не запускайте TUN/WireGuard-интерфейсы вместе с PrivStack; outbound должен жить внутри core.",
+				"Не запускайте TUN/WireGuard-интерфейсы вместе с RKNnoVPN; outbound должен жить внутри core.",
 				line,
 			)
 		}
@@ -236,12 +236,12 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 		if !localPortProtectionPresent(cfg) {
 			appendFinding(
 				"LOCAL_PORT_PROTECTION_MISSING",
-				"Локальные порты PrivStack защищены не полностью",
+				"Локальные порты RKNnoVPN защищены не полностью",
 				"Обычные приложения могут получить доступ к TPROXY-, DNS-, API-, SOCKS- или HTTP-helper портам.",
 				"HIGH",
 				"LEAK",
 				"Повторно примените правила iptables и проверьте DROP-правила для TPROXY, DNS, API, SOCKS и HTTP-helper портов.",
-				"iptables mangle PRIVSTACK_OUT",
+				"iptables mangle RKNNOVPN_OUT",
 			)
 		}
 	}

@@ -1,4 +1,4 @@
-# RKNnoVPN / PrivStack
+# RKNnoVPN / RKNnoVPN
 
 Прозрачный прокси для rooted Android без `VpnService`, TUN-интерфейса и VPN-иконки.
 
@@ -39,8 +39,8 @@ APK вызывает `privctl` через `su`. `privctl` общается с ro
 ## Быстрый старт
 
 1. Скачайте свежий релиз:
-   - `privstack-vX.X.X-module.zip`
-   - `privstack-vX.X.X-panel.apk`
+   - `rknnovpn-vX.X.X-module.zip`
+   - `rknnovpn-vX.X.X-panel.apk`
 
 2. Прошейте module ZIP через Magisk Manager / KernelSU Manager / APatch.
 
@@ -169,31 +169,31 @@ Workflow:
 Проверка состояния:
 
 ```sh
-su -c '/data/adb/privstack/bin/privctl backend.status'
+su -c '/data/adb/rknnovpn/bin/privctl backend.status'
 ```
 
 Запуск:
 
 ```sh
-su -c '/data/adb/privstack/bin/privctl backend.start'
+su -c '/data/adb/rknnovpn/bin/privctl backend.start'
 ```
 
 Логи core:
 
 ```sh
-su -c 'cat /data/adb/privstack/logs/sing-box.log'
+su -c 'cat /data/adb/rknnovpn/logs/sing-box.log'
 ```
 
 Логи daemon:
 
 ```sh
-su -c '/data/adb/privstack/bin/privctl logs {"lines":100}'
+su -c '/data/adb/rknnovpn/bin/privctl logs {"lines":100}'
 ```
 
 Проверка всех nodes:
 
 ```sh
-su -c '/data/adb/privstack/bin/privctl diagnostics.testNodes'
+su -c '/data/adb/rknnovpn/bin/privctl diagnostics.testNodes'
 ```
 
 Если `sing-box` упал до открытия порта `10853`, ошибка в приложении должна содержать хвост `sing-box.log`.

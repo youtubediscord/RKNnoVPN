@@ -181,7 +181,7 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 
 		if moduleExists {
 			markStep("update-install-module", "running", "MODULE_INSTALLING", filepath.Base(p.ModulePath))
-			moduleDir := "/data/adb/modules/privstack"
+			moduleDir := "/data/adb/modules/rknnovpn"
 			if err := updater.InstallModuleUpdate(p.ModulePath, d.dataDir, moduleDir); err != nil {
 				if wasRunning {
 					d.restoreCurrentRuntimeAfterFailedUpdate()

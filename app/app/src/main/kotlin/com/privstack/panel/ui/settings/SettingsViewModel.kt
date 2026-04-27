@@ -1,21 +1,21 @@
-package com.privstack.panel.ui.settings
+package com.rknnovpn.panel.ui.settings
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.privstack.panel.BuildConfig
-import com.privstack.panel.i18n.UserMessageFormatter
-import com.privstack.panel.ipc.DaemonClient
-import com.privstack.panel.ipc.DaemonClientResult
-import com.privstack.panel.model.ConnectionState
-import com.privstack.panel.model.DaemonStatus
-import com.privstack.panel.model.DnsIpv6Mode
-import com.privstack.panel.model.FallbackPolicy
-import com.privstack.panel.model.ProfileConfig
-import com.privstack.panel.model.UpdateInstallState
-import com.privstack.panel.repository.CommandOutcome
-import com.privstack.panel.repository.ProfileRepository
-import com.privstack.panel.repository.StatusRepository
+import com.rknnovpn.panel.BuildConfig
+import com.rknnovpn.panel.i18n.UserMessageFormatter
+import com.rknnovpn.panel.ipc.DaemonClient
+import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.model.ConnectionState
+import com.rknnovpn.panel.model.DaemonStatus
+import com.rknnovpn.panel.model.DnsIpv6Mode
+import com.rknnovpn.panel.model.FallbackPolicy
+import com.rknnovpn.panel.model.ProfileConfig
+import com.rknnovpn.panel.model.UpdateInstallState
+import com.rknnovpn.panel.repository.CommandOutcome
+import com.rknnovpn.panel.repository.ProfileRepository
+import com.rknnovpn.panel.repository.StatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -146,10 +146,10 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(routingMode = mode, errorMessage = null) }
         viewModelScope.launch {
             val profileMode = when (mode) {
-                RoutingMode.GLOBAL -> com.privstack.panel.model.RoutingMode.PROXY_ALL
-                RoutingMode.WHITELIST -> com.privstack.panel.model.RoutingMode.PER_APP
-                RoutingMode.BYPASS -> com.privstack.panel.model.RoutingMode.PER_APP_BYPASS
-                RoutingMode.DIRECT -> com.privstack.panel.model.RoutingMode.DIRECT
+                RoutingMode.GLOBAL -> com.rknnovpn.panel.model.RoutingMode.PROXY_ALL
+                RoutingMode.WHITELIST -> com.rknnovpn.panel.model.RoutingMode.PER_APP
+                RoutingMode.BYPASS -> com.rknnovpn.panel.model.RoutingMode.PER_APP_BYPASS
+                RoutingMode.DIRECT -> com.rknnovpn.panel.model.RoutingMode.DIRECT
             }
             val ok = profileRepository.updateConfig { config ->
                 config.copy(routing = config.routing.copy(mode = profileMode))
@@ -263,7 +263,7 @@ class SettingsViewModel @Inject constructor(
         val state = _uiState.value
         if (state.remoteDnsUrl.isBlank() || state.directDnsUrl.isBlank() || state.bootstrapDnsIp.isBlank()) {
             _uiState.update {
-                it.copy(errorMessage = messages.get(com.privstack.panel.R.string.dns_settings_required))
+                it.copy(errorMessage = messages.get(com.rknnovpn.panel.R.string.dns_settings_required))
             }
             return
         }
@@ -282,7 +282,7 @@ class SettingsViewModel @Inject constructor(
         val url = _uiState.value.urlTestUrl.trim()
         if (url.isBlank()) {
             _uiState.update {
-                it.copy(errorMessage = messages.get(com.privstack.panel.R.string.url_test_endpoint_required))
+                it.copy(errorMessage = messages.get(com.rknnovpn.panel.R.string.url_test_endpoint_required))
             }
             return
         }
@@ -360,7 +360,7 @@ class SettingsViewModel @Inject constructor(
         if (_uiState.value.runtimeActionActive) return
         _uiState.update {
             it.copy(
-                daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_restarting),
+                daemonStatusText = messages.get(com.rknnovpn.panel.R.string.daemon_status_restarting),
                 errorMessage = null,
                 lastResetSummary = null,
             )
@@ -370,14 +370,14 @@ class SettingsViewModel @Inject constructor(
                 is CommandOutcome.Success -> {
                     Log.d(TAG, "Backend restart succeeded")
                     _uiState.update {
-                        it.copy(daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_restarted))
+                        it.copy(daemonStatusText = messages.get(com.rknnovpn.panel.R.string.daemon_status_restarted))
                     }
                 }
                 is CommandOutcome.Failed -> {
                     Log.w(TAG, "Backend restart failed: ${outcome.message}")
                     _uiState.update {
                         it.copy(
-                            daemonStatusText = messages.get(com.privstack.panel.R.string.state_error),
+                            daemonStatusText = messages.get(com.rknnovpn.panel.R.string.state_error),
                             errorMessage = outcome.message,
                         )
                     }
@@ -390,7 +390,7 @@ class SettingsViewModel @Inject constructor(
         if (_uiState.value.runtimeActionActive || _uiState.value.isResetting) return
         _uiState.update {
             it.copy(
-                daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_resetting),
+                daemonStatusText = messages.get(com.rknnovpn.panel.R.string.daemon_status_resetting),
                 errorMessage = null,
                 lastResetSummary = null,
                 isResetting = true,
@@ -402,9 +402,9 @@ class SettingsViewModel @Inject constructor(
                     Log.d(TAG, "Backend reset accepted; waiting for status result")
                     _uiState.update {
                         it.copy(
-                            daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_resetting),
+                            daemonStatusText = messages.get(com.rknnovpn.panel.R.string.daemon_status_resetting),
                             errorMessage = null,
-                            lastResetSummary = messages.get(com.privstack.panel.R.string.operation_accepted),
+                            lastResetSummary = messages.get(com.rknnovpn.panel.R.string.operation_accepted),
                             isResetting = true,
                         )
                     }
@@ -414,7 +414,7 @@ class SettingsViewModel @Inject constructor(
                     Log.w(TAG, "Backend reset failed: $message")
                     _uiState.update {
                         it.copy(
-                            daemonStatusText = messages.get(com.privstack.panel.R.string.state_error),
+                            daemonStatusText = messages.get(com.rknnovpn.panel.R.string.state_error),
                             errorMessage = message,
                             isResetting = false,
                         )
@@ -564,7 +564,7 @@ class SettingsViewModel @Inject constructor(
                 _updateState.update {
                     it.copy(
                         status = UpdateStatus.ERROR,
-                        errorMessage = messages.get(com.privstack.panel.R.string.update_error_no_checked_update),
+                        errorMessage = messages.get(com.rknnovpn.panel.R.string.update_error_no_checked_update),
                     )
                 }
                 return@launch
@@ -581,7 +581,7 @@ class SettingsViewModel @Inject constructor(
                             errorMessage = if (hasArtifacts) {
                                 ""
                             } else {
-                                messages.get(com.privstack.panel.R.string.update_error_pair_required)
+                                messages.get(com.rknnovpn.panel.R.string.update_error_pair_required)
                             },
                             modulePath = downloaded.modulePath,
                             apkPath = downloaded.apkPath,
@@ -609,7 +609,7 @@ class SettingsViewModel @Inject constructor(
                 _updateState.update {
                     it.copy(
                         status = UpdateStatus.ERROR,
-                        errorMessage = messages.get(com.privstack.panel.R.string.update_error_no_downloaded_update),
+                        errorMessage = messages.get(com.rknnovpn.panel.R.string.update_error_no_downloaded_update),
                     )
                 }
                 return@launch
@@ -625,9 +625,9 @@ class SettingsViewModel @Inject constructor(
                         it.copy(
                             status = if (result.data.accepted) UpdateStatus.INSTALLING else UpdateStatus.ERROR,
                             errorMessage = if (result.data.accepted) {
-                                messages.get(com.privstack.panel.R.string.operation_accepted)
+                                messages.get(com.rknnovpn.panel.R.string.operation_accepted)
                             } else {
-                                messages.get(com.privstack.panel.R.string.update_error_install_without_artifacts)
+                                messages.get(com.rknnovpn.panel.R.string.update_error_install_without_artifacts)
                             },
                         )
                     }
@@ -692,7 +692,7 @@ class SettingsViewModel @Inject constructor(
                                 current.copy(
                                     status = UpdateStatus.ERROR,
                                     errorMessage = completedUpdateInstall.errorMessage.ifBlank {
-                                        messages.get(com.privstack.panel.R.string.update_error_install_failed)
+                                        messages.get(com.rknnovpn.panel.R.string.update_error_install_failed)
                                     },
                                 )
                             }
@@ -718,13 +718,13 @@ class SettingsViewModel @Inject constructor(
                             val report = resetResult.resetReport
                             it.copy(
                                 daemonStatusText = if (resetResult.succeeded) {
-                                    messages.get(com.privstack.panel.R.string.daemon_status_stopped)
+                                    messages.get(com.rknnovpn.panel.R.string.daemon_status_stopped)
                                 } else {
-                                    messages.get(com.privstack.panel.R.string.daemon_status_partial_reset)
+                                    messages.get(com.rknnovpn.panel.R.string.daemon_status_partial_reset)
                                 },
                                 errorMessage = resetResult.errorMessage.ifBlank { null },
                                 lastResetSummary = report?.let(::summarizeResetReport)
-                                    ?: resetResult.errorMessage.ifBlank { messages.get(com.privstack.panel.R.string.state_error) },
+                                    ?: resetResult.errorMessage.ifBlank { messages.get(com.rknnovpn.panel.R.string.state_error) },
                                 isResetting = false,
                                 runtimeActionActive = false,
                             )
@@ -742,11 +742,11 @@ class SettingsViewModel @Inject constructor(
 
     private fun applyProfileConfig(config: ProfileConfig) {
         val routingMode = when (config.routing.mode) {
-            com.privstack.panel.model.RoutingMode.PROXY_ALL -> RoutingMode.GLOBAL
-            com.privstack.panel.model.RoutingMode.PER_APP -> RoutingMode.WHITELIST
-            com.privstack.panel.model.RoutingMode.PER_APP_BYPASS -> RoutingMode.BYPASS
-            com.privstack.panel.model.RoutingMode.DIRECT -> RoutingMode.DIRECT
-            com.privstack.panel.model.RoutingMode.RULES -> RoutingMode.DIRECT
+            com.rknnovpn.panel.model.RoutingMode.PROXY_ALL -> RoutingMode.GLOBAL
+            com.rknnovpn.panel.model.RoutingMode.PER_APP -> RoutingMode.WHITELIST
+            com.rknnovpn.panel.model.RoutingMode.PER_APP_BYPASS -> RoutingMode.BYPASS
+            com.rknnovpn.panel.model.RoutingMode.DIRECT -> RoutingMode.DIRECT
+            com.rknnovpn.panel.model.RoutingMode.RULES -> RoutingMode.DIRECT
         }
 
         val dnsPreset = DnsPreset.entries.find {
@@ -791,18 +791,18 @@ class SettingsViewModel @Inject constructor(
                             info.currentReleaseWarning()
                         info.controlProtocolVersion in 1 until DaemonClient.MIN_CONTROL_PROTOCOL_VERSION ->
                             messages.get(
-                                com.privstack.panel.R.string.daemon_status_incompatible_protocol,
+                                com.rknnovpn.panel.R.string.daemon_status_incompatible_protocol,
                                 info.controlProtocolVersion,
                                 DaemonClient.MIN_CONTROL_PROTOCOL_VERSION,
                             )
                         missingMethods.isNotEmpty() ->
                             messages.get(
-                                com.privstack.panel.R.string.daemon_status_missing_methods,
+                                com.rknnovpn.panel.R.string.daemon_status_missing_methods,
                                 missingMethods.joinToString(", "),
                             )
                         !info.singBoxAvailable ->
                             messages.get(
-                                com.privstack.panel.R.string.daemon_status_sing_box_unavailable,
+                                com.rknnovpn.panel.R.string.daemon_status_sing_box_unavailable,
                                 info.singBoxError.ifBlank { "unknown" },
                             )
                         else -> null
@@ -812,9 +812,9 @@ class SettingsViewModel @Inject constructor(
                             moduleVersion = info.moduleVersion.ifBlank { info.daemonVersion },
                             daemonStatusText = compatibilityWarning
                                 ?: messages.get(
-                                    com.privstack.panel.R.string.daemon_status_running_with_core,
+                                    com.rknnovpn.panel.R.string.daemon_status_running_with_core,
                                     messages.get(
-                                        com.privstack.panel.R.string.daemon_status_runtime_versions,
+                                        com.rknnovpn.panel.R.string.daemon_status_runtime_versions,
                                         info.daemonVersion,
                                         info.moduleVersion.ifBlank { "unknown" },
                                         info.coreVersion,
@@ -844,7 +844,7 @@ class SettingsViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             daemonStatusText = messages.get(
-                                com.privstack.panel.R.string.daemon_status_module_not_installed
+                                com.rknnovpn.panel.R.string.daemon_status_module_not_installed
                             )
                         )
                     }
@@ -853,7 +853,7 @@ class SettingsViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             daemonStatusText = messages.get(
-                                com.privstack.panel.R.string.daemon_status_root_denied
+                                com.rknnovpn.panel.R.string.daemon_status_root_denied
                             )
                         )
                     }
@@ -862,7 +862,7 @@ class SettingsViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             daemonStatusText = messages.get(
-                                com.privstack.panel.R.string.daemon_status_not_responding
+                                com.rknnovpn.panel.R.string.daemon_status_not_responding
                             )
                         )
                     }
@@ -871,7 +871,7 @@ class SettingsViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             daemonStatusText = messages.get(
-                                com.privstack.panel.R.string.daemon_status_unknown_text
+                                com.rknnovpn.panel.R.string.daemon_status_unknown_text
                             )
                         )
                     }
@@ -918,11 +918,11 @@ class SettingsViewModel @Inject constructor(
             ConnectionState.CONNECTED -> {
                 if (status.health.healthy && !status.health.operationalHealthy) {
                     messages.get(
-                        com.privstack.panel.R.string.daemon_status_running_degraded,
+                        com.rknnovpn.panel.R.string.daemon_status_running_degraded,
                         healthIssue,
                     )
                 } else {
-                    fallback.ifBlank { messages.get(com.privstack.panel.R.string.state_connected) }
+                    fallback.ifBlank { messages.get(com.rknnovpn.panel.R.string.state_connected) }
                 }
             }
             ConnectionState.CONNECTING ->
@@ -933,30 +933,30 @@ class SettingsViewModel @Inject constructor(
                             status.activeOperation.step,
                         )
                     status.activeOperation?.kind == "reset" ->
-                        messages.get(com.privstack.panel.R.string.daemon_status_resetting)
+                        messages.get(com.rknnovpn.panel.R.string.daemon_status_resetting)
                     status.activeOperation?.kind == "restart" || status.activeOperation?.kind == "reload" ->
-                        messages.get(com.privstack.panel.R.string.daemon_status_restarting)
+                        messages.get(com.rknnovpn.panel.R.string.daemon_status_restarting)
                     else ->
-                        messages.get(com.privstack.panel.R.string.state_connecting)
+                        messages.get(com.rknnovpn.panel.R.string.state_connecting)
                 }
             ConnectionState.DISCONNECTED ->
-                messages.get(com.privstack.panel.R.string.daemon_status_stopped)
+                messages.get(com.rknnovpn.panel.R.string.daemon_status_stopped)
             ConnectionState.ERROR ->
                 messages.get(
-                    com.privstack.panel.R.string.daemon_status_error_with_reason,
+                    com.rknnovpn.panel.R.string.daemon_status_error_with_reason,
                     healthIssue,
                 )
             ConnectionState.UNKNOWN ->
-                messages.get(com.privstack.panel.R.string.daemon_status_unknown_text)
+                messages.get(com.rknnovpn.panel.R.string.daemon_status_unknown_text)
         }
     }
 
     private fun formatStuckOperation(stepDetail: String, step: String): String {
         val currentStep = stepDetail.ifBlank { step }.trim()
         return if (currentStep.isBlank()) {
-            messages.get(com.privstack.panel.R.string.daemon_status_operation_stuck)
+            messages.get(com.rknnovpn.panel.R.string.daemon_status_operation_stuck)
         } else {
-            messages.get(com.privstack.panel.R.string.daemon_status_operation_stuck_with_step, currentStep)
+            messages.get(com.rknnovpn.panel.R.string.daemon_status_operation_stuck_with_step, currentStep)
         }
     }
 
@@ -966,7 +966,7 @@ class SettingsViewModel @Inject constructor(
     private fun formatPersistedUpdateInstallState(state: UpdateInstallState): String {
         val step = state.step.ifBlank { state.code }.ifBlank { state.status }
         val detail = state.detail.ifBlank { state.code }.ifBlank { state.status }
-        return messages.get(com.privstack.panel.R.string.update_error_install_interrupted, step, detail)
+        return messages.get(com.rknnovpn.panel.R.string.update_error_install_interrupted, step, detail)
     }
 
     private fun parsePackageList(raw: String): List<String> =
@@ -975,17 +975,17 @@ class SettingsViewModel @Inject constructor(
             .filter(String::isNotBlank)
             .distinct()
 
-    private fun summarizeResetReport(report: com.privstack.panel.model.ResetReport): String {
+    private fun summarizeResetReport(report: com.rknnovpn.panel.model.ResetReport): String {
         if (report.errors.isEmpty() && report.warnings.isEmpty() && report.leftovers.isEmpty()) {
-            return messages.get(com.privstack.panel.R.string.reset_summary_all_done)
+            return messages.get(com.rknnovpn.panel.R.string.reset_summary_all_done)
         }
         return buildString {
             append(
                 messages.get(
                     if (report.errors.isEmpty()) {
-                        com.privstack.panel.R.string.reset_summary_warning_prefix
+                        com.rknnovpn.panel.R.string.reset_summary_warning_prefix
                     } else {
-                        com.privstack.panel.R.string.reset_summary_partial_prefix
+                        com.rknnovpn.panel.R.string.reset_summary_partial_prefix
                     },
                 ),
             )
@@ -993,15 +993,15 @@ class SettingsViewModel @Inject constructor(
             val stepLines = report.steps.filter { it.status != "ok" }.map { step ->
                 val stepValue = if (step.detail.isBlank()) {
                     when (step.status.lowercase()) {
-                        "error" -> messages.get(com.privstack.panel.R.string.state_error)
-                        "ok" -> messages.get(com.privstack.panel.R.string.node_test_status_ok)
+                        "error" -> messages.get(com.rknnovpn.panel.R.string.state_error)
+                        "ok" -> messages.get(com.rknnovpn.panel.R.string.node_test_status_ok)
                         else -> step.status
                     }
                 } else {
                     step.detail
                 }
                 messages.get(
-                    com.privstack.panel.R.string.reset_summary_step,
+                    com.rknnovpn.panel.R.string.reset_summary_step,
                     step.name,
                     stepValue,
                 )
@@ -1010,13 +1010,13 @@ class SettingsViewModel @Inject constructor(
             append((stepLines + warningLines).joinToString("\n"))
             if (report.leftovers.isNotEmpty()) {
                 append('\n')
-                append(messages.get(com.privstack.panel.R.string.reset_summary_leftovers_prefix))
+                append(messages.get(com.rknnovpn.panel.R.string.reset_summary_leftovers_prefix))
                 append('\n')
                 append(report.leftovers.joinToString("\n"))
             }
             if (report.rebootRequired) {
                 append('\n')
-                append(messages.get(com.privstack.panel.R.string.reset_summary_reboot_required))
+                append(messages.get(com.rknnovpn.panel.R.string.reset_summary_reboot_required))
             }
         }
     }

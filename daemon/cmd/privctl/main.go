@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const defaultSocket = "/data/adb/privstack/run/daemon.sock"
+const defaultSocket = "/data/adb/rknnovpn/run/daemon.sock"
 const maxFrameBytes = 16 * 1024 * 1024
 
 var Version = "v1.8.0"
@@ -83,7 +83,7 @@ func main() {
 	}
 
 	// Determine socket path.
-	socketPath := os.Getenv("PRIVSTACK_SOCKET")
+	socketPath := os.Getenv("RKNNOVPN_SOCKET")
 	if socketPath == "" {
 		socketPath = defaultSocket
 	}
@@ -171,7 +171,7 @@ func prettyPrint(data json.RawMessage) {
 }
 
 func printUsage() {
-	fmt.Println("privctl - PrivStack daemon control CLI")
+	fmt.Println("privctl - RKNnoVPN daemon control CLI")
 	fmt.Println()
 	fmt.Println("Usage: privctl <command> [json_params]")
 	fmt.Println()
@@ -203,7 +203,7 @@ func printUsage() {
 
 	fmt.Println()
 	fmt.Println("Environment:")
-	fmt.Printf("  PRIVSTACK_SOCKET  daemon socket path (default: %s)\n", defaultSocket)
+	fmt.Printf("  RKNNOVPN_SOCKET  daemon socket path (default: %s)\n", defaultSocket)
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  privctl backend.status")
@@ -223,7 +223,7 @@ func readRawParams(args []string) string {
 	if len(args) > 0 {
 		return strings.TrimSpace(strings.Join(args, " "))
 	}
-	if os.Getenv("PRIVSTACK_STDIN_PARAMS") != "1" {
+	if os.Getenv("RKNNOVPN_STDIN_PARAMS") != "1" {
 		return ""
 	}
 

@@ -46,7 +46,7 @@ ensure_privctl
 RUN_DIR="$(make_run_dir)"
 FAILED=0
 
-note "running safe PrivStack smoke checks into $RUN_DIR"
+note "running safe RKNnoVPN smoke checks into $RUN_DIR"
 
 capture_su privctl_version "'$PRIVCTL_PATH' version" || FAILED=1
 capture_su status_before "'$PRIVCTL_PATH' status" || FAILED=1

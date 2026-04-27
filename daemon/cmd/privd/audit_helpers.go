@@ -60,7 +60,7 @@ func localPortProtectionPresent(cfg *config.Config) bool {
 		{port: profileInbounds.HTTPPort, protocol: "tcp"},
 	}
 
-	v4, err4 := core.ExecCommand("iptables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
+	v4, err4 := core.ExecCommand("iptables", "-w", "100", "-t", "mangle", "-S", "RKNNOVPN_OUT")
 	if err4 != nil {
 		return false
 	}
@@ -71,7 +71,7 @@ func localPortProtectionPresent(cfg *config.Config) bool {
 	if _, err := core.ExecCommand("ip6tables", "-w", "100", "-t", "mangle", "-L"); err != nil {
 		return true
 	}
-	v6, err6 := core.ExecCommand("ip6tables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")
+	v6, err6 := core.ExecCommand("ip6tables", "-w", "100", "-t", "mangle", "-S", "RKNNOVPN_OUT")
 	if err6 != nil {
 		return false
 	}

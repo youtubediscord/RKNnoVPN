@@ -10,7 +10,7 @@ import (
 
 func TestApplyRunsCleanupThenStartsRulesAndDNS(t *testing.T) {
 	var calls []string
-	manager := New("/data/adb/privstack", map[string]string{"A": "B"}, func(scriptPath string, command string, env map[string]string) error {
+	manager := New("/data/adb/rknnovpn", map[string]string{"A": "B"}, func(scriptPath string, command string, env map[string]string) error {
 		calls = append(calls, filepath.Base(scriptPath)+":"+command+":"+env["A"])
 		return nil
 	})
@@ -32,7 +32,7 @@ func TestApplyRunsCleanupThenStartsRulesAndDNS(t *testing.T) {
 
 func TestApplyDNSFailureRollsBackAndReturnsDNSCode(t *testing.T) {
 	var calls []string
-	manager := New("/data/adb/privstack", nil, func(scriptPath string, command string, env map[string]string) error {
+	manager := New("/data/adb/rknnovpn", nil, func(scriptPath string, command string, env map[string]string) error {
 		call := filepath.Base(scriptPath) + ":" + command
 		calls = append(calls, call)
 		if call == "dns.sh:start" {
@@ -62,7 +62,7 @@ func TestApplyDNSFailureRollsBackAndReturnsDNSCode(t *testing.T) {
 }
 
 func TestCleanupTreatsMissingScriptsAsAlreadyClean(t *testing.T) {
-	manager := New("/data/adb/privstack", nil, func(scriptPath string, command string, env map[string]string) error {
+	manager := New("/data/adb/rknnovpn", nil, func(scriptPath string, command string, env map[string]string) error {
 		return errors.New("script not found: " + scriptPath + ": no such file or directory")
 	})
 
@@ -77,8 +77,8 @@ func TestCleanupTreatsMissingScriptsAsAlreadyClean(t *testing.T) {
 	}
 }
 
-func TestVerifyCleanupReportsPrivStackRulesAndRoutes(t *testing.T) {
-	manager := New("/data/adb/privstack", map[string]string{
+func TestVerifyCleanupReportsRKNnoVPNRulesAndRoutes(t *testing.T) {
+	manager := New("/data/adb/rknnovpn", map[string]string{
 		"FWMARK":         "0x2023",
 		"ROUTE_TABLE":    "2023",
 		"ROUTE_TABLE_V6": "2024",
@@ -86,7 +86,7 @@ func TestVerifyCleanupReportsPrivStackRulesAndRoutes(t *testing.T) {
 		key := name + " " + strings.Join(args, " ")
 		switch key {
 		case "iptables -w 100 -t mangle -S":
-			return "-N PRIVSTACK_OUT\n-A OUTPUT -j PRIVSTACK_OUT", nil
+			return "-N RKNNOVPN_OUT\n-A OUTPUT -j RKNNOVPN_OUT", nil
 		case "ip rule show":
 			return "100: from all fwmark 0x2023 lookup 2023", nil
 		case "ip route show table 2023":
@@ -116,7 +116,7 @@ func TestVerifyCleanupReportsPrivStackRulesAndRoutes(t *testing.T) {
 
 func TestRuleLineMatchesExactFwmarkAndTable(t *testing.T) {
 	if !RuleLineMatches("100: from all fwmark 0x2023 lookup 2023", "0x2023", "2023") {
-		t.Fatal("expected exact PrivStack fwmark/table to match")
+		t.Fatal("expected exact RKNnoVPN fwmark/table to match")
 	}
 	if RuleLineMatches("100: from all fwmark 0x20230 lookup 20230", "0x2023", "2023") {
 		t.Fatal("substring fwmark/table must not match")
@@ -127,7 +127,7 @@ func TestRuleLineMatchesExactFwmarkAndTable(t *testing.T) {
 }
 
 func TestVerifyCleanupIgnoresMissingOptionalCommandAndTables(t *testing.T) {
-	manager := New("/data/adb/privstack", map[string]string{
+	manager := New("/data/adb/rknnovpn", map[string]string{
 		"FWMARK":      "0x2023",
 		"ROUTE_TABLE": "2023",
 	}, nil).WithExecCommand(func(name string, args ...string) (string, error) {
@@ -150,7 +150,7 @@ func TestVerifyCleanupIgnoresMissingOptionalCommandAndTables(t *testing.T) {
 }
 
 func TestVerifyReturnsVerifyCode(t *testing.T) {
-	manager := New("/data/adb/privstack", nil, func(scriptPath string, command string, env map[string]string) error {
+	manager := New("/data/adb/rknnovpn", nil, func(scriptPath string, command string, env map[string]string) error {
 		if filepath.Base(scriptPath) == "dns.sh" && command == "status" {
 			return errors.New("dns hook missing")
 		}
@@ -173,7 +173,7 @@ func TestVerifyReturnsVerifyCode(t *testing.T) {
 
 func TestVerifyRunsRuleAndDNSStatus(t *testing.T) {
 	var calls []string
-	manager := New("/data/adb/privstack", map[string]string{"A": "B"}, func(scriptPath string, command string, env map[string]string) error {
+	manager := New("/data/adb/rknnovpn", map[string]string{"A": "B"}, func(scriptPath string, command string, env map[string]string) error {
 		calls = append(calls, filepath.Base(scriptPath)+":"+command+":"+env["A"])
 		return nil
 	})
@@ -192,7 +192,7 @@ func TestVerifyRunsRuleAndDNSStatus(t *testing.T) {
 }
 
 func TestEffectiveLocalPortsSkipsDisabledHelpersAndAPI(t *testing.T) {
-	manager := New("/data/adb/privstack", map[string]string{
+	manager := New("/data/adb/rknnovpn", map[string]string{
 		"TPROXY_PORT": "10853",
 		"DNS_PORT":    "10856",
 		"API_PORT":    "0",
@@ -207,7 +207,7 @@ func TestEffectiveLocalPortsSkipsDisabledHelpersAndAPI(t *testing.T) {
 }
 
 func TestEffectiveLocalPortsIncludesChainedProxyPorts(t *testing.T) {
-	manager := New("/data/adb/privstack", map[string]string{
+	manager := New("/data/adb/rknnovpn", map[string]string{
 		"TPROXY_PORT":       "10853",
 		"DNS_PORT":          "10856",
 		"API_PORT":          "0",

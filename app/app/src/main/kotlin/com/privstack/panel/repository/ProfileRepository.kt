@@ -1,14 +1,14 @@
-package com.privstack.panel.repository
+package com.rknnovpn.panel.repository
 
 import android.util.Log
-import com.privstack.panel.`import`.LinkParser
-import com.privstack.panel.i18n.UserMessageFormatter
-import com.privstack.panel.ipc.DaemonClient
-import com.privstack.panel.ipc.DaemonClientResult
-import com.privstack.panel.ipc.ConfigMutationInfo
-import com.privstack.panel.ipc.PollingStatusSource
-import com.privstack.panel.model.Node
-import com.privstack.panel.model.ProfileConfig
+import com.rknnovpn.panel.`import`.LinkParser
+import com.rknnovpn.panel.i18n.UserMessageFormatter
+import com.rknnovpn.panel.ipc.DaemonClient
+import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.ipc.ConfigMutationInfo
+import com.rknnovpn.panel.ipc.PollingStatusSource
+import com.rknnovpn.panel.model.Node
+import com.rknnovpn.panel.model.ProfileConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -143,12 +143,12 @@ class ProfileRepository @Inject constructor(
         try {
             val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                 if (_error.value.isNullOrBlank()) {
-                    _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                    _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
                 }
                 return@withLock false
             }
             if (current.nodes.none { it.id == nodeId && !it.stale }) {
-                _error.value = messages.get(com.privstack.panel.R.string.node_not_found)
+                _error.value = messages.get(com.rknnovpn.panel.R.string.node_not_found)
                 return@withLock false
             }
             if (!ensureRuntimeIdle("setActiveNode")) {
@@ -188,7 +188,7 @@ class ProfileRepository @Inject constructor(
             try {
                 val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                     if (_error.value.isNullOrBlank()) {
-                        _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                        _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
                     }
                     return@withLock emptyList()
                 }
@@ -212,7 +212,7 @@ class ProfileRepository @Inject constructor(
             try {
                 val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                     if (_error.value.isNullOrBlank()) {
-                        _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                        _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
                     }
                     return@withLock null
                 }
@@ -232,7 +232,7 @@ class ProfileRepository @Inject constructor(
                 try {
                     val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                         if (_error.value.isNullOrBlank()) {
-                            _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                            _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
                         }
                         return@withLock emptyList()
                     }
@@ -293,7 +293,7 @@ class ProfileRepository @Inject constructor(
         try {
             val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                 if (_error.value.isNullOrBlank()) {
-                    _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                    _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
                 }
                 return@withLock false
             }
@@ -331,7 +331,7 @@ class ProfileRepository @Inject constructor(
         try {
             val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                 if (_error.value.isNullOrBlank()) {
-                    _error.value = messages.get(com.privstack.panel.R.string.error_no_profile_loaded)
+                    _error.value = messages.get(com.rknnovpn.panel.R.string.error_no_profile_loaded)
                 }
                 return@withLock false
             }
@@ -415,13 +415,13 @@ class ProfileRepository @Inject constructor(
     ): List<Node> {
         val detectedUris = LinkParser.detectUris(rawInput)
         if (detectedUris.isEmpty()) {
-            _error.value = messages.get(com.privstack.panel.R.string.node_no_valid_proxy_links_detected)
+            _error.value = messages.get(com.rknnovpn.panel.R.string.node_no_valid_proxy_links_detected)
             return emptyList()
         }
 
         val parsedNodes = detectedUris.mapNotNull(LinkParser::parse)
         if (parsedNodes.isEmpty()) {
-            _error.value = messages.get(com.privstack.panel.R.string.node_no_supported_proxy_links_parsed)
+            _error.value = messages.get(com.rknnovpn.panel.R.string.node_no_supported_proxy_links_parsed)
             return emptyList()
         }
 
@@ -465,9 +465,9 @@ class ProfileRepository @Inject constructor(
         }
         if (preview.nodes.isEmpty() && preview.stale == 0) {
             _error.value = if (preview.parseFailures > 0) {
-                messages.get(com.privstack.panel.R.string.subscription_no_supported_links)
+                messages.get(com.rknnovpn.panel.R.string.subscription_no_supported_links)
             } else {
-                messages.get(com.privstack.panel.R.string.subscription_empty)
+                messages.get(com.rknnovpn.panel.R.string.subscription_empty)
             }
             return null
         }
@@ -521,7 +521,7 @@ class ProfileRepository @Inject constructor(
             is DaemonClientResult.Ok -> {
                 poller.publishBackendStatus(result.data)
                 if (result.data.activeOperation != null) {
-                    _error.value = messages.get(com.privstack.panel.R.string.error_runtime_busy)
+                    _error.value = messages.get(com.rknnovpn.panel.R.string.error_runtime_busy)
                     Log.w(TAG, "$tag blocked: runtime operation is active (${result.data.activeOperation.kind})")
                     false
                 } else {

@@ -1,15 +1,15 @@
-package com.privstack.panel.ui.navigation
+package com.rknnovpn.panel.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import com.privstack.panel.ui.apps.AppPickerScreen
-import com.privstack.panel.ui.dashboard.DashboardScreen
-import com.privstack.panel.ui.nodes.NodeListScreen
-import com.privstack.panel.ui.audit.AuditScreen
-import com.privstack.panel.ui.settings.SettingsScreen
+import com.rknnovpn.panel.ui.apps.AppPickerScreen
+import com.rknnovpn.panel.ui.dashboard.DashboardScreen
+import com.rknnovpn.panel.ui.nodes.NodeListScreen
+import com.rknnovpn.panel.ui.audit.AuditScreen
+import com.rknnovpn.panel.ui.settings.SettingsScreen
 
 const val AUDIT_ROUTE = "audit"
 

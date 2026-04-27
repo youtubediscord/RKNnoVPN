@@ -1,6 +1,6 @@
-# PrivStack SELinux policy rules
+# RKNnoVPN SELinux policy rules
 # Grants required permissions for transparent proxy (tproxy + iptables)
-# Context: privstack daemon runs as root with magisk_file context
+# Context: rknnovpn daemon runs as root with magisk_file context
 
 # ---------------------------------------------------------------------------
 # 1. Network socket operations — TCP, UDP, raw, unix
@@ -66,16 +66,16 @@ allow init packages_list_file:file { read open getattr };
 allow init packages_list_file:dir { read open search getattr };
 
 # ---------------------------------------------------------------------------
-# 6. File access for privstack data directory
+# 6. File access for rknnovpn data directory
 # ---------------------------------------------------------------------------
 
-# /data/adb/privstack/** — configs, binaries, logs, runtime
+# /data/adb/rknnovpn/** — configs, binaries, logs, runtime
 allow init magisk_file:file { create read write open getattr setattr rename unlink execute execute_no_trans map };
 allow init magisk_file:dir { create read write open getattr setattr search add_name remove_name rmdir };
 allow init magisk_file:lnk_file { create read getattr setattr unlink };
 allow init magisk_file:sock_file { create read write open getattr setattr unlink };
 
-# /data/adb/privstack/run/daemon.sock — daemon control socket
+# /data/adb/rknnovpn/run/daemon.sock — daemon control socket
 allow init magisk_file:unix_stream_socket { connectto };
 
 # ---------------------------------------------------------------------------

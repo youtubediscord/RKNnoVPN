@@ -1,4 +1,4 @@
-package com.privstack.panel.ui.nodes
+package com.rknnovpn.panel.ui.nodes
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -64,10 +64,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.privstack.panel.R
-import com.privstack.panel.`import`.ClipboardWatcher
-import com.privstack.panel.model.Node
-import com.privstack.panel.model.NodeSourceType
+import com.rknnovpn.panel.R
+import com.rknnovpn.panel.`import`.ClipboardWatcher
+import com.rknnovpn.panel.model.Node
+import com.rknnovpn.panel.model.NodeSourceType
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

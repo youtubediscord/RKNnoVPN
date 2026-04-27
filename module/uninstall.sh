@@ -1,33 +1,33 @@
 #!/system/bin/sh
-# PrivStack — module removal entrypoint.
+# RKNnoVPN — module removal entrypoint.
 # Runtime cleanup is owned by scripts/rescue_reset.sh; this file only
 # orchestrates uninstall-specific cleanup and preserves config/logs.
 
 set +e
 
-PRIVSTACK_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}"
-TAG="privstack:uninstall"
+RKNNOVPN_DIR="${RKNNOVPN_DIR:-/data/adb/rknnovpn}"
+TAG="rknnovpn:uninstall"
 
-if [ -f "${PRIVSTACK_DIR}/scripts/lib/privstack_env.sh" ]; then
-    . "${PRIVSTACK_DIR}/scripts/lib/privstack_env.sh"
+if [ -f "${RKNNOVPN_DIR}/scripts/lib/rknnovpn_env.sh" ]; then
+    . "${RKNNOVPN_DIR}/scripts/lib/rknnovpn_env.sh"
 fi
-SCRIPTS_DIR="${SCRIPTS_DIR:-${PRIVSTACK_DIR}/scripts}"
-RENDERED_CONFIG_DIR="${RENDERED_CONFIG_DIR:-${PRIVSTACK_DIR}/config/rendered}"
+SCRIPTS_DIR="${SCRIPTS_DIR:-${RKNNOVPN_DIR}/scripts}"
+RENDERED_CONFIG_DIR="${RENDERED_CONFIG_DIR:-${RKNNOVPN_DIR}/config/rendered}"
 
 log_msg() {
     /system/bin/log -t "$TAG" -p i "$1" 2>/dev/null
-    echo "[privstack] $1"
+    echo "[rknnovpn] $1"
 }
 
 log_err() {
     /system/bin/log -t "$TAG" -p e "$1" 2>/dev/null
-    echo "[privstack] ERROR: $1"
+    echo "[rknnovpn] ERROR: $1"
 }
 
 run_runtime_cleanup() {
     if [ -x "${SCRIPTS_DIR}/rescue_reset.sh" ]; then
         log_msg "Running canonical runtime cleanup"
-        PRIVSTACK_DIR="$PRIVSTACK_DIR" "${SCRIPTS_DIR}/rescue_reset.sh" uninstall-clean
+        RKNNOVPN_DIR="$RKNNOVPN_DIR" "${SCRIPTS_DIR}/rescue_reset.sh" uninstall-clean
         return $?
     fi
 
@@ -51,7 +51,7 @@ clean_runtime_files() {
 }
 
 log_msg "========================================="
-log_msg "PrivStack module removal starting"
+log_msg "RKNnoVPN module removal starting"
 log_msg "========================================="
 
 run_runtime_cleanup || log_err "Runtime cleanup reported leftovers"
@@ -59,8 +59,8 @@ restore_kernel_params
 clean_runtime_files
 
 log_msg "========================================="
-log_msg "PrivStack module removal complete"
-log_msg "Data directory preserved at: ${PRIVSTACK_DIR}/"
+log_msg "RKNnoVPN module removal complete"
+log_msg "Data directory preserved at: ${RKNNOVPN_DIR}/"
 log_msg "Remove manually if no longer needed:"
-log_msg "  rm -rf ${PRIVSTACK_DIR}"
+log_msg "  rm -rf ${RKNNOVPN_DIR}"
 log_msg "========================================="

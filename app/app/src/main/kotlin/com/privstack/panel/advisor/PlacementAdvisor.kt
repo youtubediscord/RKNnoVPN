@@ -1,4 +1,4 @@
-package com.privstack.panel.advisor
+package com.rknnovpn.panel.advisor
 
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -126,7 +126,7 @@ class PlacementAdvisor @Inject constructor(
                 "Streaming apps may need the proxy to access geo-restricted content."
 
             AppCategory.VPN_PROXY -> ProfilePlacement.PERSONAL to
-                "Proxy/VPN tools should stay with the PrivStack control app and outside the proxied app set."
+                "Proxy/VPN tools should stay with the RKNnoVPN control app and outside the proxied app set."
 
             AppCategory.SYSTEM -> ProfilePlacement.PERSONAL to
                 "System apps are managed by the OS and should not be moved."
