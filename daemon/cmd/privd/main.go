@@ -624,7 +624,7 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 			"HIGH",
 			"LEAK",
 			"Оставьте HTTP/SOCKS helper ports равными 0 в production-режиме; для URL-test используйте core API только на время диагностики.",
-			"panel.inbounds",
+			"profile.inbounds",
 		)
 	}
 	if profileInbounds.AllowLAN && (profileInbounds.HTTPPort > 0 || profileInbounds.SocksPort > 0) {
@@ -635,7 +635,7 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 			"HIGH",
 			"LEAK",
 			"Отключите helper inbound или установите allowLan = false.",
-			"panel.inbounds",
+			"profile.inbounds",
 		)
 	}
 

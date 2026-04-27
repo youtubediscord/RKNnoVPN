@@ -72,5 +72,15 @@ func Save(path string, doc Document) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("profile: rename %s -> %s: %w", tmpPath, path, err)
 	}
+	syncDirBestEffort(filepath.Dir(path))
 	return nil
+}
+
+func syncDirBestEffort(dir string) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_ = f.Sync()
 }

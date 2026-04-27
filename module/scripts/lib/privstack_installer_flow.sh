@@ -179,18 +179,15 @@ preserve_existing_config() {
     fi
 
     if [ -f "$PANEL_FILE" ]; then
-        ui_print "  [*] Existing panel.json found — preserving"
+        ui_print "  [*] Existing legacy panel.json found — preserving for daemon migration"
         cp -f "$PANEL_FILE" "${PRIVSTACK_DIR}/backup/panel.json.pre-upgrade" 2>/dev/null
-        PRESERVE_PANEL=1
     else
-        PRESERVE_PANEL=0
-        ui_print "  [*] No existing panel.json — will install defaults when available"
+        ui_print "  [*] No legacy panel.json found — canonical profile.json will be daemon-managed"
     fi
 }
 
 install_default_config() {
     CONFIG_FILE="${PRIVSTACK_DIR}/config/config.json"
-    PANEL_FILE="${PRIVSTACK_DIR}/config/panel.json"
 
     if [ "$PRESERVE_CONFIG" -eq 0 ]; then
         if [ -f "${MODPATH}/defaults/config.json" ]; then
@@ -205,14 +202,9 @@ install_default_config() {
         cp -f "${MODPATH}/defaults/config.json" "${PRIVSTACK_DIR}/config/config.defaults.json"
     fi
 
-    if [ "$PRESERVE_PANEL" -eq 0 ] && [ -f "${MODPATH}/defaults/panel.json" ]; then
-        cp -f "${MODPATH}/defaults/panel.json" "$PANEL_FILE"
-        ui_print "  [*] Default panel.json installed"
-    fi
-
-    if [ -f "${MODPATH}/defaults/panel.json" ]; then
-        cp -f "${MODPATH}/defaults/panel.json" "${PRIVSTACK_DIR}/config/panel.defaults.json"
-    fi
+    # panel.json is a legacy migration sidecar. New installs let privd create
+    # canonical profile.json from config.json instead of installing APK-owned
+    # defaults into runtime state.
 }
 
 mark_manual_start_required() {

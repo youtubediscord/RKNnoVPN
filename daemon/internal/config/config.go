@@ -90,7 +90,7 @@ type NodeConfig struct {
 	WGReserved      []int    `json:"wg_reserved,omitempty"`
 }
 
-// ProfileProjectionConfig stores APK-facing metadata that the daemon itself does not need
+// ProfileProjectionConfig stores profile projection data that the daemon itself does not need
 // to understand in depth, but must persist without loss.
 type ProfileProjectionConfig struct {
 	ID            string            `json:"id,omitempty"`
@@ -103,7 +103,8 @@ type ProfileProjectionConfig struct {
 	Extra         json.RawMessage   `json:"extra,omitempty"`
 }
 
-const panelFileName = "panel.json"
+const legacyPanelSidecarFileName = "panel.json"
+const canonicalProfileFileName = "profile.json"
 
 // RuntimeV2Config stores reliability-first backend selection state for the
 // side-by-side v2 runtime path.
@@ -348,8 +349,8 @@ func (c *Config) SharingInterfacesEnv() string {
 	return strings.Join(values, " ")
 }
 
-// DefaultProfileProjectionConfig returns the APK-facing metadata defaults stored in panel.json.
-func DefaultProfileProjectionConfig() ProfileProjectionConfig {
+// defaultProfileProjectionConfig returns the profile projection defaults for legacy panel sidecar.
+func defaultProfileProjectionConfig() ProfileProjectionConfig {
 	return ProfileProjectionConfig{
 		ID:   "default",
 		Name: "Default",
@@ -357,7 +358,7 @@ func DefaultProfileProjectionConfig() ProfileProjectionConfig {
 }
 
 // ResolveProfileInbounds returns the effective profile inbound settings with
-// defaults applied even when the APK-facing panel section is absent.
+// defaults applied even when profile inbounds are absent.
 func (c *Config) ResolveProfileInbounds() ProfileInboundsConfig {
 	result := ProfileInboundsConfig{
 		SocksPort: 0,
@@ -386,16 +387,19 @@ func (c *Config) ResolveProfileInbounds() ProfileInboundsConfig {
 // Load reads a Config from the given JSON file path.
 // If the file does not exist, it returns DefaultConfig.
 func Load(path string) (*Config, error) {
+	profileAlreadyMigrated := canonicalProfileExists(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			cfg := DefaultConfig()
-			panel, found, panelErr := loadPanelFromSidecar(PanelPath(path))
-			if panelErr != nil {
-				return nil, panelErr
+			if !profileAlreadyMigrated {
+				panel, found, panelErr := loadLegacyPanelSidecar(LegacyPanelSidecarPath(path))
+				if panelErr != nil {
+					return nil, panelErr
+				}
+				cfg.Profile = normalizeProfileProjectionConfig(panel)
+				cfg.SyncFromProfileProjection(found)
 			}
-			cfg.Profile = normalizeProfileProjectionConfig(panel)
-			cfg.SyncFromProfileProjection(found)
 			return cfg, nil
 		}
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
@@ -440,31 +444,33 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.Migrate()
 
-	panelPath := PanelPath(path)
-	panel, found, err := loadPanelFromSidecar(panelPath)
-	if err != nil {
-		return nil, err
-	}
-	panelAuthoritative := found
-	if found {
-		cfg.Profile = normalizeProfileProjectionConfig(panel)
-	} else {
-		legacyPanel, hasLegacy, err := loadLegacyPanel(raw)
+	if !profileAlreadyMigrated {
+		panelPath := LegacyPanelSidecarPath(path)
+		panel, found, err := loadLegacyPanelSidecar(panelPath)
 		if err != nil {
 			return nil, err
 		}
-		panelAuthoritative = hasLegacy
-		cfg.Profile = normalizeProfileProjectionConfig(legacyPanel)
-		if hasLegacy {
-			if err := SavePanel(panelPath, cfg.Profile); err != nil {
+		panelAuthoritative := found
+		if found {
+			cfg.Profile = normalizeProfileProjectionConfig(panel)
+		} else {
+			legacyPanel, hasLegacy, err := loadLegacyPanel(raw)
+			if err != nil {
 				return nil, err
 			}
-			if err := cfg.Save(path); err != nil {
-				return nil, err
+			panelAuthoritative = hasLegacy
+			cfg.Profile = normalizeProfileProjectionConfig(legacyPanel)
+			if hasLegacy {
+				if err := saveLegacyPanelSidecar(panelPath, cfg.Profile); err != nil {
+					return nil, err
+				}
+				if err := cfg.Save(path); err != nil {
+					return nil, err
+				}
 			}
 		}
+		cfg.SyncFromProfileProjection(panelAuthoritative)
 	}
-	cfg.SyncFromProfileProjection(panelAuthoritative)
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config: validate: %w", err)
@@ -504,19 +510,24 @@ func (c *Config) Migrate() {
 	}
 }
 
-// PanelPath returns the sidecar path for APK-facing panel state.
-func PanelPath(configPath string) string {
-	return filepath.Join(filepath.Dir(configPath), panelFileName)
+// LegacyPanelSidecarPath returns the sidecar path for legacy panel sidecar.
+func LegacyPanelSidecarPath(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), legacyPanelSidecarFileName)
 }
 
-// SavePanel writes the APK-facing panel metadata atomically.
-func SavePanel(path string, panel ProfileProjectionConfig) error {
+func canonicalProfileExists(configPath string) bool {
+	_, err := os.Stat(filepath.Join(filepath.Dir(configPath), canonicalProfileFileName))
+	return err == nil
+}
+
+// saveLegacyPanelSidecar writes the legacy panel sidecar atomically.
+func saveLegacyPanelSidecar(path string, panel ProfileProjectionConfig) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return fmt.Errorf("panel: mkdir: %w", err)
 	}
 
 	panel = normalizeProfileProjectionConfig(panel)
-	if err := ValidateProfileProjectionConfig(panel); err != nil {
+	if err := validateProfileProjectionConfig(panel); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(panel, "", "  ")
@@ -561,81 +572,81 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode, label string) e
 	return nil
 }
 
-func ValidateProfileProjectionConfig(panel ProfileProjectionConfig) error {
-	if len(panel.Inbounds) > 0 {
+func validateProfileProjectionConfig(profile ProfileProjectionConfig) error {
+	if len(profile.Inbounds) > 0 {
 		var inbounds ProfileInboundsConfig
-		if err := json.Unmarshal(panel.Inbounds, &inbounds); err != nil {
-			return fmt.Errorf("panel.inbounds invalid: %w", err)
+		if err := json.Unmarshal(profile.Inbounds, &inbounds); err != nil {
+			return fmt.Errorf("profile.inbounds invalid: %w", err)
 		}
 		if inbounds.SocksPort < 0 || inbounds.SocksPort > 65535 {
-			return fmt.Errorf("panel.inbounds.socksPort must be 0-65535, got %d", inbounds.SocksPort)
+			return fmt.Errorf("profile.inbounds.socksPort must be 0-65535, got %d", inbounds.SocksPort)
 		}
 		if inbounds.HTTPPort < 0 || inbounds.HTTPPort > 65535 {
-			return fmt.Errorf("panel.inbounds.httpPort must be 0-65535, got %d", inbounds.HTTPPort)
+			return fmt.Errorf("profile.inbounds.httpPort must be 0-65535, got %d", inbounds.HTTPPort)
 		}
 		if inbounds.AllowLAN {
-			return fmt.Errorf("panel.inbounds.allowLan is not supported by root helper inbounds")
+			return fmt.Errorf("profile.inbounds.allowLan is not supported by root helper inbounds")
 		}
 	}
-	for index, raw := range panel.Nodes {
+	for index, raw := range profile.Nodes {
 		if len(bytes.TrimSpace(raw)) == 0 {
-			return fmt.Errorf("panel.nodes[%d] is empty", index)
+			return fmt.Errorf("profile.nodes[%d] is empty", index)
 		}
 		var node profileNodeValidationConfig
 		if err := json.Unmarshal(raw, &node); err != nil {
-			return fmt.Errorf("panel.nodes[%d] invalid: %w", index, err)
+			return fmt.Errorf("profile.nodes[%d] invalid: %w", index, err)
 		}
 		if node.Port < 0 || node.Port > 65535 {
-			return fmt.Errorf("panel.nodes[%d].port must be 0-65535, got %d", index, node.Port)
+			return fmt.Errorf("profile.nodes[%d].port must be 0-65535, got %d", index, node.Port)
 		}
-		source := normalizedPanelNodeSource(node.Stale, node.Source)
+		source := normalizedProfileNodeSource(node.Stale, node.Source)
 		switch source.Type {
 		case "MANUAL":
 			if node.Stale {
-				return fmt.Errorf("panel.nodes[%d].stale requires subscription source", index)
+				return fmt.Errorf("profile.nodes[%d].stale requires subscription source", index)
 			}
 		case "SUBSCRIPTION":
 			if strings.TrimSpace(source.ProviderKey) == "" {
-				return fmt.Errorf("panel.nodes[%d].source.providerKey is required for subscription nodes", index)
+				return fmt.Errorf("profile.nodes[%d].source.providerKey is required for subscription nodes", index)
 			}
 			if source.LastSeenAt < 0 {
-				return fmt.Errorf("panel.nodes[%d].source.lastSeenAt must be >= 0", index)
+				return fmt.Errorf("profile.nodes[%d].source.lastSeenAt must be >= 0", index)
 			}
 		default:
-			return fmt.Errorf("panel.nodes[%d].source.type must be MANUAL or SUBSCRIPTION, got %q", index, source.Type)
+			return fmt.Errorf("profile.nodes[%d].source.type must be MANUAL or SUBSCRIPTION, got %q", index, source.Type)
 		}
 	}
-	for index, raw := range panel.Subscriptions {
+	for index, raw := range profile.Subscriptions {
 		if len(bytes.TrimSpace(raw)) == 0 {
-			return fmt.Errorf("panel.subscriptions[%d] is empty", index)
+			return fmt.Errorf("profile.subscriptions[%d] is empty", index)
 		}
 		var subscription ProfileSubscriptionConfig
 		if err := json.Unmarshal(raw, &subscription); err != nil {
-			return fmt.Errorf("panel.subscriptions[%d] invalid: %w", index, err)
+			return fmt.Errorf("profile.subscriptions[%d] invalid: %w", index, err)
 		}
 		if strings.TrimSpace(subscription.ProviderKey) == "" {
-			return fmt.Errorf("panel.subscriptions[%d].providerKey is required", index)
+			return fmt.Errorf("profile.subscriptions[%d].providerKey is required", index)
 		}
 		if strings.TrimSpace(subscription.URL) == "" {
-			return fmt.Errorf("panel.subscriptions[%d].url is required", index)
+			return fmt.Errorf("profile.subscriptions[%d].url is required", index)
 		}
 		if subscription.LastFetchedAt < 0 {
-			return fmt.Errorf("panel.subscriptions[%d].lastFetchedAt must be >= 0", index)
+			return fmt.Errorf("profile.subscriptions[%d].lastFetchedAt must be >= 0", index)
 		}
 		if subscription.LastSeenNodeCount < 0 {
-			return fmt.Errorf("panel.subscriptions[%d].lastSeenNodeCount must be >= 0", index)
+			return fmt.Errorf("profile.subscriptions[%d].lastSeenNodeCount must be >= 0", index)
 		}
 		if subscription.StaleNodeCount < 0 {
-			return fmt.Errorf("panel.subscriptions[%d].staleNodeCount must be >= 0", index)
+			return fmt.Errorf("profile.subscriptions[%d].staleNodeCount must be >= 0", index)
 		}
 		if subscription.UploadBytes < 0 || subscription.DownloadBytes < 0 || subscription.TotalBytes < 0 {
-			return fmt.Errorf("panel.subscriptions[%d] traffic counters must be >= 0", index)
+			return fmt.Errorf("profile.subscriptions[%d] traffic counters must be >= 0", index)
 		}
 		if subscription.ExpireTimestamp < 0 {
-			return fmt.Errorf("panel.subscriptions[%d].expireTimestamp must be >= 0", index)
+			return fmt.Errorf("profile.subscriptions[%d].expireTimestamp must be >= 0", index)
 		}
 		if subscription.ParseFailures < 0 {
-			return fmt.Errorf("panel.subscriptions[%d].parseFailures must be >= 0", index)
+			return fmt.Errorf("profile.subscriptions[%d].parseFailures must be >= 0", index)
 		}
 	}
 	return nil
@@ -658,7 +669,7 @@ func (c *Config) Validate() error {
 	if c.SchemaVersion > CurrentSchemaVersion {
 		return fmt.Errorf("schema_version %d is newer than daemon supports (%d)", c.SchemaVersion, CurrentSchemaVersion)
 	}
-	if err := ValidateProfileProjectionConfig(c.Profile); err != nil {
+	if err := validateProfileProjectionConfig(c.Profile); err != nil {
 		return err
 	}
 	if c.Proxy.TProxyPort < 1 || c.Proxy.TProxyPort > 65535 {
@@ -803,32 +814,32 @@ func (c *Config) ResolveProfile() *NodeProfile {
 	}
 }
 
-func normalizeProfileProjectionConfig(panel ProfileProjectionConfig) ProfileProjectionConfig {
-	if panel.ID == "" {
-		panel.ID = DefaultProfileProjectionConfig().ID
+func normalizeProfileProjectionConfig(profile ProfileProjectionConfig) ProfileProjectionConfig {
+	if profile.ID == "" {
+		profile.ID = defaultProfileProjectionConfig().ID
 	}
-	if panel.Name == "" {
-		panel.Name = DefaultProfileProjectionConfig().Name
+	if profile.Name == "" {
+		profile.Name = defaultProfileProjectionConfig().Name
 	}
-	if panel.Nodes == nil {
-		panel.Nodes = []json.RawMessage{}
+	if profile.Nodes == nil {
+		profile.Nodes = []json.RawMessage{}
 	}
-	panel.Nodes = normalizeProfileNodes(panel.Nodes)
-	if panel.Subscriptions == nil {
-		panel.Subscriptions = []json.RawMessage{}
+	profile.Nodes = normalizeProfileNodes(profile.Nodes)
+	if profile.Subscriptions == nil {
+		profile.Subscriptions = []json.RawMessage{}
 	}
-	panel.Subscriptions = normalizeProfileSubscriptions(panel.Subscriptions)
-	panel.Subscriptions = backfillPanelSubscriptionsFromNodes(panel.Nodes, panel.Subscriptions)
-	if len(panel.Inbounds) > 0 {
+	profile.Subscriptions = normalizeProfileSubscriptions(profile.Subscriptions)
+	profile.Subscriptions = backfillProfileSubscriptionsFromNodes(profile.Nodes, profile.Subscriptions)
+	if len(profile.Inbounds) > 0 {
 		var inbounds ProfileInboundsConfig
-		if err := json.Unmarshal(panel.Inbounds, &inbounds); err == nil && inbounds.AllowLAN {
+		if err := json.Unmarshal(profile.Inbounds, &inbounds); err == nil && inbounds.AllowLAN {
 			inbounds.AllowLAN = false
 			if raw, marshalErr := json.Marshal(inbounds); marshalErr == nil {
-				panel.Inbounds = raw
+				profile.Inbounds = raw
 			}
 		}
 	}
-	return panel
+	return profile
 }
 
 type profileSubscriptionAggregate struct {
@@ -838,7 +849,7 @@ type profileSubscriptionAggregate struct {
 	StaleCount    int
 }
 
-func backfillPanelSubscriptionsFromNodes(nodes []json.RawMessage, subscriptions []json.RawMessage) []json.RawMessage {
+func backfillProfileSubscriptionsFromNodes(nodes []json.RawMessage, subscriptions []json.RawMessage) []json.RawMessage {
 	existing := make(map[string]bool)
 	for _, raw := range subscriptions {
 		var subscription ProfileSubscriptionConfig
@@ -857,7 +868,7 @@ func backfillPanelSubscriptionsFromNodes(nodes []json.RawMessage, subscriptions 
 		if err := json.Unmarshal(raw, &node); err != nil {
 			continue
 		}
-		source := normalizedPanelNodeSource(node.Stale, node.Source)
+		source := normalizedProfileNodeSource(node.Stale, node.Source)
 		if source.Type != "SUBSCRIPTION" || source.ProviderKey == "" || existing[source.ProviderKey] {
 			continue
 		}
@@ -942,7 +953,7 @@ func normalizeProfileNodes(nodes []json.RawMessage) []json.RawMessage {
 				source = &decoded
 			}
 		}
-		normalizedSource := normalizedPanelNodeSource(stale, source)
+		normalizedSource := normalizedProfileNodeSource(stale, source)
 		sourceRaw, err := json.Marshal(normalizedSource)
 		if err != nil {
 			normalized = append(normalized, raw)
@@ -959,7 +970,7 @@ func normalizeProfileNodes(nodes []json.RawMessage) []json.RawMessage {
 	return normalized
 }
 
-func normalizedPanelNodeSource(stale bool, source *ProfileNodeSourceConfig) ProfileNodeSourceConfig {
+func normalizedProfileNodeSource(stale bool, source *ProfileNodeSourceConfig) ProfileNodeSourceConfig {
 	if source == nil {
 		if stale {
 			return ProfileNodeSourceConfig{Type: "SUBSCRIPTION", ProviderKey: "legacy"}
@@ -986,26 +997,26 @@ func normalizedPanelNodeSource(stale bool, source *ProfileNodeSourceConfig) Prof
 func loadLegacyPanel(raw map[string]json.RawMessage) (ProfileProjectionConfig, bool, error) {
 	panelRaw, ok := raw["panel"]
 	if !ok {
-		return DefaultProfileProjectionConfig(), false, nil
+		return defaultProfileProjectionConfig(), false, nil
 	}
 
-	panel := DefaultProfileProjectionConfig()
+	panel := defaultProfileProjectionConfig()
 	if err := json.Unmarshal(panelRaw, &panel); err != nil {
 		return ProfileProjectionConfig{}, false, fmt.Errorf("config: parse legacy panel: %w", err)
 	}
 	return panel, true, nil
 }
 
-func loadPanelFromSidecar(path string) (ProfileProjectionConfig, bool, error) {
+func loadLegacyPanelSidecar(path string) (ProfileProjectionConfig, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return DefaultProfileProjectionConfig(), false, nil
+			return defaultProfileProjectionConfig(), false, nil
 		}
 		return ProfileProjectionConfig{}, false, fmt.Errorf("panel: read %s: %w", path, err)
 	}
 
-	panel := DefaultProfileProjectionConfig()
+	panel := defaultProfileProjectionConfig()
 	if err := json.Unmarshal(data, &panel); err != nil {
 		return ProfileProjectionConfig{}, false, fmt.Errorf("panel: parse %s: %w", path, err)
 	}

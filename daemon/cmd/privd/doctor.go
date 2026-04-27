@@ -195,7 +195,7 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	}
 	panelPath := ""
 	if cfgPath != "" {
-		panelPath = config.PanelPath(cfgPath)
+		panelPath = config.LegacyPanelSidecarPath(cfgPath)
 	}
 
 	renderedConfigPath := filepath.Join(dataDir, "config", "rendered", "singbox.json")
