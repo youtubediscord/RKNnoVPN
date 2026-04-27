@@ -1323,6 +1323,11 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 		return err
 	}
 
+	d.mu.Lock()
+	oldCfg := d.cfg
+	d.mu.Unlock()
+	needsFullRestart := runtimeReloadNeedsFullRestart(oldCfg, newCfg, d.dataDir)
+
 	if err := newCfg.Save(d.cfgPath); err != nil {
 		return fmt.Errorf("persist config: %w", err)
 	}
@@ -1367,7 +1372,7 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 
 	if reload && wasRunning {
 		if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(generation int64) error {
-			return d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved", generation)
+			return d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved", generation, needsFullRestart)
 		}); err != nil {
 			return fmt.Errorf("config saved: %w", err)
 		}
@@ -1385,11 +1390,13 @@ func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) erro
 	}
 
 	d.mu.Lock()
+	oldCfg := d.cfg
 	nextCfg := *d.cfg
 	d.mu.Unlock()
 
 	nextCfg.Panel = newPanel
 	nextCfg.SyncFromPanel(true)
+	needsFullRestart := runtimeReloadNeedsFullRestart(oldCfg, &nextCfg, d.dataDir)
 
 	if err := config.SavePanel(d.panelPath, nextCfg.Panel); err != nil {
 		return fmt.Errorf("persist panel: %w", err)
@@ -1412,7 +1419,7 @@ func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) erro
 
 	if reload && wasRunning {
 		if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(generation int64) error {
-			return d.reloadRuntimeAfterConfigChange(currentCfg, "apply panel", "panel saved", generation)
+			return d.reloadRuntimeAfterConfigChange(currentCfg, "apply panel", "panel saved", generation, needsFullRestart)
 		}); err != nil {
 			return fmt.Errorf("panel saved: %w", err)
 		}
@@ -1421,7 +1428,7 @@ func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) erro
 	return nil
 }
 
-func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string, generation int64) error {
+func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string, generation int64, fullRestart bool) error {
 	if err := d.failIfResetInProgress(); err != nil {
 		return err
 	}
@@ -1439,6 +1446,19 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 
 	d.stopSubsystems()
 	recordStage("stop-subsystems", "ok", "", "", false)
+	if fullRestart {
+		if err := d.restartRootBackendV2(generation); err != nil {
+			if resetReport := resetReportFromRuntimeError(err); resetReport != nil {
+				recordStage("reset-after-full-restart-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
+			}
+			err = failStage("full-restart", runtimeErrorCode(err, "RUNTIME_RESTART_FAILED"), err, resetReportFromRuntimeError(err) != nil)
+			return fmt.Errorf("%s full restart failed; %s: %w", context, savedLabel, err)
+		}
+		recordStage("full-restart", "ok", "", d.coreMgr.LastRuntimeReport().Status, false)
+		report.FinishOK()
+		d.setLastReloadReport(report)
+		return nil
+	}
 	profile := cfg.ResolveProfile()
 	if err := d.coreMgr.HotSwap(profile); err != nil {
 		resetReport := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
@@ -1562,10 +1582,11 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 	}
 	apiPort := cfg.Proxy.APIPort
 	panelInbounds := cfg.ResolvePanelInbounds()
-	appRouting := core.BuildAppRoutingEnv(
+	appRouting := core.BuildRuntimeAppRoutingEnv(
 		cfg.Apps.Mode,
 		cfg.Apps.Packages,
 		cfg.Routing.AlwaysDirectApps,
+		cfg.Routing.Mode,
 	)
 	chainProxyPorts, chainProxyUIDs := core.BuildChainedProxyProtectionEnv(cfg)
 
@@ -1593,6 +1614,42 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"SHARING_MODE":      cfg.SharingModeEnv(),
 		"SHARING_IFACES":    cfg.SharingInterfacesEnv(),
 	}
+}
+
+func runtimeReloadNeedsFullRestart(oldCfg *config.Config, newCfg *config.Config, dataDir string) bool {
+	if oldCfg == nil || newCfg == nil {
+		return true
+	}
+	oldEnv := buildScriptEnv(oldCfg, dataDir)
+	newEnv := buildScriptEnv(newCfg, dataDir)
+	for _, key := range []string{
+		"CORE_GID",
+		"TPROXY_PORT",
+		"DNS_PORT",
+		"API_PORT",
+		"SOCKS_PORT",
+		"HTTP_PORT",
+		"CHAIN_PROXY_PORTS",
+		"CHAIN_PROXY_UIDS",
+		"FWMARK",
+		"ROUTE_TABLE",
+		"ROUTE_TABLE_V6",
+		"APP_MODE",
+		"APP_UIDS",
+		"PROXY_UIDS",
+		"DIRECT_UIDS",
+		"BYPASS_UIDS",
+		"DNS_SCOPE",
+		"DNS_MODE",
+		"PROXY_MODE",
+		"SHARING_MODE",
+		"SHARING_IFACES",
+	} {
+		if oldEnv[key] != newEnv[key] {
+			return true
+		}
+	}
+	return false
 }
 
 func firstVisibleLocalProxyPort(cfg *config.Config) int {
@@ -1716,6 +1773,12 @@ func (d *daemon) handleSubscriptionFetch(params *json.RawMessage) (interface{}, 
 			Message: "url is required",
 		}
 	}
+	if err := validateSubscriptionFetchURL(p.URL); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: err.Error(),
+		}
+	}
 
 	req, err := http.NewRequest(http.MethodGet, p.URL, nil)
 	if err != nil {
@@ -1726,7 +1789,9 @@ func (d *daemon) handleSubscriptionFetch(params *json.RawMessage) (interface{}, 
 	}
 	req.Header.Set("User-Agent", "RKNnoVPN-subscription-fetch/1.0")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = subscriptionFetchDialContext
+	client := &http.Client{Timeout: 30 * time.Second, Transport: transport}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, &ipc.RPCError{
@@ -1767,6 +1832,85 @@ func (d *daemon) handleSubscriptionFetch(params *json.RawMessage) (interface{}, 
 		"body":    string(body),
 		"headers": headers,
 	}, nil
+}
+
+func validateSubscriptionFetchURL(rawURL string) error {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("subscription URL scheme must be http or https")
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return fmt.Errorf("subscription URL host is required")
+	}
+	if isDisallowedSubscriptionHost(host) {
+		return fmt.Errorf("subscription URL host is local or private")
+	}
+	return nil
+}
+
+func subscriptionFetchDialContext(ctx context.Context, network string, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+		port = ""
+	}
+	if isDisallowedSubscriptionHost(host) {
+		return nil, fmt.Errorf("subscription URL host is local or private")
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	for _, resolved := range ips {
+		if isDisallowedSubscriptionIP(resolved.IP) {
+			return nil, fmt.Errorf("subscription URL resolved to local or private address")
+		}
+	}
+	var dialer net.Dialer
+	var lastErr error
+	for _, resolved := range ips {
+		dialAddress := address
+		if port != "" {
+			dialAddress = net.JoinHostPort(resolved.IP.String(), port)
+		}
+		conn, err := dialer.DialContext(ctx, network, dialAddress)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("subscription URL host did not resolve")
+}
+
+func isDisallowedSubscriptionHost(host string) bool {
+	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return isDisallowedSubscriptionIP(ip)
+	}
+	return false
+}
+
+func isDisallowedSubscriptionIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsUnspecified() ||
+		ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() ||
+		ip.IsMulticast()
 }
 
 func (d *daemon) handleNodeTest(params *json.RawMessage) (interface{}, *ipc.RPCError) {

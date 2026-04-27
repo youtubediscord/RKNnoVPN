@@ -310,10 +310,11 @@ func (r *RescueManager) scriptEnv() map[string]string {
 	}
 
 	panelInbounds := r.cfg.ResolvePanelInbounds()
-	appRouting := core.BuildAppRoutingEnv(
+	appRouting := core.BuildRuntimeAppRoutingEnv(
 		r.cfg.Apps.Mode,
 		r.cfg.Apps.Packages,
 		r.cfg.Routing.AlwaysDirectApps,
+		r.cfg.Routing.Mode,
 	)
 	chainProxyPorts, chainProxyUIDs := core.BuildChainedProxyProtectionEnv(r.cfg)
 

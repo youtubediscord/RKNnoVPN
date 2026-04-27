@@ -19,6 +19,7 @@ import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.InterruptedIOException
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.concurrent.thread
@@ -106,7 +107,7 @@ class PrivctlExecutor @Inject constructor() {
             process = Runtime.getRuntime().exec(command)
 
             cont.invokeOnCancellation {
-                process.destroy()
+                terminateProcess(process, "cancelled")
             }
 
             writeParamsSafely(process, if (useStdin) paramsJson else null)
@@ -127,10 +128,40 @@ class PrivctlExecutor @Inject constructor() {
             Log.d(TAG, "<<< exit=$exitCode stdout=${stdout.take(200)}")
 
             val result = parseResponse(exitCode, stdout, stderr, method)
-            cont.resume(result)
+            if (cont.isActive) {
+                cont.resume(result)
+            }
         } catch (e: Exception) {
-            process?.destroy()
-            cont.resume(PrivctlResult.UnexpectedError(e))
+            terminateProcess(process, "failed")
+            if (cont.isActive) {
+                cont.resume(PrivctlResult.UnexpectedError(e))
+            }
+        }
+    }
+
+    private fun terminateProcess(process: Process?, reason: String) {
+        if (process == null) return
+        try {
+            process.outputStream.close()
+        } catch (_: IOException) {
+        }
+        try {
+            process.inputStream.close()
+        } catch (_: IOException) {
+        }
+        try {
+            process.errorStream.close()
+        } catch (_: IOException) {
+        }
+        try {
+            process.destroy()
+            if (!process.waitFor(300, TimeUnit.MILLISECONDS)) {
+                Log.w(TAG, "privctl process still alive after $reason; forcing kill")
+                process.destroyForcibly()
+                process.waitFor(1, TimeUnit.SECONDS)
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "privctl process cleanup after $reason failed: ${e.message}")
         }
     }
 

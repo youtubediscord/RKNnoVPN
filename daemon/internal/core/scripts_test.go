@@ -146,6 +146,23 @@ func TestBuildAppRoutingEnvModes(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimeAppRoutingEnvDirectHardBypass(t *testing.T) {
+	withPackageResolverTestEnv(t, "com.example.app 10123 0 /data/user/0/com.example.app default\n", func(bool) (string, error) {
+		return "", errors.New("fallback should not be needed")
+	})
+
+	env := BuildRuntimeAppRoutingEnv("whitelist", []string{"com.example.app"}, []string{"com.android.vending"}, "direct")
+	if env.AppMode != "off" || env.ProxyUIDs != "" || env.DirectUIDs != "" || env.AppUIDs != "" {
+		t.Fatalf("direct routing must disable app interception, got %#v", env)
+	}
+	if env.DNSScope != "off" || env.LegacyDNSMode != "off" {
+		t.Fatalf("direct routing must disable DNS interception, got %#v", env)
+	}
+	if env.BypassUIDs == "" {
+		t.Fatalf("direct routing should preserve hard-bypass UID protection, got %#v", env)
+	}
+}
+
 func TestBuildChainedProxyProtectionEnvAllowsMutualLocalProxyUIDs(t *testing.T) {
 	withProcNetTCPTestEnv(t, `
   sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode

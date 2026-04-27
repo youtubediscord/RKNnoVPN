@@ -352,6 +352,21 @@ func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []s
 	return env
 }
 
+// BuildRuntimeAppRoutingEnv resolves the kernel/DNS interception contract for a
+// full runtime config. Routing "direct" is a hard bypass: no app traffic or DNS
+// should be intercepted even if the persisted split-tunnel app mode is stale.
+func BuildRuntimeAppRoutingEnv(appMode string, packages []string, alwaysDirectPackages []string, routingMode string) AppRoutingEnv {
+	if strings.EqualFold(strings.TrimSpace(routingMode), "direct") {
+		return AppRoutingEnv{
+			AppMode:       "off",
+			BypassUIDs:    BuildBypassUIDs(alwaysDirectPackages),
+			DNSScope:      "off",
+			LegacyDNSMode: "off",
+		}
+	}
+	return BuildAppRoutingEnv(appMode, packages, alwaysDirectPackages)
+}
+
 // IsBuiltInAlwaysDirectPackage reports whether a package is part of the
 // built-in hard-direct policy for sensitive apps and network clients.
 func IsBuiltInAlwaysDirectPackage(pkgName string) bool {

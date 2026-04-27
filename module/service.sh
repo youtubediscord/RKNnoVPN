@@ -205,13 +205,13 @@ has_boot_cleanup_markers() {
 if [ -x "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" ]; then
     if has_boot_cleanup_markers; then
         log_info "Running boot rescue cleanup"
-        if "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
-            log_info "Boot rescue cleanup completed"
-        else
-            log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
-        fi
     else
-        log_info "Skipping boot rescue cleanup: no stale runtime markers"
+        log_info "Running boot rescue cleanup probe without stale runtime markers"
+    fi
+    if "${PRIVSTACK_DIR}/scripts/rescue_reset.sh" --boot-clean >> "$LOG_FILE" 2>&1; then
+        log_info "Boot rescue cleanup completed"
+    else
+        log_warn "Boot rescue cleanup reported leftovers; daemon will still start for diagnostics"
     fi
 else
     log_warn "Boot rescue cleanup script not found"

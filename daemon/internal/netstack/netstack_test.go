@@ -114,6 +114,18 @@ func TestVerifyCleanupReportsPrivStackRulesAndRoutes(t *testing.T) {
 	}
 }
 
+func TestRuleLineMatchesExactFwmarkAndTable(t *testing.T) {
+	if !RuleLineMatches("100: from all fwmark 0x2023 lookup 2023", "0x2023", "2023") {
+		t.Fatal("expected exact PrivStack fwmark/table to match")
+	}
+	if RuleLineMatches("100: from all fwmark 0x20230 lookup 20230", "0x2023", "2023") {
+		t.Fatal("substring fwmark/table must not match")
+	}
+	if !RuleLineMatches("100: from all fwmark 0x2023/0xffffffff lookup 2023", "0x2023", "2023") {
+		t.Fatal("expected masked fwmark to match")
+	}
+}
+
 func TestVerifyCleanupIgnoresMissingOptionalCommandAndTables(t *testing.T) {
 	manager := New("/data/adb/privstack", map[string]string{
 		"FWMARK":      "0x2023",

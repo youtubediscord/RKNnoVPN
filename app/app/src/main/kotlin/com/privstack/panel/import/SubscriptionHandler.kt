@@ -152,20 +152,21 @@ object SubscriptionHandler {
      * User overrides (custom name, group assignment, latency) on matched nodes are preserved.
      */
     fun previewMerge(existing: List<Node>, incoming: List<Node>): MergePreview {
-        val existingByKey = existing.associateBy { nodeMatchKey(it) }
-        val incomingByKey = incoming.associateBy { nodeMatchKey(it) }
-
         val added = mutableListOf<Node>()
         val updated = mutableListOf<Node>()
         val unchanged = mutableListOf<Node>()
-        val removed = mutableListOf<Node>()
+        val matchedExistingIds = mutableSetOf<String>()
 
         // Walk incoming nodes.
-        for ((key, inNode) in incomingByKey) {
-            val exNode = existingByKey[key]
+        for (inNode in incoming) {
+            val key = nodeMatchKey(inNode)
+            val exNode = existing.firstOrNull { candidate ->
+                candidate.id !in matchedExistingIds && nodeMatchKey(candidate) == key
+            }
             if (exNode == null) {
                 added += inNode
             } else if (hasOutboundChanged(exNode, inNode)) {
+                matchedExistingIds += exNode.id
                 // Outbound changed: update but keep user overrides.
                 updated += inNode.copy(
                     id = exNode.id,
@@ -175,16 +176,13 @@ object SubscriptionHandler {
                     createdAt = exNode.createdAt
                 )
             } else {
+                matchedExistingIds += exNode.id
                 unchanged += exNode
             }
         }
 
         // Existing nodes not present in incoming.
-        for ((key, exNode) in existingByKey) {
-            if (key !in incomingByKey) {
-                removed += exNode
-            }
-        }
+        val removed = existing.filter { it.id !in matchedExistingIds }
 
         return MergePreview(added, updated, removed, unchanged)
     }

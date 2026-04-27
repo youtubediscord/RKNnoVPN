@@ -202,8 +202,7 @@ func (m Manager) CollectLeftovers() []string {
 			continue
 		}
 		for _, line := range splitLines(out) {
-			lower := strings.ToLower(line)
-			if mark != "" && strings.Contains(lower, mark) || spec.table != "" && strings.Contains(lower, "lookup "+spec.table) {
+			if RuleLineMatches(line, mark, spec.table) {
 				add("%s remains: %s", spec.name, strings.TrimSpace(line))
 				break
 			}
@@ -358,6 +357,29 @@ func isMissingRouteTableOutput(output string) bool {
 	return strings.Contains(lower, "fib table does not exist") ||
 		strings.Contains(lower, "no such process") ||
 		strings.Contains(lower, "no such file")
+}
+
+// RuleLineMatches reports whether an `ip rule show` line belongs to the
+// PrivStack fwmark/table contract. It intentionally avoids substring matches
+// so unrelated marks such as 0x20230 do not look like PrivStack leftovers.
+func RuleLineMatches(line string, mark string, table string) bool {
+	fields := strings.Fields(strings.ToLower(line))
+	wantMark := strings.ToLower(strings.TrimSpace(mark))
+	wantTable := strings.TrimSpace(table)
+	for i, field := range fields {
+		if field == "fwmark" && wantMark != "" && i+1 < len(fields) {
+			got := fields[i+1]
+			if got == wantMark || strings.HasPrefix(got, wantMark+"/") {
+				return true
+			}
+		}
+		if (field == "lookup" || field == "table") && wantTable != "" && i+1 < len(fields) {
+			if fields[i+1] == wantTable {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (m Manager) effectiveLocalPorts() []int {

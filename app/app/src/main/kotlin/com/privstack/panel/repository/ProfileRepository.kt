@@ -373,7 +373,7 @@ class ProfileRepository @Inject constructor(
             return emptyList()
         }
 
-        val merged = mergeNodes(current, parsed.nodes, dropRemoved = true)
+        val merged = mergeNodes(current, parsed.nodes, dropRemoved = false)
         return if (persistPanelUnlocked(merged.updatedConfig)) {
             parsed.nodes
         } else {

@@ -89,9 +89,25 @@ privstack_collect_netstack_leftovers() {
         done
     done
 
-    _out="$(ip rule show 2>/dev/null | grep -E "$ROUTE_TABLE|$FWMARK" | head -n 1)"
+    _out="$(ip rule show 2>/dev/null | awk -v mark="$(printf '%s' "$FWMARK" | tr 'A-F' 'a-f')" -v table="$ROUTE_TABLE" '
+        {
+            line=tolower($0)
+            n=split(line, f, /[[:space:]]+/)
+            for (i=1; i<n; i++) {
+                if (f[i] == "fwmark" && mark != "" && (f[i+1] == mark || index(f[i+1], mark "/") == 1)) { print; exit }
+                if ((f[i] == "lookup" || f[i] == "table") && table != "" && f[i+1] == table) { print; exit }
+            }
+        }')"
     [ -n "$_out" ] && _leftovers="${_leftovers}${_leftovers:+; }ip rule: ${_out}"
-    _out="$(ip -6 rule show 2>/dev/null | grep -E "$ROUTE_TABLE_V6|$FWMARK" | head -n 1)"
+    _out="$(ip -6 rule show 2>/dev/null | awk -v mark="$(printf '%s' "$FWMARK" | tr 'A-F' 'a-f')" -v table="$ROUTE_TABLE_V6" '
+        {
+            line=tolower($0)
+            n=split(line, f, /[[:space:]]+/)
+            for (i=1; i<n; i++) {
+                if (f[i] == "fwmark" && mark != "" && (f[i+1] == mark || index(f[i+1], mark "/") == 1)) { print; exit }
+                if ((f[i] == "lookup" || f[i] == "table") && table != "" && f[i+1] == table) { print; exit }
+            }
+        }')"
     [ -n "$_out" ] && _leftovers="${_leftovers}${_leftovers:+; }ip -6 rule: ${_out}"
     _out="$(ip route show table "$ROUTE_TABLE" 2>/dev/null | head -n 1)"
     [ -n "$_out" ] && _leftovers="${_leftovers}${_leftovers:+; }ip route table ${ROUTE_TABLE}: ${_out}"

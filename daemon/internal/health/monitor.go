@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 )
 
 // CheckResult is the outcome of a single named check.
@@ -380,14 +381,18 @@ func (h *HealthMonitor) checkRoutingIntact() CheckResult {
 	}
 
 	out6, err := core.ExecCommand("ip", "-6", "rule", "show")
+	ipv6Available := err == nil
 	if err != nil {
-		return CheckResult{Pass: false, Detail: fmt.Sprintf("ошибка ip -6 rule show: %v", err), Code: "ROUTING_CHECK_FAILED"}
+		out6 = ""
 	}
 
-	hasV4 := strings.Contains(out, markHex) || strings.Contains(out, markDec)
-	hasV6 := strings.Contains(out6, markHex) || strings.Contains(out6, markDec)
+	hasV4 := ipRuleOutputMatches(out, markHex, markDec, "2023")
+	hasV6 := ipv6Available && ipRuleOutputMatches(out6, markHex, markDec, "2024")
 	if hasV4 && hasV6 {
 		return CheckResult{Pass: true, Detail: fmt.Sprintf("правило fwmark %s есть для IPv4 и IPv6", markHex)}
+	}
+	if hasV4 && !ipv6Available {
+		return CheckResult{Pass: true, Detail: fmt.Sprintf("правило fwmark %s есть для IPv4; IPv6 policy routing недоступен", markHex)}
 	}
 	if hasV4 {
 		return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует для IPv6", markHex), Code: "ROUTING_V6_MISSING"}
@@ -396,6 +401,15 @@ func (h *HealthMonitor) checkRoutingIntact() CheckResult {
 		return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует для IPv4", markHex), Code: "ROUTING_V4_MISSING"}
 	}
 	return CheckResult{Pass: false, Detail: fmt.Sprintf("правило fwmark %s отсутствует", markHex), Code: "ROUTING_NOT_APPLIED"}
+}
+
+func ipRuleOutputMatches(output string, markHex string, markDec string, table string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if netstack.RuleLineMatches(line, markHex, table) || netstack.RuleLineMatches(line, markDec, table) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *HealthMonitor) checkDNSListener() CheckResult {

@@ -124,6 +124,35 @@ validate_env() {
     fi
 }
 
+ipv6_mangle_available() {
+    command -v ip6tables >/dev/null 2>&1 &&
+        ip6tables ${IPT_WAIT} -t mangle -L >/dev/null 2>&1 &&
+        command -v ip6tables-restore >/dev/null 2>&1
+}
+
+ip_rule_present() {
+    _family="$1"
+    _table="$2"
+    if [ "$_family" = "6" ]; then
+        _cmd="ip -6 rule show"
+    else
+        _cmd="ip rule show"
+    fi
+    $_cmd 2>/dev/null | awk -v mark="$(printf '%s' "$FWMARK" | tr 'A-F' 'a-f')" -v table="$_table" '
+        {
+            line=tolower($0)
+            n=split(line, f, /[[:space:]]+/)
+            mark_ok=0
+            table_ok=0
+            for (i=1; i<n; i++) {
+                if (f[i] == "fwmark" && mark != "" && (f[i+1] == mark || index(f[i+1], mark "/") == 1)) { mark_ok=1 }
+                if ((f[i] == "lookup" || f[i] == "table") && table != "" && f[i+1] == table) { table_ok=1 }
+            }
+            if (mark_ok && table_ok) { found=1; exit }
+        }
+        END { exit found ? 0 : 1 }'
+}
+
 save_snapshot() {
     mkdir -p "${SNAPSHOT_DIR}"
 
@@ -217,7 +246,11 @@ do_start() {
     log_info "========================================="
 
     flush_chains iptables
-    flush_chains ip6tables
+    if ipv6_mangle_available; then
+        flush_chains ip6tables
+    else
+        log_warn "IPv6 iptables mangle/restore unavailable; continuing with IPv4-only interception"
+    fi
     save_snapshot
     setup_policy_routing
 
@@ -234,12 +267,15 @@ do_start() {
         exit 1
     fi
 
-    log_info "Applying IPv6 rules..."
-    if ! ip6tables-restore ${IPT_WAIT} --noflush < "${SNAPSHOT_DIR}/ip6tables.rules"; then
-        log_error "ip6tables-restore failed for IPv6!"
-        cat "${SNAPSHOT_DIR}/ip6tables.rules" >&2
-        do_stop
-        exit 1
+    if ipv6_mangle_available; then
+        log_info "Applying IPv6 rules..."
+        if ! ip6tables-restore ${IPT_WAIT} --noflush < "${SNAPSHOT_DIR}/ip6tables.rules"; then
+            log_warn "ip6tables-restore failed for IPv6; continuing with IPv4-only interception"
+            cat "${SNAPSHOT_DIR}/ip6tables.rules" >&2
+            flush_chains ip6tables
+        fi
+    else
+        log_warn "Skipping IPv6 rules apply: ip6tables/ip6tables-restore unavailable"
     fi
 
     if ! iptables ${IPT_WAIT} -t mangle -L ${CHAIN_OUT} -n >/dev/null 2>&1; then
@@ -247,10 +283,10 @@ do_start() {
         do_stop
         exit 1
     fi
-    if ! ip6tables ${IPT_WAIT} -t mangle -L ${CHAIN_OUT} -n >/dev/null 2>&1; then
-        log_error "Verification failed: ${CHAIN_OUT} not found in ip6tables mangle table!"
-        do_stop
-        exit 1
+    if ipv6_mangle_available; then
+        if ! ip6tables ${IPT_WAIT} -t mangle -L ${CHAIN_OUT} -n >/dev/null 2>&1; then
+            log_warn "Verification degraded: ${CHAIN_OUT} not found in ip6tables mangle table"
+        fi
     fi
 
     log_info "========================================="
@@ -269,7 +305,9 @@ do_stop() {
     fi
 
     flush_chains iptables
-    flush_chains ip6tables
+    if command -v ip6tables >/dev/null 2>&1; then
+        flush_chains ip6tables
+    fi
     teardown_policy_routing
 
     if [ -d "${SNAPSHOT_DIR}" ]; then
@@ -329,7 +367,7 @@ do_status() {
         fi
     fi
 
-    if ! ip rule show | grep -q "fwmark ${FWMARK}.*lookup ${ROUTE_TABLE}"; then
+    if ! ip_rule_present 4 "$ROUTE_TABLE"; then
         log_error "missing IPv4 policy rule fwmark ${FWMARK} lookup ${ROUTE_TABLE}"
         missing=1
     fi
@@ -338,7 +376,7 @@ do_status() {
         missing=1
     fi
     if ip -6 rule show >/dev/null 2>&1; then
-        if ! ip -6 rule show | grep -q "fwmark ${FWMARK}.*lookup ${ROUTE_TABLE_V6}"; then
+        if ! ip_rule_present 6 "$ROUTE_TABLE_V6"; then
             log_error "missing IPv6 policy rule fwmark ${FWMARK} lookup ${ROUTE_TABLE_V6}"
             missing=1
         fi

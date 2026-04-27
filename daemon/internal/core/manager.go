@@ -1015,10 +1015,11 @@ func (m *CoreManager) scriptEnv() map[string]string {
 	}
 
 	panelInbounds := m.config.ResolvePanelInbounds()
-	appRouting := BuildAppRoutingEnv(
+	appRouting := BuildRuntimeAppRoutingEnv(
 		m.config.Apps.Mode,
 		m.config.Apps.Packages,
 		m.config.Routing.AlwaysDirectApps,
+		m.config.Routing.Mode,
 	)
 	chainProxyPorts, chainProxyUIDs := BuildChainedProxyProtectionEnv(m.config)
 
