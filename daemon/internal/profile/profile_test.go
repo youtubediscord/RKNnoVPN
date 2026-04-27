@@ -22,6 +22,9 @@ func TestProfileDocumentMigratesConfigAndPanelWithoutDroppingState(t *testing.T)
 	cfg.Panel.Inbounds = json.RawMessage(`{"socksPort":10808,"httpPort":10809,"allowLan":false}`)
 
 	doc := FromConfig(cfg)
+	if doc.SchemaVersion != CurrentSchemaVersion {
+		t.Fatalf("profile schema version not exposed: got %d want %d", doc.SchemaVersion, CurrentSchemaVersion)
+	}
 	if doc.ID != "main" || doc.Name != "Primary" || doc.ActiveNodeID != "node-a" {
 		t.Fatalf("profile identity not migrated: %#v", doc)
 	}

@@ -11,6 +11,8 @@ import kotlinx.serialization.json.JsonObject
  */
 @Serializable
 data class ProfileConfig(
+    /** Daemon-owned profile contract version. Must be sent back on profile.apply. */
+    val profileSchemaVersion: Int = 2,
     val id: String,
     val name: String,
     /** ID of the active node within this profile. */

@@ -25,6 +25,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
+	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
@@ -35,10 +36,11 @@ var Version = "v1.8.0"
 
 // daemon holds all runtime state, wiring the internal subsystems together.
 type daemon struct {
-	cfg       *config.Config
-	cfgPath   string
-	panelPath string
-	dataDir   string
+	cfg         *config.Config
+	cfgPath     string
+	profilePath string
+	panelPath   string
+	dataDir     string
 
 	coreMgr    *core.CoreManager
 	healthMon  *health.HealthMonitor
@@ -127,6 +129,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+	profilePath := profiledoc.Path(*cfgPath)
+	profileDoc, profileFound, err := profiledoc.Load(profilePath)
+	if err != nil {
+		log.Fatalf("load profile: %v", err)
+	}
+	if profileFound {
+		cfg, _, err = profiledoc.ApplyToConfig(cfg, profileDoc)
+		if err != nil {
+			log.Fatalf("apply profile: %v", err)
+		}
+	} else {
+		profileDoc = profiledoc.FromConfig(cfg)
+		if err := profiledoc.Save(profilePath, profileDoc); err != nil {
+			log.Fatalf("migrate profile: %v", err)
+		}
+	}
 	log.Printf("config loaded from %s", *cfgPath)
 
 	// ---- Per-subsystem loggers ---------------------------------------------
@@ -192,15 +210,16 @@ func main() {
 	socketPath := filepath.Join(*dataDir, "run", "daemon.sock")
 
 	d = &daemon{
-		cfg:        cfg,
-		cfgPath:    *cfgPath,
-		panelPath:  config.PanelPath(*cfgPath),
-		dataDir:    *dataDir,
-		coreMgr:    coreMgr,
-		healthMon:  healthMon,
-		rescueMgr:  rescueMgr,
-		netWatcher: netWatcher,
-		ipcServer:  ipc.NewServer(socketPath),
+		cfg:         cfg,
+		cfgPath:     *cfgPath,
+		profilePath: profilePath,
+		panelPath:   config.PanelPath(*cfgPath),
+		dataDir:     *dataDir,
+		coreMgr:     coreMgr,
+		healthMon:   healthMon,
+		rescueMgr:   rescueMgr,
+		netWatcher:  netWatcher,
+		ipcServer:   ipc.NewServer(socketPath),
 	}
 	d.initRuntimeV2()
 	d.runtimeV2.SetOperationLogger(func(event runtimev2.OperationLogEvent) {
@@ -921,8 +940,7 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 	}
 	newCfg.Migrate()
 	d.mu.Lock()
-	oldPanel := d.cfg.Panel
-	newCfg.Panel = oldPanel
+	newCfg.Panel = d.cfg.Panel
 	d.mu.Unlock()
 	panelProvided := false
 	if panelRaw, ok := raw["panel"]; ok {
@@ -948,17 +966,25 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 			Message: "validation failed: " + err.Error(),
 		}
 	}
+	if profile := newCfg.ResolveProfile(); profile != nil && profile.Address != "" {
+		if _, err := config.RenderSingboxConfig(newCfg, profile); err != nil {
+			return nil, &ipc.RPCError{
+				Code:    ipc.CodeConfigError,
+				Message: "render validation failed: " + err.Error(),
+			}
+		}
+	}
 
+	if err := d.failIfRuntimeOperationActive(); err != nil {
+		return nil, d.configApplyRPCError("config-import", err)
+	}
 	if panelProvided {
-		if err := config.SavePanel(d.panelPath, newCfg.Panel); err != nil {
-			return nil, d.configApplyRPCError("config-import", fmt.Errorf("persist panel: %w", err))
+		if err := profiledoc.Save(d.profilePath, profiledoc.FromConfig(newCfg)); err != nil {
+			return nil, d.configApplyRPCError("config-import", fmt.Errorf("persist profile: %w", err))
 		}
 	}
 	runtimeWasRunning := d.runtimeIsRunning()
 	if err := d.applyConfig(newCfg, true); err != nil {
-		if panelProvided {
-			_ = config.SavePanel(d.panelPath, oldPanel)
-		}
 		return nil, d.configApplyRPCError("config-import", err)
 	}
 
@@ -1086,6 +1112,10 @@ func configMutationOperation(action string, status string, saved bool, reload bo
 	stages := []map[string]interface{}{
 		{
 			"name":   "validate",
+			"status": "ok",
+		},
+		{
+			"name":   "render",
 			"status": "ok",
 		},
 	}
@@ -1234,56 +1264,6 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 			return d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved", generation, needsFullRestart)
 		}); err != nil {
 			return fmt.Errorf("config saved: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) error {
-	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
-		d.coreMgr.GetState() == core.StateDegraded
-
-	if err := d.failIfRuntimeOperationActive(); err != nil {
-		return err
-	}
-
-	d.mu.Lock()
-	oldCfg := d.cfg
-	nextCfg := *d.cfg
-	d.mu.Unlock()
-
-	nextCfg.Panel = newPanel
-	if err := config.ValidatePanelConfig(nextCfg.Panel); err != nil {
-		return err
-	}
-	nextCfg.SyncFromPanel(true)
-	needsFullRestart := runtimeReloadNeedsFullRestart(oldCfg, &nextCfg, d.dataDir)
-
-	if err := config.SavePanel(d.panelPath, nextCfg.Panel); err != nil {
-		return fmt.Errorf("persist panel: %w", err)
-	}
-
-	d.mu.Lock()
-	d.cfg.Panel = nextCfg.Panel
-	d.cfg.Node = nextCfg.Node
-	d.cfg.Transport = nextCfg.Transport
-	currentCfg := d.cfg
-	d.mu.Unlock()
-
-	d.coreMgr.SetConfig(currentCfg)
-	if d.netWatcher != nil {
-		d.netWatcher.SetEnv(buildScriptEnv(currentCfg, d.dataDir))
-	}
-	if err := d.syncRuntimeV2DesiredState(); err != nil {
-		return fmt.Errorf("panel saved: sync runtime desired state: %w", err)
-	}
-
-	if reload && wasRunning {
-		if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(generation int64) error {
-			return d.reloadRuntimeAfterConfigChange(currentCfg, "apply panel", "panel saved", generation, needsFullRestart)
-		}); err != nil {
-			return fmt.Errorf("panel saved: %w", err)
 		}
 	}
 

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
@@ -210,7 +209,6 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 
 	d.mu.Lock()
 	base := d.cfg
-	oldPanel := d.cfg.Panel
 	d.mu.Unlock()
 	nextCfg, warnings, err := profiledoc.ApplyToConfig(base, doc)
 	if err != nil {
@@ -221,11 +219,16 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 		}
 	}
 
-	if err := config.SavePanel(d.panelPath, nextCfg.Panel); err != nil {
+	if err := d.failIfRuntimeOperationActive(); err != nil {
+		rpcErr := d.configApplyRPCError(action, err)
+		rpcErr.Data = profileOperation(action, "failed", false, false, "not_started", before.AppliedState.Generation+1, before.AppliedState.Generation, runtimeErrorCode(err, "PROFILE_APPLY_BUSY"), err.Error(), nil, warnings, updated)
+		return nil, rpcErr
+	}
+
+	if err := profiledoc.Save(d.profilePath, profiledoc.FromConfig(nextCfg)); err != nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "persist profile: " + err.Error()}
 	}
 	if err := d.applyConfig(nextCfg, reload); err != nil {
-		_ = config.SavePanel(d.panelPath, oldPanel)
 		rpcErr := d.configApplyRPCError(action, err)
 		status := d.runtimeV2.Status()
 		rpcErr.Data = profileOperation(action, "saved_not_applied", true, false, "failed", desiredGeneration(status, before), status.AppliedState.Generation, runtimeErrorCode(err, "PROFILE_APPLY_FAILED"), err.Error(), resetReportFromRuntimeError(err), warnings, updated)

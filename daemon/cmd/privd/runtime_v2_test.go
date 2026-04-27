@@ -500,6 +500,7 @@ func TestBackendStartRecordsMissingNodeFailure(t *testing.T) {
 func TestBackendRestartReturnsRuntimeStatus(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.profilePath = profiledoc.Path(d.cfgPath)
 	d.panelPath = config.PanelPath(d.cfgPath)
 	if err := d.cfg.Save(d.cfgPath); err != nil {
 		t.Fatal(err)
@@ -524,6 +525,7 @@ func TestBackendRestartReturnsRuntimeStatus(t *testing.T) {
 func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.profilePath = profiledoc.Path(d.cfgPath)
 	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 	d.coreMgr.SetState(core.StateRunning)
@@ -557,6 +559,7 @@ func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 func TestConfigImportRejectsLinkPayload(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.profilePath = profiledoc.Path(d.cfgPath)
 	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 
@@ -576,6 +579,7 @@ func TestConfigImportRejectsLinkPayload(t *testing.T) {
 func TestReloadConfigApplyBusyDoesNotPersistConfig(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.profilePath = profiledoc.Path(d.cfgPath)
 	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 	if err := d.cfg.Save(d.cfgPath); err != nil {
@@ -611,6 +615,7 @@ func TestReloadConfigApplyBusyDoesNotPersistConfig(t *testing.T) {
 func TestConfigApplyWithoutReloadBusyDoesNotPersistConfig(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.profilePath = profiledoc.Path(d.cfgPath)
 	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 	if err := d.cfg.Save(d.cfgPath); err != nil {
@@ -643,50 +648,10 @@ func TestConfigApplyWithoutReloadBusyDoesNotPersistConfig(t *testing.T) {
 	}
 }
 
-func TestPanelApplyWithoutReloadBusyDoesNotPersistPanel(t *testing.T) {
-	d := newTestResetDaemon(t, nil, true)
-	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
-	d.panelPath = config.PanelPath(d.cfgPath)
-	d.initRuntimeV2()
-	originalPanel := d.cfg.Panel
-	originalPanel.ActiveNodeID = "original"
-	if err := config.SavePanel(d.panelPath, originalPanel); err != nil {
-		t.Fatal(err)
-	}
-	d.cfg.Panel = originalPanel
-
-	release := make(chan struct{})
-	if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(int64) error {
-		<-release
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	defer close(release)
-
-	nextPanel := originalPanel
-	nextPanel.ActiveNodeID = "changed"
-	err := d.applyPanelConfig(nextPanel, false)
-	if !isRuntimeBusyCode(err, runtimev2.BusyCodeRuntimeBusy) {
-		t.Fatalf("expected runtime busy before panel write, got %T %v", err, err)
-	}
-
-	data, err := os.ReadFile(d.panelPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var reloaded config.PanelConfig
-	if err := json.Unmarshal(data, &reloaded); err != nil {
-		t.Fatal(err)
-	}
-	if reloaded.ActiveNodeID != originalPanel.ActiveNodeID {
-		t.Fatalf("panel was persisted while runtime busy: got %q want %q", reloaded.ActiveNodeID, originalPanel.ActiveNodeID)
-	}
-}
-
 func TestProfileApplyReturnsRuntimeStatus(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.profilePath = profiledoc.Path(d.cfgPath)
 	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 	if err := d.cfg.Save(d.cfgPath); err != nil {
@@ -717,6 +682,16 @@ func TestProfileApplyReturnsRuntimeStatus(t *testing.T) {
 	}
 	if _, ok := result["runtimeStatus"].(runtimev2.Status); !ok {
 		t.Fatalf("runtimeStatus missing from profile.apply result: %#v", result)
+	}
+	saved, found, err := profiledoc.Load(d.profilePath)
+	if err != nil {
+		t.Fatalf("load saved profile: %v", err)
+	}
+	if !found {
+		t.Fatal("profile.apply did not persist profile.json")
+	}
+	if saved.Health.IntervalSec != doc.Health.IntervalSec {
+		t.Fatalf("saved profile health interval = %d, want %d", saved.Health.IntervalSec, doc.Health.IntervalSec)
 	}
 }
 
@@ -868,8 +843,12 @@ func newTestResetDaemon(t *testing.T, leftovers []string, withRescueScript bool)
 	}
 	coreMgr := core.NewCoreManager(cfg, dataDir, log.New(os.Stderr, "", 0))
 	healthMon := health.NewHealthMonitor(coreMgr, time.Hour, 3, cfg.Proxy.TProxyPort, cfg.Proxy.DNSPort, cfg.Proxy.Mark, cfg.Health.URL, time.Second, nil)
+	cfgPath := filepath.Join(dataDir, "config", "config.json")
 	return &daemon{
 		cfg:                      cfg,
+		cfgPath:                  cfgPath,
+		profilePath:              profiledoc.Path(cfgPath),
+		panelPath:                config.PanelPath(cfgPath),
 		dataDir:                  dataDir,
 		coreMgr:                  coreMgr,
 		healthMon:                healthMon,

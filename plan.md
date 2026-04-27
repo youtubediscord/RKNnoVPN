@@ -24,7 +24,8 @@
 - `privctl` JSON-RPC CLI;
 - Android APK на Kotlin/Compose;
 - импорт VLESS/VMess/Trojan/Shadowsocks/SOCKS/Hysteria2/TUIC/Amnezia `vpn://`;
-- хранение списка nodes в `panel.nodes`;
+- daemon-owned `profile.json` как canonical user intent storage;
+- миграция старых `config.json + panel.json` без APK fallback;
 - рендер нескольких nodes как `sing-box` outbounds;
 - `urltest` outbound с тегом `proxy`;
 - `diagnostics.testNodes` TCP/URL RPC;
@@ -180,6 +181,8 @@ Acceptance:
   update/logs/doctor/self-check методы.
 - Legacy IPC aliases удалены из daemon registration, privctl help, APK client и
   doctor supported methods.
+- Старый APK-side subscription merge/parser удален из runtime flow; preview и
+  refresh выполняет daemon.
 - `diagnostics.testNodes` сохраняет `url_error_class`, чтобы UI показывал
   классифицированную причину отказа, а не только сырой error string.
 - Compatibility check больше не принимает альтернативные legacy entrypoints.
@@ -272,15 +275,15 @@ server/port/SNI остаются видимыми для диагностики 
 1. selector + manual override; начальный slice сделан: `proxy` рендерится как
    selector, `auto` остаётся `urltest`, active node становится selector default.
    UI-slice тоже сделан: список серверов умеет переключать `Авто` /
-   `Вручную`, где `Авто` очищает `active_node_id`, а выбор карточки задаёт
-   manual override. APK config bridge сохраняет пустой `active_node_id` как
-   auto-mode для `panel.nodes`, а не подставляет первый сервер после refresh.
+   `Вручную`, где `Авто` очищает `activeNodeId`, а выбор карточки задаёт
+   manual override через `profile.setActiveNode`. Daemon сохраняет auto-mode в
+   `profile.json`, а не подставляет первый сервер после refresh.
 2. speed/throughput probes; начальный slice сделан: прозрачная URL-проба
    возвращает `responseBytes/throughputBps`, если probe URL отдаёт тело, а
    Clash delay остаётся честным latency-only. UI-slice тоже сделан: список
    серверов показывает скорость и умеет сортировать по throughput.
-3. per-app groups; начальный renderer-slice сделан: `panel.nodes[].group`
-   протягивается в daemon profile и создаёт group selector/urltest outbounds
+3. per-app groups; начальный renderer-slice сделан: `profile.nodes[].group`
+   протягивается в daemon renderer и создаёт group selector/urltest outbounds
    без изменения дефолтного маршрута. Следующий slice тоже сделан на уровне
    config/renderer: `apps.app_groups` задаёт package -> node group и рендерит
    `package_name` route rules на group selector. UI-slice тоже сделан:
@@ -299,7 +302,7 @@ server/port/SNI остаются видимыми для диагностики 
 
 Задачи:
 
-- Убедиться, что `panel.nodes -> outbounds[] -> urltest proxy` работает на реальном устройстве.
+- Убедиться, что `profile.nodes -> outbounds[] -> urltest proxy` работает на реальном устройстве.
 - Проверить VLESS Reality, Trojan, Shadowsocks, SOCKS5, Hysteria2, TUIC.
 - Проверить DNS на `sing-box 1.14.x`.
 - Проверить, что `diagnostics.testNodes` возвращает:

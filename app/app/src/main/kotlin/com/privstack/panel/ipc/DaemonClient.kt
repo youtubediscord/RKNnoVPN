@@ -81,6 +81,7 @@ class DaemonClient @Inject constructor(
         ignoreUnknownKeys = true
         isLenient = true
         coerceInputValues = true
+        encodeDefaults = true
     }
     private val prettyJson = Json {
         prettyPrint = true

@@ -17,6 +17,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
+	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
 )
@@ -956,34 +957,27 @@ func (d *daemon) persistDesiredStateV2(desired runtimev2.DesiredState) error {
 	currentCfg := d.cfg
 	d.mu.Unlock()
 
-	raw, err := json.Marshal(currentCfg)
+	doc := profiledoc.FromConfig(currentCfg)
+	if desired.BackendKind != "" {
+		doc.Runtime.BackendKind = string(desired.BackendKind)
+	}
+	if desired.FallbackPolicy != "" {
+		doc.Runtime.FallbackPolicy = string(desired.FallbackPolicy)
+	}
+	if desired.ActiveProfileID != "" {
+		doc.ActiveNodeID = desired.ActiveProfileID
+	}
+	nextCfg, _, err := profiledoc.ApplyToConfig(currentCfg, doc)
 	if err != nil {
 		return err
 	}
-	nextCfg := config.DefaultConfig()
-	if err := json.Unmarshal(raw, nextCfg); err != nil {
+	if err := d.failIfRuntimeOperationActive(); err != nil {
 		return err
 	}
-
-	if desired.BackendKind != "" {
-		nextCfg.RuntimeV2.BackendKind = string(desired.BackendKind)
-	}
-	if desired.FallbackPolicy != "" {
-		nextCfg.RuntimeV2.FallbackPolicy = string(desired.FallbackPolicy)
-	}
-	d.mu.Lock()
-	currentPanel := d.cfg.Panel
-	nextCfg.Panel = currentPanel
-	d.mu.Unlock()
-	if desired.ActiveProfileID != "" {
-		nextCfg.Panel.ActiveNodeID = desired.ActiveProfileID
-	}
-	nextCfg.SyncFromPanel(true)
-	if err := config.SavePanel(d.panelPath, nextCfg.Panel); err != nil {
+	if err := profiledoc.Save(d.profilePath, profiledoc.FromConfig(nextCfg)); err != nil {
 		return err
 	}
 	if err := d.applyConfig(nextCfg, false); err != nil {
-		_ = config.SavePanel(d.panelPath, currentPanel)
 		return err
 	}
 	return nil

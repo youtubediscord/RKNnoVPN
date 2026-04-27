@@ -225,17 +225,15 @@ class PrivctlExecutor @Inject constructor() {
             )
         }
 
-        // No output at all
+        // No output at all. New daemons always return a typed IPC envelope;
+        // a silent success would make mutating operations look safer than they are.
         if (stdout.isBlank()) {
-            return if (exitCode == 0) {
-                // Some void commands (stop) may produce no output on success
-                PrivctlResult.Success(buildJsonObject { put("ok", true) })
-            } else {
-                PrivctlResult.Error(
-                    code = exitCode,
-                    message = stderr.ifBlank { "privctl exited with code $exitCode and no output" }
-                )
-            }
+            return PrivctlResult.Error(
+                code = if (exitCode == 0) -32600 else exitCode,
+                message = stderr.ifBlank {
+                    "Daemon response for $method is missing the typed IPC envelope"
+                },
+            )
         }
 
         // Try parsing JSON-RPC response
@@ -262,12 +260,19 @@ class PrivctlExecutor @Inject constructor() {
             return resultFromEnvelope(envelope)
         }
 
-        // JSON-RPC error field present
+        // JSON-RPC error field present. Error responses must carry the typed
+        // daemon envelope in error.data so callers can inspect stable details
+        // such as configSaved/runtimeApplied/activeOperation.
         val errorObj = obj["error"]
         if (errorObj != null) {
             return try {
                 val errJson = errorObj.jsonObject
                 val envelope = errJson["data"]?.daemonEnvelopeOrNull()
+                    ?: return PrivctlResult.Error(
+                        code = errJson["code"]?.jsonPrimitive?.int ?: -32600,
+                        message = "Daemon error for $method is missing the typed IPC envelope",
+                        details = errJson["data"],
+                    )
                 val envelopeError = envelope?.get("error")?.jsonObject
                 PrivctlResult.Error(
                     code = errJson["code"]?.jsonPrimitive?.int ?: -1,
@@ -300,11 +305,18 @@ class PrivctlExecutor @Inject constructor() {
             if (envelope != null) {
                 return resultFromEnvelope(envelope)
             }
-            return PrivctlResult.Success(resultField)
+            return PrivctlResult.Error(
+                code = -32600,
+                message = "Daemon result for $method is missing the typed IPC envelope",
+                details = resultField,
+            )
         }
 
-        // Fallback: treat the entire object as the result
-        return PrivctlResult.Success(jsonElement)
+        return PrivctlResult.Error(
+            code = -32600,
+            message = "Daemon response for $method is missing result/error typed IPC envelope",
+            details = jsonElement,
+        )
     }
 
     private fun shellQuote(value: String): String {

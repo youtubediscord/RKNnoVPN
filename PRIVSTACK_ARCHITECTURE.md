@@ -7,7 +7,7 @@ PrivStack - прозрачный прокси-стек для rooted Android. Ц
 Система состоит из двух частей:
 
 1. Magisk/KernelSU/APatch-модуль с root-демоном `privd`, CLI `privctl`, скриптами iptables и бинарником `sing-box`.
-2. Android APK, который управляет демоном через `su -c privctl` и в `v2` использует сеть только для control-plane операций, не зависящих от rooted data-plane.
+2. Android APK, который управляет демоном через `su -c privctl`; HTTP/control-plane операции выполняет root-демон, чтобы APK не зависел от собственной сети и Android VPN stack.
 
 ## Основной поток трафика
 
@@ -28,7 +28,7 @@ Android app
 
 - Не использовать Android VPN API.
 - Не создавать `tun0`.
-- В `v2` разрешить APK `INTERNET` только для control-plane трафика, не зависящего от rooted data-plane.
+- Не давать APK `INTERNET` без отдельного архитектурного решения; updater/subscription/control-plane HTTP сейчас принадлежат daemon.
 - Не полагаться на Xposed/хуки как основную защиту.
 - Всё сетевое состояние держать в root-слое.
 - Любая ошибка запуска core должна быть диагностируема через `sing-box.log`.
@@ -200,21 +200,36 @@ stdout, exit code или произвольным строкам.
 Основной файл:
 
 ```text
-/data/adb/privstack/config/config.json
+/data/adb/privstack/config/profile.json
 ```
 
 Ключевые секции:
 
+- `schemaVersion`, `id`, `name` - typed profile identity and schema;
+- `nodes`, `activeNodeId`, `subscriptions` - user proxy intent and subscription
+  state owned by daemon;
+- `routing`, `dns`, `health`, `sharing`, `inbounds` - user-visible policy;
+- `runtime` - backend kind and runtime fallback policy;
+- `extra` - explicit extension bucket for fields the daemon preserves.
+
+Runtime projection:
+
+```text
+/data/adb/privstack/config/config.json
+```
+
 - `proxy` - порты, GID core, fwmark;
 - `node` - rendered active node mirror for the root runtime;
-- `panel.json` - migration sidecar for old installs; daemon converts it into
-  canonical profile state and keeps it in sync for rollback/debug visibility;
 - `routing` - routing mode и domain/IP rules;
 - `apps` - package whitelist/blacklist;
 - `dns` - remote/direct DNS;
 - `health` - URL проверки и интервалы;
 - `rescue` - политика восстановления;
 - `autostart`.
+
+`panel.json` is a migration sidecar for old installs only. The daemon reads it
+when bootstrapping old data, but new profile mutations persist desired user
+intent to `profile.json`, not to the old panel sidecar.
 
 APK-facing intent теперь принадлежит daemon `profile` contract. APK читает и
 меняет только:
@@ -300,7 +315,8 @@ step status/code/detail и флаги `apk_installed` / `module_installed`. Эт
 
 ### Nodes
 
-APK хранит полный список nodes в `panel.nodes`. Каждый node содержит:
+Daemon хранит полный список nodes в `profile.json` (`nodes`). Каждый node
+содержит:
 
 - `id`;
 - `name`;
@@ -313,32 +329,34 @@ APK хранит полный список nodes в `panel.nodes`. Каждый 
 - `source` (`MANUAL` или `SUBSCRIPTION`, provider metadata);
 - latency/response test metadata.
 
-`outbound` хранится в xray-like форме на стороне APK, а renderer демона переводит его в `sing-box` outbound.
+`outbound` хранится как typed node field с явным raw outbound payload для
+совместимости импортированных ссылок, а renderer демона переводит его в
+`sing-box` outbound.
 
 Subscription refresh работает только в своём source scope: ручные nodes не
 считаются удалёнными подпиской, а stale/removed применяется только к nodes того
 же provider. Stale nodes остаются видимыми в UI, но не участвуют в выборе
 активного runtime node и массовых `diagnostics.testNodes` операциях.
 
-Daemon валидирует `panel.nodes[].source`: `MANUAL` или `SUBSCRIPTION`.
+Daemon валидирует `profile.nodes[].source`: `MANUAL` или `SUBSCRIPTION`.
 Subscription nodes обязаны иметь `providerKey`; legacy stale nodes без source
 мигрируются в subscription source `legacy`, чтобы старое состояние не ломало
 загрузку. Явный `stale=true` для manual node запрещён, потому что stale/removed
 является подписочным состоянием, а не свойством ручного узла.
 
-Отдельно от nodes в `panel.subscriptions` хранится metadata подписок:
+Отдельно от nodes в `profile.subscriptions` хранится metadata подписок:
 `providerKey`, `url`, optional display `name`, `lastFetchedAt`, node counts,
 traffic quota/expiry из `subscription-userinfo` и `parseFailures`. Это не
 runtime input для sing-box, а доменный источник правды для refresh/preview/apply
 поведения. Nodes с `source.type=SUBSCRIPTION` должны ссылаться на provider через
 тот же `providerKey`, а daemon валидирует subscription records до сохранения.
 Если legacy panel уже содержит subscription nodes, но ещё не содержит
-`panel.subscriptions`, daemon миграционно создаёт metadata из node source, чтобы
+`panel.subscriptions`, daemon миграционно создаёт `profile.subscriptions` из node source, чтобы
 старые профили не теряли домен подписки.
 
 APK node UI обязан показывать subscription domain отдельно от manual nodes:
 summary по provider (`active`, `removed/stale`, parse failures) строится из
-`panel.subscriptions` + `nodes[].source`, а stale nodes остаются selectable=false.
+`profile.subscriptions` + `nodes[].source`, а stale nodes остаются selectable=false.
 Это защищает UX от старой модели "подписка просто добавила обычные nodes".
 
 ## Renderer sing-box
@@ -351,7 +369,7 @@ daemon/internal/config/renderer.go
 
 Логика:
 
-1. Считать `panel.nodes`.
+1. Считать `profile.nodes` из daemon config projection.
 2. Преобразовать каждый node в `NodeProfile`.
 3. Сгенерировать отдельный outbound tag для каждого node.
 4. Если node один, tag `proxy` указывает прямо на него.
