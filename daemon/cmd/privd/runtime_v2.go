@@ -32,6 +32,9 @@ func (b *rootBackendV2) Supported() (bool, string) {
 }
 
 func (b *rootBackendV2) Start(desired runtimev2.DesiredState) error {
+	if err := b.d.failIfResetInProgress(); err != nil {
+		return err
+	}
 	epoch := b.d.beginRuntimeStartOperation()
 	state := b.d.coreMgr.GetState()
 	if state == core.StateRunning || state == core.StateDegraded {
@@ -75,6 +78,9 @@ func (b *rootBackendV2) Reset(generation int64) runtimev2.ResetReport {
 }
 
 func (b *rootBackendV2) Restart(desired runtimev2.DesiredState, generation int64) error {
+	if err := b.d.failIfResetInProgress(); err != nil {
+		return err
+	}
 	b.d.beginRuntimeStartOperation()
 	return b.d.restartRootBackendV2()
 }
@@ -125,6 +131,15 @@ func (d *daemon) markRuntimeStartFailed(epoch uint64) {
 	if d.runtimeOpEpoch == epoch {
 		d.runtimeDesiredRunning = false
 	}
+}
+
+func (d *daemon) failIfResetInProgress() error {
+	if _, err := os.Stat(d.resetLockPath()); err == nil {
+		return runtimev2.NewResetInProgressError("reset is in progress")
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reset lock is not readable: %w", err)
+	}
+	return nil
 }
 
 func (d *daemon) currentRuntimeOperationEpoch() uint64 {
@@ -834,6 +849,9 @@ func (d *daemon) handleBackendApplyDesiredState(params *json.RawMessage) (interf
 		desired.ActiveProfileID = d.desiredStateV2().ActiveProfileID
 	}
 	if err := d.runtimeV2.ApplyDesiredState(desired); err != nil {
+		if rpcErr := d.rpcErrorFromRuntimeError(err); rpcErr.Code == ipc.CodeRuntimeBusy {
+			return nil, rpcErr
+		}
 		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
 	}
 	if err := d.persistDesiredStateV2(desired); err != nil {
@@ -847,7 +865,7 @@ func (d *daemon) handleBackendStart(params *json.RawMessage) (interface{}, *ipc.
 	d.syncRuntimeV2DesiredState()
 	status, err := d.runtimeV2.Start()
 	if err != nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+		return nil, d.rpcErrorFromRuntimeError(err)
 	}
 	return status, nil
 }
@@ -855,7 +873,7 @@ func (d *daemon) handleBackendStart(params *json.RawMessage) (interface{}, *ipc.
 func (d *daemon) handleBackendStop(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	status, err := d.runtimeV2.Stop()
 	if err != nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+		return nil, d.rpcErrorFromRuntimeError(err)
 	}
 	return status, nil
 }
@@ -864,13 +882,17 @@ func (d *daemon) handleBackendRestart(params *json.RawMessage) (interface{}, *ip
 	d.syncRuntimeV2DesiredState()
 	status, err := d.runtimeV2.Restart()
 	if err != nil {
-		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
+		return nil, d.rpcErrorFromRuntimeError(err)
 	}
 	return status, nil
 }
 
 func (d *daemon) handleBackendReset(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	return d.runtimeV2.Reset(), nil
+	report, err := d.runtimeV2.Reset()
+	if err != nil {
+		return nil, d.rpcErrorFromRuntimeError(err)
+	}
+	return report, nil
 }
 
 func (d *daemon) handleDiagnosticsHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {

@@ -139,6 +139,38 @@ func TestStartStopsBeforeSpawnAndNetstackWhenConfigCheckFails(t *testing.T) {
 	}
 }
 
+func TestStartDoesNotRemoveExternalResetLock(t *testing.T) {
+	dataDir := t.TempDir()
+	runDir := filepath.Join(dataDir, "run")
+	binDir := filepath.Join(dataDir, "bin")
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	resetLock := filepath.Join(runDir, "reset.lock")
+	if err := os.WriteFile(resetLock, []byte("external reset\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	singBoxPath := filepath.Join(binDir, "sing-box")
+	if err := os.WriteFile(singBoxPath, []byte("#!/bin/sh\necho invalid config >&2\nexit 2\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	manager := NewCoreManager(cfg, dataDir, nil)
+
+	if err := manager.Start(cfg.ResolveProfile()); err == nil {
+		t.Fatal("expected config-check failure")
+	}
+	if _, err := os.Stat(resetLock); err != nil {
+		t.Fatalf("start must not remove reset.lock, stat err=%v", err)
+	}
+}
+
 func TestSingBoxConfigCheckTimeout(t *testing.T) {
 	dataDir := t.TempDir()
 	singBoxPath := filepath.Join(dataDir, "sing-box")

@@ -14,6 +14,7 @@ const (
 	CodeProxyNotRunning = -32001
 	CodeProxyAlready    = -32002
 	CodeConfigError     = -32003
+	CodeRuntimeBusy     = -32004
 )
 
 // Request is a JSON-RPC 2.0 request object.

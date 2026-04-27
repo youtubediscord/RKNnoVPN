@@ -12,6 +12,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
@@ -303,6 +304,22 @@ func TestResetModeCreatesManualLockAndClearsActive(t *testing.T) {
 	}
 	if _, err := os.Stat(d.manualFlagPath()); err != nil {
 		t.Fatalf("manual flag should remain after reset: %v", err)
+	}
+}
+
+func TestRuntimeStartFailsWhileResetLockPresent(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	if err := os.WriteFile(d.resetLockPath(), []byte("reset\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	err := (&rootBackendV2{d: d}).Start(runtimev2.DesiredState{BackendKind: runtimev2.BackendRootTProxy})
+	if err == nil || !strings.Contains(err.Error(), "reset is in progress") {
+		t.Fatalf("expected reset-in-progress error, got %v", err)
+	}
+	rpcErr := d.rpcErrorFromRuntimeError(err)
+	if rpcErr.Code != ipc.CodeRuntimeBusy {
+		t.Fatalf("expected runtime busy RPC code, got %#v", rpcErr)
 	}
 }
 

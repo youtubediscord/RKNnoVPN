@@ -15,6 +15,7 @@ class UserMessageFormatter @Inject constructor(
 ) {
     private companion object {
         const val COMPATIBILITY_ERROR_CODE = -32090
+        const val RUNTIME_BUSY_CODE = -32004
     }
 
     fun get(@StringRes resId: Int, vararg args: Any): String = context.getString(resId, *args)
@@ -29,10 +30,10 @@ class UserMessageFormatter @Inject constructor(
 
     fun formatDaemonFailure(result: DaemonClientResult<*>): String = when (result) {
         is DaemonClientResult.DaemonError ->
-            if (result.code == COMPATIBILITY_ERROR_CODE) {
-                result.message
-            } else {
-                get(
+            when (result.code) {
+                COMPATIBILITY_ERROR_CODE -> result.message
+                RUNTIME_BUSY_CODE -> get(R.string.error_runtime_busy)
+                else -> get(
                     R.string.error_daemon_with_code,
                     result.code,
                     result.message,

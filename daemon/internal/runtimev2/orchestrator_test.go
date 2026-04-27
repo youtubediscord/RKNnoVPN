@@ -1,6 +1,7 @@
 package runtimev2
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -110,20 +111,188 @@ func TestStartErrorUsesCodedRuntimePhase(t *testing.T) {
 	}
 }
 
+func TestActorRejectsResetWhileStartIsActive(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend := &fakeBackend{kind: BackendRootTProxy, startStarted: started, startBlock: release}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = o.Start()
+		close(done)
+	}()
+	waitForSignal(t, started)
+
+	_, err := o.Reset()
+	if !isBusyCode(err, BusyCodeRuntimeBusy) {
+		t.Fatalf("expected runtime busy while start is active, got %T %v", err, err)
+	}
+	if status := o.Status(); status.AppliedState.Generation != 1 {
+		t.Fatalf("blocked reset must not advance generation: %#v", status)
+	}
+
+	close(release)
+	waitForSignal(t, done)
+}
+
+func TestActorRejectsStartWhileResetIsActive(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend := &fakeBackend{kind: BackendRootTProxy, resetStarted: started, resetBlock: release}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = o.Reset()
+		close(done)
+	}()
+	waitForSignal(t, started)
+
+	_, err := o.Start()
+	if !isBusyCode(err, BusyCodeResetInProgress) {
+		t.Fatalf("expected reset-in-progress while reset is active, got %T %v", err, err)
+	}
+
+	close(release)
+	waitForSignal(t, done)
+}
+
+func TestActorRejectsReloadNetworkRescueAndUpdateDuringReset(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend := &fakeBackend{kind: BackendRootTProxy, resetStarted: started, resetBlock: release}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = o.Reset()
+		close(done)
+	}()
+	waitForSignal(t, started)
+
+	if _, err := o.RunOperation(OperationReload, PhaseStarting, func(int64) error { return nil }); !isBusyCode(err, BusyCodeResetInProgress) {
+		t.Fatalf("expected reload to fail fast during reset, got %T %v", err, err)
+	}
+	if _, err := o.HandleNetworkChange(); !isBusyCode(err, BusyCodeResetInProgress) {
+		t.Fatalf("expected network-change to fail fast during reset, got %T %v", err, err)
+	}
+	if _, err := o.RunOperation(OperationRescue, PhaseStarting, func(int64) error { return nil }); !isBusyCode(err, BusyCodeResetInProgress) {
+		t.Fatalf("expected rescue to fail fast during reset, got %T %v", err, err)
+	}
+	if _, err := o.RunOperation(OperationUpdateInstall, PhaseStopping, func(int64) error { return nil }); !isBusyCode(err, BusyCodeResetInProgress) {
+		t.Fatalf("expected update install to fail fast during reset, got %T %v", err, err)
+	}
+
+	close(release)
+	waitForSignal(t, done)
+}
+
+func TestActorRejectsRescueDuringStart(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend := &fakeBackend{kind: BackendRootTProxy, startStarted: started, startBlock: release}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = o.Start()
+		close(done)
+	}()
+	waitForSignal(t, started)
+
+	if _, err := o.RunOperation(OperationRescue, PhaseStarting, func(int64) error { return nil }); !isBusyCode(err, BusyCodeRuntimeBusy) {
+		t.Fatalf("expected rescue to fail fast during start, got %T %v", err, err)
+	}
+
+	close(release)
+	waitForSignal(t, done)
+}
+
+func TestActorStatusAndHealthRemainReadableDuringOperation(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend := &fakeBackend{kind: BackendRootTProxy, startStarted: started, startBlock: release}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = o.Start()
+		close(done)
+	}()
+	waitForSignal(t, started)
+
+	status := o.Status()
+	if status.ActiveOperation == nil || status.ActiveOperation.Kind != OperationStart {
+		t.Fatalf("expected active start operation in status: %#v", status)
+	}
+	if status.AppliedState.Phase != PhaseStarting || status.AppliedState.Generation != 1 {
+		t.Fatalf("expected starting generation 1, got %#v", status.AppliedState)
+	}
+	health := o.CurrentHealth()
+	if !health.CheckedAt.IsZero() {
+		t.Fatalf("current health should be readable without forcing probes: %#v", health)
+	}
+
+	close(release)
+	waitForSignal(t, done)
+}
+
+func TestActorFailedAndBlockedOperationsDoNotRollBackGeneration(t *testing.T) {
+	backend := &fakeBackend{kind: BackendRootTProxy, startErr: errors.New("boom")}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+
+	status, err := o.Start()
+	if err == nil {
+		t.Fatal("expected start failure")
+	}
+	if status.AppliedState.Generation != 1 {
+		t.Fatalf("failed start should leave generation 1, got %#v", status.AppliedState)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend.startErr = nil
+	backend.startStarted = started
+	backend.startBlock = release
+	done := make(chan struct{})
+	go func() {
+		_, _ = o.Start()
+		close(done)
+	}()
+	waitForSignal(t, started)
+	if _, err := o.Reset(); !isBusyCode(err, BusyCodeRuntimeBusy) {
+		t.Fatalf("expected blocked reset, got %T %v", err, err)
+	}
+	if status := o.Status(); status.AppliedState.Generation != 2 {
+		t.Fatalf("blocked reset must not advance active generation: %#v", status.AppliedState)
+	}
+	close(release)
+	waitForSignal(t, done)
+}
+
 type fakeBackend struct {
-	kind      BackendKind
-	stopCalls int
-	startErr  error
+	kind         BackendKind
+	stopCalls    int
+	startErr     error
+	startStarted chan struct{}
+	startBlock   chan struct{}
+	resetStarted chan struct{}
+	resetBlock   chan struct{}
 }
 
 func (f *fakeBackend) Kind() BackendKind         { return f.kind }
 func (f *fakeBackend) Supported() (bool, string) { return true, "" }
-func (f *fakeBackend) Start(DesiredState) error  { return f.startErr }
+func (f *fakeBackend) Start(DesiredState) error {
+	signalAndWait(f.startStarted, f.startBlock)
+	return f.startErr
+}
 func (f *fakeBackend) Stop() error {
 	f.stopCalls++
 	return nil
 }
 func (f *fakeBackend) Reset(generation int64) ResetReport {
+	signalAndWait(f.resetStarted, f.resetBlock)
 	return ResetReport{BackendKind: f.kind, Generation: generation, Status: "ok"}
 }
 func (f *fakeBackend) Restart(DesiredState, int64) error { return nil }
@@ -152,4 +321,27 @@ func (e codedTestError) RuntimeDebug() string         { return e.debug }
 func (e codedTestError) RuntimeRollbackApplied() bool { return e.rollbackApplied }
 func (e codedTestError) RuntimeStageReport() interface{} {
 	return e.stageReport
+}
+
+func signalAndWait(started chan struct{}, block chan struct{}) {
+	if started != nil {
+		close(started)
+	}
+	if block != nil {
+		<-block
+	}
+}
+
+func waitForSignal(t *testing.T, ch chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for operation signal")
+	}
+}
+
+func isBusyCode(err error, code string) bool {
+	var busy *OperationBusyError
+	return errors.As(err, &busy) && busy.Code == code
 }

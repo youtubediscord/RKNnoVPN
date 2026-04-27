@@ -46,6 +46,7 @@
     <string name="health_issue_outbound_url_failed">Outbound URL probe did not pass through the selected proxy route.</string>
     <string name="health_issue_readiness_failed">Runtime readiness gates failed.</string>
     <string name="health_issue_operational_degraded">Runtime started, but data-plane checks are degraded.</string>
+    <string name="error_runtime_busy">An operation is already running. Wait for the current action to finish.</string>
     <string name="uptime">Uptime</string>
     <string name="traffic">Traffic</string>
     <string name="upload_short">TX</string>

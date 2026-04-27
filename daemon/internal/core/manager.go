@@ -487,7 +487,6 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	m.startedAt = time.Now()
 	m.state = StateRunning
 	m.markActive()
-	_ = os.Remove(filepath.Join(m.dataDir, "run", "reset.lock"))
 	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
 	m.logger.Printf("core is running (pid=%d)", m.pid)
 	recordStage("commit-state", "ok", "", m.activeProfile, false)
@@ -668,7 +667,6 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.startedAt = time.Now()
 	m.state = StateRunning
 	m.markActive()
-	_ = os.Remove(filepath.Join(m.dataDir, "run", "reset.lock"))
 	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
 	m.logger.Printf("hot-swap complete (pid=%d)", m.pid)
 	recordStage("commit-state", "ok", "", m.activeProfile, false)

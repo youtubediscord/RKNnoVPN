@@ -210,28 +210,39 @@ func main() {
 			log.Printf("rescue skipped: runtime is no longer desired running")
 			return
 		}
-		d.mu.Lock()
-		rescueEnabled := d.cfg.Rescue.Enabled
-		d.mu.Unlock()
-		if !rescueEnabled {
-			log.Printf("rescue disabled, skipping automatic recovery")
-			return
-		}
-		if err := d.rescueMgr.Attempt(func() bool {
-			return d.canRunRuntimeRecovery(epoch)
-		}); err != nil {
-			log.Printf("rescue attempt failed: %v", err)
+		_, err := d.runtimeV2.RunOperation(runtimev2.OperationRescue, runtimev2.PhaseStarting, func(generation int64) error {
+			if !d.canRunRuntimeRecovery(epoch) {
+				log.Printf("rescue skipped: runtime changed before recovery")
+				return nil
+			}
 			d.mu.Lock()
-			maxAttempts := d.cfg.Rescue.MaxAttempts
+			rescueEnabled := d.cfg.Rescue.Enabled
 			d.mu.Unlock()
-			if maxAttempts < 1 {
-				maxAttempts = 1
+			if !rescueEnabled {
+				log.Printf("rescue disabled, skipping automatic recovery")
+				return nil
 			}
-			if d.rescueMgr.Attempts() >= maxAttempts && d.canRunRuntimeRecovery(epoch) {
-				if rollbackErr := d.rescueMgr.Rollback(); rollbackErr != nil {
-					log.Printf("rescue rollback failed: %v", rollbackErr)
+			if err := d.rescueMgr.Attempt(func() bool {
+				return d.canRunRuntimeRecovery(epoch)
+			}); err != nil {
+				log.Printf("rescue attempt failed: %v", err)
+				d.mu.Lock()
+				maxAttempts := d.cfg.Rescue.MaxAttempts
+				d.mu.Unlock()
+				if maxAttempts < 1 {
+					maxAttempts = 1
 				}
+				if d.rescueMgr.Attempts() >= maxAttempts && d.canRunRuntimeRecovery(epoch) {
+					if rollbackErr := d.rescueMgr.Rollback(); rollbackErr != nil {
+						log.Printf("rescue rollback failed: %v", rollbackErr)
+					}
+				}
+				return nil
 			}
+			return nil
+		})
+		if err != nil {
+			log.Printf("rescue skipped or failed: %v", err)
 		}
 	})
 	d.healthMon.SetOnRestored(func() {
@@ -273,7 +284,9 @@ func main() {
 
 		case syscall.SIGHUP:
 			log.Printf("received SIGHUP, reloading config")
-			d.reloadConfig()
+			if err := d.reloadConfig(); err != nil {
+				log.Printf("reload config failed: %v", err)
+			}
 
 		case syscall.SIGUSR1:
 			log.Printf("received SIGUSR1, dumping state")
@@ -331,19 +344,18 @@ func (d *daemon) shutdown() {
 // Config reload
 // --------------------------------------------------------------------------
 
-func (d *daemon) reloadConfig() {
+func (d *daemon) reloadConfig() error {
 	newCfg, err := config.Load(d.cfgPath)
 	if err != nil {
-		log.Printf("reload config failed: %v", err)
-		return
+		return fmt.Errorf("reload config: %w", err)
 	}
 
 	if err := d.applyConfig(newCfg, true); err != nil {
-		log.Printf("reload config apply failed: %v", err)
-		return
+		return fmt.Errorf("reload config apply: %w", err)
 	}
 
 	log.Printf("config reloaded")
+	return nil
 }
 
 // --------------------------------------------------------------------------
@@ -493,10 +505,7 @@ func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCErro
 	d.syncRuntimeV2DesiredState()
 	status, err := d.runtimeV2.Start()
 	if err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInternalError,
-			Message: err.Error(),
-		}
+		return nil, d.rpcErrorFromRuntimeError(err)
 	}
 	return status, nil
 }
@@ -504,16 +513,15 @@ func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCErro
 func (d *daemon) handleStop(params *json.RawMessage) (interface{}, *ipc.RPCError) {
 	status, err := d.runtimeV2.Stop()
 	if err != nil {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInternalError,
-			Message: err.Error(),
-		}
+		return nil, d.rpcErrorFromRuntimeError(err)
 	}
 	return status, nil
 }
 
 func (d *daemon) handleReload(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	d.reloadConfig()
+	if err := d.reloadConfig(); err != nil {
+		return nil, d.rpcErrorFromRuntimeError(err)
+	}
 	return map[string]string{"status": "reloaded"}, nil
 }
 
@@ -521,7 +529,23 @@ func (d *daemon) handleNetworkReset(params *json.RawMessage) (interface{}, *ipc.
 	if d.runtimeV2 == nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "v2 runtime is not initialized"}
 	}
-	return d.runtimeV2.Reset(), nil
+	report, err := d.runtimeV2.Reset()
+	if err != nil {
+		return nil, d.rpcErrorFromRuntimeError(err)
+	}
+	return report, nil
+}
+
+func (d *daemon) rpcErrorFromRuntimeError(err error) *ipc.RPCError {
+	var busy *runtimev2.OperationBusyError
+	if errors.As(err, &busy) {
+		return &ipc.RPCError{
+			Code:    ipc.CodeRuntimeBusy,
+			Message: busy.Error(),
+			Data:    busy.Data(),
+		}
+	}
+	return &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
 }
 
 func (d *daemon) handleHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1185,6 +1209,17 @@ func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Co
 }
 
 func (d *daemon) configApplyRPCError(err error) *ipc.RPCError {
+	var busy *runtimev2.OperationBusyError
+	if errors.As(err, &busy) {
+		rpcErr := d.rpcErrorFromRuntimeError(err)
+		if strings.Contains(err.Error(), "config saved") || strings.Contains(err.Error(), "panel saved") {
+			rpcErr.Data = map[string]interface{}{
+				"config_saved": true,
+				"busy":         busy.Data(),
+			}
+		}
+		return rpcErr
+	}
 	rpcErr := &ipc.RPCError{
 		Code:    ipc.CodeInternalError,
 		Message: err.Error(),
@@ -1240,8 +1275,10 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 	d.syncRuntimeV2DesiredState()
 
 	if reload && wasRunning {
-		if err := d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved"); err != nil {
-			return err
+		if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(generation int64) error {
+			return d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved")
+		}); err != nil {
+			return fmt.Errorf("config saved: %w", err)
 		}
 	}
 
@@ -1275,8 +1312,10 @@ func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) erro
 	d.syncRuntimeV2DesiredState()
 
 	if reload && wasRunning {
-		if err := d.reloadRuntimeAfterConfigChange(currentCfg, "apply panel", "panel saved"); err != nil {
-			return err
+		if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(generation int64) error {
+			return d.reloadRuntimeAfterConfigChange(currentCfg, "apply panel", "panel saved")
+		}); err != nil {
+			return fmt.Errorf("panel saved: %w", err)
 		}
 	}
 
@@ -1284,6 +1323,10 @@ func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) erro
 }
 
 func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string) error {
+	if err := d.failIfResetInProgress(); err != nil {
+		return err
+	}
+
 	report := core.NewRuntimeStageReport(context)
 	d.setLastReloadReport(report)
 	recordStage := func(name string, status string, code string, detail string, rollbackApplied bool) {
@@ -2248,47 +2291,51 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
 		d.coreMgr.GetState() == core.StateDegraded
 
-	if moduleExists {
-		// Stop subsystems before module update only when we are replacing the
-		// daemon/module itself. APK-only installs should not disrupt traffic.
-		d.stopSubsystems()
-		if err := d.coreMgr.Stop(); err != nil {
-			log.Printf("[updater] warning: failed to stop core: %v", err)
-		}
-	}
-
 	moduleUpdated := false
-
-	// Install module (binaries + scripts + module files).
-	if moduleExists {
-		moduleDir := "/data/adb/modules/privstack"
-		if err := updater.InstallModuleUpdate(p.ModulePath, d.dataDir, moduleDir); err != nil {
-			if wasRunning {
-				d.restoreCurrentRuntimeAfterFailedUpdate()
+	if _, err := d.runtimeV2.RunOperation(runtimev2.OperationUpdateInstall, runtimev2.PhaseStopping, func(generation int64) error {
+		if moduleExists {
+			if err := d.failIfResetInProgress(); err != nil {
+				return err
 			}
-			return nil, &ipc.RPCError{
-				Code:    ipc.CodeInternalError,
-				Message: "module install failed: " + err.Error(),
+			// Stop subsystems before module update only when we are replacing the
+			// daemon/module itself. APK-only installs should not disrupt traffic.
+			d.stopSubsystems()
+			if err := d.coreMgr.Stop(); err != nil {
+				log.Printf("[updater] warning: failed to stop core: %v", err)
 			}
 		}
-		result["module_installed"] = true
-		moduleUpdated = true
-	}
 
-	// Install APK.
-	if apkExists {
-		if err := updater.InstallApkUpdate(p.ApkPath); err != nil {
-			log.Printf("[updater] APK install failed: %v", err)
-			result["apk_error"] = err.Error()
-		} else {
-			result["apk_installed"] = true
+		// Install module (binaries + scripts + module files).
+		if moduleExists {
+			moduleDir := "/data/adb/modules/privstack"
+			if err := updater.InstallModuleUpdate(p.ModulePath, d.dataDir, moduleDir); err != nil {
+				if wasRunning {
+					d.restoreCurrentRuntimeAfterFailedUpdate()
+				}
+				return fmt.Errorf("module install failed: %w", err)
+			}
+			result["module_installed"] = true
+			moduleUpdated = true
 		}
+
+		// Install APK.
+		if apkExists {
+			if err := updater.InstallApkUpdate(p.ApkPath); err != nil {
+				log.Printf("[updater] APK install failed: %v", err)
+				result["apk_error"] = err.Error()
+			} else {
+				result["apk_installed"] = true
+			}
+		}
+
+		// Clean up downloaded files.
+		os.RemoveAll(updateDir)
+
+		result["status"] = "installed"
+		return nil
+	}); err != nil {
+		return nil, d.rpcErrorFromRuntimeError(err)
 	}
-
-	// Clean up downloaded files.
-	os.RemoveAll(updateDir)
-
-	result["status"] = "installed"
 
 	// If we installed a new module (which includes a new privd binary),
 	// the new daemon is already forked and listening. Schedule this old
@@ -2302,6 +2349,11 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 }
 
 func (d *daemon) restoreCurrentRuntimeAfterFailedUpdate() {
+	if err := d.failIfResetInProgress(); err != nil {
+		log.Printf("[updater] skipping runtime restore while reset is active: %v", err)
+		return
+	}
+
 	d.mu.Lock()
 	cfg := d.cfg
 	d.mu.Unlock()

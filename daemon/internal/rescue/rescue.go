@@ -171,6 +171,7 @@ func (r *RescueManager) Rollback() error {
 
 	// 3. Explicitly flush PRIVSTACK chains as a final safety net.
 	r.flushPrivstackChains()
+	_ = os.Remove(filepath.Join(r.dataDir, "run", "reset.lock"))
 
 	r.core.SetState(core.StateStopped)
 	r.logger.Println("rollback complete — proxy is fully down")

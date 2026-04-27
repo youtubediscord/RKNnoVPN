@@ -46,6 +46,7 @@
     <string name="health_issue_outbound_url_failed">URL-проверка не прошла через выбранный proxy-маршрут.</string>
     <string name="health_issue_readiness_failed">Проверки готовности runtime не пройдены.</string>
     <string name="health_issue_operational_degraded">Runtime запущен, но data-plane проверки degraded.</string>
+    <string name="error_runtime_busy">Операция уже выполняется. Дождитесь завершения текущего действия.</string>
     <string name="uptime">Время работы</string>
     <string name="traffic">Трафик</string>
     <string name="upload_short">TX</string>

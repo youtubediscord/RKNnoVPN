@@ -6,6 +6,8 @@ SINGBOX_RESOLVED_VERSION := $(shell if [ "$(SINGBOX_VERSION)" = "stable" ]; then
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 OUT_DIR := out
 MODULE_DIR := module
+LAB_APK ?= $(OUT_DIR)/privstack-$(VERSION)-panel.apk
+LAB_MODULE ?= $(OUT_DIR)/privstack-$(VERSION)-module.zip
 SINGBOX_SRC_DIR := /tmp/sing-box-$(SINGBOX_RESOLVED_VERSION)
 SINGBOX_TAGS := with_quic,with_wireguard,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0
 SINGBOX_LDFLAGS := -X 'github.com/sagernet/sing-box/constant.Version=$(SINGBOX_RESOLVED_VERSION)' -X 'internal/godebug.defaultGODEBUG=multipathtcp=0' -checklinkname=0 -s -w -buildid=
@@ -16,7 +18,7 @@ ANDROID_NDK_TOOLCHAIN := $(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/$(ANDROID_
 ANDROID_CC_ARM64 := $(ANDROID_NDK_TOOLCHAIN)/aarch64-linux-android$(ANDROID_API)-clang
 ANDROID_CC_ARMV7 := $(ANDROID_NDK_TOOLCHAIN)/armv7a-linux-androideabi$(ANDROID_API)-clang
 
-.PHONY: all daemon daemon-arm64 daemon-armv7 singbox singbox-src singbox-arm64 singbox-armv7 apk module clean lab-collect lab-smoke lab-smoke-reset
+.PHONY: all daemon daemon-arm64 daemon-armv7 singbox singbox-src singbox-arm64 singbox-armv7 apk module clean lab-collect lab-smoke lab-smoke-reset lab-emulator-prepare-insecure-adb lab-emulator-connect lab-emulator-doctor lab-emulator-collect lab-emulator-smoke lab-emulator-smoke-start lab-emulator-install
 
 all: daemon singbox module apk
 	@echo "Build complete. Artifacts in $(OUT_DIR)/"
@@ -131,6 +133,27 @@ lab-smoke:
 
 lab-smoke-reset:
 	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/smoke.sh --allow-reset
+
+lab-emulator-prepare-insecure-adb:
+	tools/device_lab/lineage_emulator.sh prepare-insecure-adb --vm-dir "$(VM_DIR)"
+
+lab-emulator-connect:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh connect
+
+lab-emulator-doctor:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh doctor
+
+lab-emulator-collect:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh collect
+
+lab-emulator-smoke:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh smoke
+
+lab-emulator-smoke-start:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh smoke --allow-start --stop-after-start
+
+lab-emulator-install:
+	ADB="$(ADB)" ADB_SERIAL="$(ADB_SERIAL)" OUT_ROOT="$(OUT_ROOT)" tools/device_lab/lineage_emulator.sh install --apk "$(LAB_APK)" --module "$(LAB_MODULE)" --allow-module-install --reboot-after-install
 
 # === Clean ===
 clean:

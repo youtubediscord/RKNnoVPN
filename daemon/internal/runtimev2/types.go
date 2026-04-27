@@ -27,6 +27,19 @@ const (
 	PhaseFailed          Phase = "FAILED"
 )
 
+type OperationKind string
+
+const (
+	OperationStart         OperationKind = "start"
+	OperationStop          OperationKind = "stop"
+	OperationRestart       OperationKind = "restart"
+	OperationReset         OperationKind = "reset"
+	OperationReload        OperationKind = "reload"
+	OperationNetworkChange OperationKind = "network-change"
+	OperationRescue        OperationKind = "rescue"
+	OperationUpdateInstall OperationKind = "update-install"
+)
+
 type FallbackPolicy string
 
 const (
@@ -62,6 +75,14 @@ type AppliedState struct {
 	ActiveProfileID string      `json:"activeProfileId,omitempty"`
 	StartedAt       time.Time   `json:"startedAt,omitempty"`
 	Generation      int64       `json:"generation"`
+}
+
+type OperationStatus struct {
+	OperationID string        `json:"operationId"`
+	Kind        OperationKind `json:"kind"`
+	Generation  int64         `json:"generation"`
+	Phase       Phase         `json:"phase"`
+	StartedAt   time.Time     `json:"startedAt"`
 }
 
 type HealthSnapshot struct {
@@ -141,8 +162,9 @@ type BackendCapability struct {
 }
 
 type Status struct {
-	DesiredState DesiredState        `json:"desiredState"`
-	AppliedState AppliedState        `json:"appliedState"`
-	Health       HealthSnapshot      `json:"health"`
-	Capabilities []BackendCapability `json:"capabilities"`
+	DesiredState    DesiredState        `json:"desiredState"`
+	AppliedState    AppliedState        `json:"appliedState"`
+	Health          HealthSnapshot      `json:"health"`
+	Capabilities    []BackendCapability `json:"capabilities"`
+	ActiveOperation *OperationStatus    `json:"activeOperation,omitempty"`
 }
