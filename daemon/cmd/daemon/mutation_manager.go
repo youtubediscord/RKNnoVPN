@@ -7,11 +7,9 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
-type profileConfigMutationResult = applytx.ConfigTransactionResult
-
 // persistProfileConfigMutationForAction is the daemon-owned transaction gate
 // for every mutation that changes user intent and its runtime projection.
-func (d *daemon) persistProfileConfigMutationForAction(nextCfg *config.Config, reload bool, action string) (profileConfigMutationResult, error) {
+func (d *daemon) persistProfileConfigMutationForAction(nextCfg *config.Config, reload bool, action string) (applytx.ConfigTransactionResult, error) {
 	operation := runtimeOperationForConfigMutation(action)
 	return applytx.ConfigTransaction{
 		EnsureIdle: d.failIfRuntimeOperationActive,

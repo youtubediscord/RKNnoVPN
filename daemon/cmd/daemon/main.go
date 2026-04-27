@@ -407,7 +407,7 @@ func (d *daemon) reloadConfig() error {
 		return fmt.Errorf("reload config: %w", err)
 	}
 
-	if err := d.applyConfig(newCfg, true); err != nil {
+	if err := d.applyConfigWithOperation(newCfg, true, runtimev2.OperationReload); err != nil {
 		return fmt.Errorf("reload config apply: %w", err)
 	}
 

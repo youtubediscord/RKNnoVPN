@@ -17,7 +17,7 @@ func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError
 		}
 	}
 
-	sections := diagnostics.ReadLogSections(d.resolveLogFileSpecs(request.Files), request.Lines, 512*1024, nil)
+	sections := diagnostics.ReadLogSections(diagnostics.ResolveLogFileSpecs(d.dataDir, request.Files), request.Lines, 512*1024, nil)
 	combined := make([]string, 0, len(request.Files)*request.Lines)
 	for _, section := range sections {
 		combined = append(combined, "== "+section.Path+" ==")
@@ -36,14 +36,4 @@ func (d *daemon) handleLogs(params *json.RawMessage) (interface{}, *ipc.RPCError
 		"lines": combined,
 		"logs":  sections,
 	}, nil
-}
-
-type logFileSpec = diagnostics.LogFileSpec
-
-func (d *daemon) resolveLogFileSpecs(requested []string) []logFileSpec {
-	return diagnostics.ResolveLogFileSpecs(d.dataDir, requested)
-}
-
-func readLogTail(path string, maxLines int, maxBytes int64) ([]string, error) {
-	return diagnostics.ReadLogTail(path, maxLines, maxBytes)
 }

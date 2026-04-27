@@ -46,9 +46,9 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 		runtimeStatus = d.runtimeV2.Status()
 		backendStatus = runtimeStatus
 	}
-	moduleVersion := readModuleVersion()
-	ports := diagnosticPortStatuses(cfg)
-	portConflicts := diagnosticLocalPortConflicts(cfg)
+	moduleVersion := diagnostics.ReadModuleVersion()
+	ports := diagnostics.PortStatuses(cfg)
+	portConflicts := diagnostics.LocalPortConflicts(cfg)
 	netstackReport := d.diagnosticNetstackReport(cfg)
 	netstackRuntimeReport := d.diagnosticNetstackRuntimeReport(cfg)
 	leftovers := netstackReport.Leftovers
@@ -56,9 +56,9 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 	if cfg != nil {
 		nodeResults = d.testNodeProbesV2(cfg.Health.URL, 2500, nil)
 	}
-	privacy := d.privacyDiagnostics(cfg, lines)
-	singBoxCheck := d.singBoxCheck(singBoxPath, renderedConfigPath, lines)
-	releaseIntegrity := diagnosticReleaseIntegrityReport(dataDir)
+	privacy := diagnostics.Privacy(cfg, lines, core.ExecCommand)
+	singBoxCheck := diagnostics.SingBoxCheck(singBoxPath, renderedConfigPath, lines, core.ExecCommand)
+	releaseIntegrity := diagnostics.ReleaseIntegrityReport(dataDir)
 	routingSummary := diagnostics.RoutingSummaryFromConfig(cfg)
 	profileSummary := diagnostics.ProfileSummaryFromConfig(cfg, runtimeStatus)
 	packageResolution := diagnostics.PackageResolutionFromConfig(cfg)
@@ -69,9 +69,9 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 		"control_protocol_version": controlProtocolVersion,
 		"schema_version":           config.CurrentSchemaVersion,
 		"panel_min_version":        Version,
-		"capabilities":             supportedCapabilities(),
-		"supported_methods":        supportedRPCMethods(),
-		"sing_box":                 d.singBoxVersion(singBoxPath, lines),
+		"capabilities":             ipc.SupportedCapabilities(),
+		"supported_methods":        ipc.SupportedMethods(),
+		"sing_box":                 diagnostics.SingBoxVersion(singBoxPath, lines, core.ExecCommand),
 		"module":                   moduleVersion,
 	}
 
@@ -79,19 +79,19 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 		"generated_at": time.Now().Format(time.RFC3339),
 		"summary":      diagnostics.BuildSummary(Version, controlProtocolVersion, healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, profileSummary, routingSummary, packageResolution),
 		"versions":     versions,
-		"device":       d.diagnosticDevice(lines),
-		"paths": map[string]diagnosticFileStatus{
-			"data_dir":          fileStatus(dataDir, false),
-			"current_release":   fileStatus(filepath.Join(dataDir, "current"), false),
-			"releases_dir":      fileStatus(filepath.Join(dataDir, "releases"), false),
-			"config":            fileStatus(cfgPath, false),
-			"profile":           fileStatus(profilePath, false),
-			"rendered_singbox":  fileStatus(renderedConfigPath, false),
-			"sing_box_binary":   fileStatus(singBoxPath, true),
-			"daemon_log":        fileStatus(filepath.Join(dataDir, "logs", "daemon.log"), false),
-			"sing_box_log":      fileStatus(filepath.Join(dataDir, "logs", "sing-box.log"), false),
-			"daemon_socket":     fileStatus(filepath.Join(dataDir, "run", "daemon.sock"), false),
-			"sing_box_pid_file": fileStatus(filepath.Join(dataDir, "run", "singbox.pid"), false),
+		"device":       diagnostics.DeviceCommands(lines, core.ExecCommand),
+		"paths": map[string]diagnostics.FileStatus{
+			"data_dir":          diagnostics.StatFile(dataDir, false),
+			"current_release":   diagnostics.StatFile(filepath.Join(dataDir, "current"), false),
+			"releases_dir":      diagnostics.StatFile(filepath.Join(dataDir, "releases"), false),
+			"config":            diagnostics.StatFile(cfgPath, false),
+			"profile":           diagnostics.StatFile(profilePath, false),
+			"rendered_singbox":  diagnostics.StatFile(renderedConfigPath, false),
+			"sing_box_binary":   diagnostics.StatFile(singBoxPath, true),
+			"daemon_log":        diagnostics.StatFile(filepath.Join(dataDir, "logs", "daemon.log"), false),
+			"sing_box_log":      diagnostics.StatFile(filepath.Join(dataDir, "logs", "sing-box.log"), false),
+			"daemon_socket":     diagnostics.StatFile(filepath.Join(dataDir, "run", "daemon.sock"), false),
+			"sing_box_pid_file": diagnostics.StatFile(filepath.Join(dataDir, "run", "singbox.pid"), false),
 		},
 		"health": map[string]interface{}{
 			"snapshot": healthSnapshot,
@@ -109,14 +109,14 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 		"netstack":            netstackReport,
 		"netstack_runtime":    netstackRuntimeReport,
 		"leftovers":           leftovers,
-		"node_tests":          redactNodeProbeResults(nodeResults),
-		"logs":                d.diagnosticLogs(lines),
-		"config": map[string]diagnosticJSONSection{
-			"daemon":           readRedactedJSONFile(cfgPath),
-			"profile":          readRedactedJSONFile(profilePath),
-			"rendered_singbox": readRedactedJSONFile(renderedConfigPath),
+		"node_tests":          diagnostics.RedactNodeProbeResults(nodeResults),
+		"logs":                diagnostics.ReadLogSections(diagnostics.DefaultLogFileSpecs(dataDir), lines, 512*1024, diagnostics.RedactText),
+		"config": map[string]diagnostics.JSONSection{
+			"daemon":           diagnostics.ReadRedactedJSONFile(cfgPath),
+			"profile":          diagnostics.ReadRedactedJSONFile(profilePath),
+			"rendered_singbox": diagnostics.ReadRedactedJSONFile(renderedConfigPath),
 		},
-		"runtime":           d.runtimeDiagnostics(lines),
+		"runtime":           diagnostics.RuntimeCommands(lines, core.ExecCommand),
 		"privacy":           privacy,
 		"release_integrity": releaseIntegrity,
 	}
@@ -133,13 +133,13 @@ func (d *daemon) handleSelfCheck(params *json.RawMessage) (interface{}, *ipc.RPC
 	return summary, nil
 }
 
-func (d *daemon) buildSelfCheckSummary(lines int) (diagnosticSummary, error) {
+func (d *daemon) buildSelfCheckSummary(lines int) (diagnostics.Summary, error) {
 	d.mu.Lock()
 	cfg := d.cfg
 	dataDir := d.dataDir
 	d.mu.Unlock()
 	if cfg == nil {
-		return diagnosticSummary{Status: "failed", Issues: []string{"config unavailable"}, IssueCount: 1}, nil
+		return diagnostics.Summary{Status: "failed", Issues: []string{"config unavailable"}, IssueCount: 1}, nil
 	}
 	if lines <= 0 {
 		lines = 80
@@ -165,11 +165,11 @@ func (d *daemon) buildSelfCheckSummary(lines int) (diagnosticSummary, error) {
 		netstackReport.Leftovers,
 		netstackRuntimeReport,
 		nodeResults,
-		diagnosticPortStatuses(cfg),
-		d.privacyDiagnostics(cfg, lines),
-		readModuleVersion(),
-		d.singBoxCheck(singBoxPath, renderedConfigPath, lines),
-		diagnosticReleaseIntegrityReport(dataDir),
+		diagnostics.PortStatuses(cfg),
+		diagnostics.Privacy(cfg, lines, core.ExecCommand),
+		diagnostics.ReadModuleVersion(),
+		diagnostics.SingBoxCheck(singBoxPath, renderedConfigPath, lines, core.ExecCommand),
+		diagnostics.ReleaseIntegrityReport(dataDir),
 		diagnostics.ProfileSummaryFromConfig(cfg, runtimeStatus),
 		diagnostics.RoutingSummaryFromConfig(cfg),
 		diagnostics.PackageResolutionFromConfig(cfg),

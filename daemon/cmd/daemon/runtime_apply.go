@@ -13,10 +13,6 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
-func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
-	return d.applyConfigWithOperation(newCfg, reload, runtimev2.OperationReload)
-}
-
 func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, operation runtimev2.OperationKind) error {
 	if operation == "" {
 		operation = runtimev2.OperationReload

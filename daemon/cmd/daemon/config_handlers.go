@@ -73,10 +73,6 @@ func configImportRPCError(err error) *ipc.RPCError {
 	return &ipc.RPCError{Code: code, Message: err.Error()}
 }
 
-func (d *daemon) configApplyRPCError(action string, err error) *ipc.RPCError {
-	return d.configApplyRPCErrorSaved(action, err, configMutationWasSaved(err))
-}
-
 func (d *daemon) configApplyRPCErrorSaved(action string, err error, saved bool) *ipc.RPCError {
 	var busy *runtimev2.OperationBusyError
 	if errors.As(err, &busy) {

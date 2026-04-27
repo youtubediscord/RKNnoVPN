@@ -186,18 +186,18 @@ func (d *daemon) refreshRuntimeV2Compatibility() {
 	if d.runtimeV2 == nil {
 		return
 	}
-	release := diagnosticReleaseIntegrityReport(d.dataDir)
+	release := diagnostics.ReleaseIntegrityReport(d.dataDir)
 	d.runtimeV2.SetCompatibility(runtimev2.CompatibilityStatus{
 		DaemonVersion:          Version,
-		ModuleVersion:          readModuleVersion()["version"],
+		ModuleVersion:          diagnostics.ReadModuleVersion()["version"],
 		CurrentReleaseVersion:  release.Version,
 		CurrentReleaseOK:       release.OK,
 		CurrentReleaseError:    releaseIntegrityStatusDetail(release),
 		ControlProtocolVersion: controlProtocolVersion,
 		SchemaVersion:          config.CurrentSchemaVersion,
 		PanelMinVersion:        Version,
-		Capabilities:           supportedCapabilities(),
-		SupportedMethods:       supportedRPCMethods(),
+		Capabilities:           ipc.SupportedCapabilities(),
+		SupportedMethods:       ipc.SupportedMethods(),
 		Methods:                runtimeMethodCapabilities(),
 	})
 }
@@ -214,7 +214,7 @@ func runtimeMethodCapabilities() []runtimev2.MethodCapability {
 	return methods
 }
 
-func releaseIntegrityStatusDetail(release diagnosticReleaseIntegrity) string {
+func releaseIntegrityStatusDetail(release diagnostics.ReleaseIntegrity) string {
 	if release.OK {
 		return ""
 	}
@@ -901,18 +901,6 @@ func isIgnorableResetScriptError(err error) bool {
 	lower := strings.ToLower(err.Error())
 	return strings.Contains(lower, "script not found:") ||
 		strings.Contains(lower, "no such file or directory")
-}
-
-func effectiveLocalPorts(cfg *config.Config) []int {
-	return diagnostics.EffectiveLocalPorts(cfg)
-}
-
-func valueOrDefaultInt(value int, fallback int) int {
-	return diagnostics.ValueOrDefaultInt(value, fallback)
-}
-
-func isTCPPortListening(host string, port int, timeout time.Duration) bool {
-	return diagnostics.TCPPortListening(host, port, timeout)
 }
 
 func firstLineContaining(text string, needle string) string {

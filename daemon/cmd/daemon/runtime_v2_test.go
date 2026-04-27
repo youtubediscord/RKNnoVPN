@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/audit"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
@@ -98,7 +100,7 @@ func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 func TestConfigApplyRPCErrorEnvelopeKeepsSavedFailureVisible(t *testing.T) {
 	d := &daemon{}
 
-	rpcErr := d.configApplyRPCError("config-import", errors.New("config saved: apply config hot-swap failed"))
+	rpcErr := d.configApplyRPCErrorSaved("config-import", errors.New("config saved: apply config hot-swap failed"), true)
 	data, ok := rpcErr.Data.(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected structured mutation error data, got %#v", rpcErr.Data)
@@ -247,16 +249,16 @@ func TestPortProtectionOutputRequiresProtocolAndDropRule(t *testing.T) {
 		"-A RKNNOVPN_OUT -p tcp -m tcp --dport 10856 -j RETURN",
 	}, "\n")
 
-	if !portProtectionOutputContains(output, "tcp", 10853) {
+	if !audit.PortProtectionOutputContains(output, "tcp", 10853) {
 		t.Fatalf("expected TCP protection rule to be detected")
 	}
-	if !portProtectionOutputContains(output, "udp", 10853) {
+	if !audit.PortProtectionOutputContains(output, "udp", 10853) {
 		t.Fatalf("expected UDP protection rule to be detected")
 	}
-	if portProtectionOutputContains(output, "udp", 10856) {
+	if audit.PortProtectionOutputContains(output, "udp", 10856) {
 		t.Fatalf("RETURN-only DNS rule must not count as listener protection")
 	}
-	if portProtectionOutputContains(output, "tcp", 10854) {
+	if audit.PortProtectionOutputContains(output, "tcp", 10854) {
 		t.Fatalf("wrong port must not count as listener protection")
 	}
 }
@@ -628,7 +630,7 @@ func TestReloadConfigApplyBusyDoesNotPersistConfig(t *testing.T) {
 
 	nextCfg := *d.cfg
 	nextCfg.Health.URL = "https://changed.invalid/generate_204"
-	err := d.applyConfig(&nextCfg, true)
+	err := d.applyConfigWithOperation(&nextCfg, true, runtimev2.OperationReload)
 	if !isRuntimeBusyCode(err, runtimev2.BusyCodeRuntimeBusy) {
 		t.Fatalf("expected runtime busy before config write, got %T %v", err, err)
 	}
@@ -664,7 +666,7 @@ func TestConfigApplyWithoutReloadBusyDoesNotPersistConfig(t *testing.T) {
 
 	nextCfg := *d.cfg
 	nextCfg.Health.URL = "https://changed-without-reload.invalid/generate_204"
-	err := d.applyConfig(&nextCfg, false)
+	err := d.applyConfigWithOperation(&nextCfg, false, runtimev2.OperationReload)
 	if !isRuntimeBusyCode(err, runtimev2.BusyCodeResetInProgress) {
 		t.Fatalf("expected runtime busy before config write, got %T %v", err, err)
 	}
@@ -1067,7 +1069,7 @@ func TestReadLogTailReturnsBoundedTail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lines, err := readLogTail(path, 2, 1024)
+	lines, err := diagnostics.ReadLogTail(path, 2, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
