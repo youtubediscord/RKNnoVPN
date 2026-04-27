@@ -16,6 +16,7 @@ data class ProfileConfig(
     /** ID of the active node within this profile. */
     val activeNodeId: String? = null,
     val nodes: List<Node> = emptyList(),
+    val subscriptions: List<Subscription> = emptyList(),
     val runtime: RuntimeConfig = RuntimeConfig(),
     val routing: RoutingConfig = RoutingConfig(),
     val dns: DnsConfig = DnsConfig(),
@@ -25,6 +26,21 @@ data class ProfileConfig(
     val inbounds: InboundsConfig = InboundsConfig(),
     /** Arbitrary extension fields the daemon may add in future versions. */
     val extra: JsonObject? = null
+)
+
+@Serializable
+data class Subscription(
+    val providerKey: String,
+    val url: String,
+    val name: String = "",
+    val lastFetchedAt: Long = 0L,
+    val lastSeenNodeCount: Int = 0,
+    val staleNodeCount: Int = 0,
+    val uploadBytes: Long = 0L,
+    val downloadBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val expireTimestamp: Long = 0L,
+    val parseFailures: Int = 0
 )
 
 @Serializable

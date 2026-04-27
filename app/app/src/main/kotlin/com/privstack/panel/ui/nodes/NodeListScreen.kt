@@ -38,6 +38,7 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -124,6 +125,22 @@ fun NodeListScreen(
                         )
                     }
                 }
+            }
+
+            val bannerMessage = state.errorMessage ?: state.statusMessage
+            if (!bannerMessage.isNullOrBlank()) {
+                StatusBanner(
+                    text = bannerMessage,
+                    isError = state.errorMessage != null,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+
+            if (state.subscriptions.isNotEmpty()) {
+                SubscriptionSummary(
+                    subscriptions = state.subscriptions,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
             }
 
             SortRow(
@@ -245,6 +262,83 @@ fun NodeListScreen(
                 viewModel.updateNodeMetadata(node.id, name, group)
                 nodeToEdit = null
             },
+        )
+    }
+}
+
+@Composable
+private fun SubscriptionSummary(
+    subscriptions: List<SubscriptionUiSummary>,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.subscriptions_summary_title),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            subscriptions.forEach { subscription ->
+                Column {
+                    Text(
+                        text = stringResource(
+                            R.string.subscription_summary_line,
+                            subscription.displayName,
+                            subscription.activeNodeCount,
+                            subscription.staleNodeCount,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (subscription.parseFailures > 0) {
+                        Text(
+                            text = stringResource(
+                                R.string.subscription_summary_parse_errors,
+                                subscription.parseFailures,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusBanner(
+    text: String,
+    isError: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val container = if (isError) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val content = if (isError) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    Surface(
+        color = container,
+        contentColor = content,
+        shape = MaterialTheme.shapes.small,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
         )
     }
 }

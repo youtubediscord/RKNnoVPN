@@ -27,6 +27,23 @@ func TestNewResponseWrapsResultEnvelope(t *testing.T) {
 	}
 }
 
+func TestNewResponsePrefersExplicitOperationEnvelope(t *testing.T) {
+	activeOperation := map[string]interface{}{"kind": "start"}
+	configOperation := map[string]interface{}{"type": "config-mutation", "action": "panel-set"}
+	resp := NewResponse(8, map[string]interface{}{
+		"activeOperation": activeOperation,
+		"operation":       configOperation,
+	})
+
+	envelope, ok := resp.Result.(Envelope)
+	if !ok {
+		t.Fatalf("expected response result envelope, got %#v", resp.Result)
+	}
+	if envelope.Operation != configOperation {
+		t.Fatalf("success envelope must prefer explicit operation: %#v", envelope)
+	}
+}
+
 func TestNewErrorResponseWrapsErrorEnvelope(t *testing.T) {
 	details := map[string]interface{}{
 		"code":         "CONFIG_APPLY_FAILED",

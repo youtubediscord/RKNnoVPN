@@ -12,6 +12,7 @@ import com.privstack.panel.model.DaemonStatus
 import com.privstack.panel.model.DnsIpv6Mode
 import com.privstack.panel.model.FallbackPolicy
 import com.privstack.panel.model.ProfileConfig
+import com.privstack.panel.model.UpdateInstallState
 import com.privstack.panel.repository.CommandOutcome
 import com.privstack.panel.repository.ProfileRepository
 import com.privstack.panel.repository.StatusRepository
@@ -716,6 +717,19 @@ class SettingsViewModel @Inject constructor(
                             }
                         }
                     }
+                    status.updateInstall
+                        ?.takeIf { install ->
+                            status.activeOperation == null &&
+                                install.status in setOf("running", "failed", "unknown")
+                        }
+                        ?.let { install ->
+                            _updateState.update {
+                                it.copy(
+                                    status = UpdateStatus.ERROR,
+                                    errorMessage = formatPersistedUpdateInstallState(install),
+                                )
+                            }
+                        }
                     _uiState.update {
                         val resetResult = status.lastOperation
                             ?.takeIf { operation -> it.isResetting && operation.kind == "reset" && status.activeOperation == null }
@@ -967,6 +981,12 @@ class SettingsViewModel @Inject constructor(
 
     private fun <T> formatUpdateError(result: DaemonClientResult<T>): String =
         messages.formatDaemonFailure(result)
+
+    private fun formatPersistedUpdateInstallState(state: UpdateInstallState): String {
+        val step = state.step.ifBlank { state.code }.ifBlank { state.status }
+        val detail = state.detail.ifBlank { state.code }.ifBlank { state.status }
+        return messages.get(com.privstack.panel.R.string.update_error_install_interrupted, step, detail)
+    }
 
     private fun parsePackageList(raw: String): List<String> =
         raw.split('\n', ',', ';', ' ', '\t')

@@ -977,10 +977,10 @@ func (d *daemon) handlePanelSet(params *json.RawMessage) (interface{}, *ipc.RPCE
 
 	runtimeWasRunning := d.runtimeIsRunning()
 	if err := d.applyPanelConfig(p.Panel, p.Reload); err != nil {
-		return nil, d.configApplyRPCError(err)
+		return nil, d.configApplyRPCError("panel-set", err)
 	}
 
-	return d.configMutationSuccess("ok", p.Reload, runtimeWasRunning && p.Reload, -1), nil
+	return d.configMutationSuccess("panel-set", "ok", p.Reload, runtimeWasRunning && p.Reload, -1), nil
 }
 
 func (d *daemon) handleConfigGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1073,9 +1073,9 @@ func (d *daemon) handleConfigSet(params *json.RawMessage) (interface{}, *ipc.RPC
 	}
 
 	if err := d.applyConfig(newCfg, false); err != nil {
-		return nil, d.configApplyRPCError(err)
+		return nil, d.configApplyRPCError("config-set", err)
 	}
-	return d.configMutationSuccess("ok", false, false, 1), nil
+	return d.configMutationSuccess("config-set", "ok", false, false, 1), nil
 }
 
 func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1134,10 +1134,10 @@ func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc
 
 	runtimeWasRunning := d.runtimeIsRunning()
 	if err := d.applyConfig(newCfg, p.Reload); err != nil {
-		return nil, d.configApplyRPCError(err)
+		return nil, d.configApplyRPCError("config-set-many", err)
 	}
 
-	return d.configMutationSuccess("ok", p.Reload, runtimeWasRunning && p.Reload, len(p.Values)), nil
+	return d.configMutationSuccess("config-set-many", "ok", p.Reload, runtimeWasRunning && p.Reload, len(p.Values)), nil
 }
 
 func (d *daemon) handleConfigList(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1233,7 +1233,7 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 
 	if panelProvided {
 		if err := config.SavePanel(d.panelPath, newCfg.Panel); err != nil {
-			return nil, d.configApplyRPCError(fmt.Errorf("persist panel: %w", err))
+			return nil, d.configApplyRPCError("config-import", fmt.Errorf("persist panel: %w", err))
 		}
 	}
 	runtimeWasRunning := d.runtimeIsRunning()
@@ -1241,10 +1241,10 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		if panelProvided {
 			_ = config.SavePanel(d.panelPath, oldPanel)
 		}
-		return nil, d.configApplyRPCError(err)
+		return nil, d.configApplyRPCError("config-import", err)
 	}
 
-	return d.configMutationSuccess("imported", true, runtimeWasRunning, -1), nil
+	return d.configMutationSuccess("config-import", "imported", true, runtimeWasRunning, -1), nil
 }
 
 func isFullConfigImportKey(key string) bool {
@@ -1313,12 +1313,12 @@ func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Co
 	return newCfg, nil
 }
 
-func (d *daemon) configApplyRPCError(err error) *ipc.RPCError {
+func (d *daemon) configApplyRPCError(action string, err error) *ipc.RPCError {
 	var busy *runtimev2.OperationBusyError
 	if errors.As(err, &busy) {
 		rpcErr := d.rpcErrorFromRuntimeError(err)
 		saved := configMutationWasSaved(err)
-		rpcErr.Data = d.configMutationErrorData(err, saved)
+		rpcErr.Data = d.configMutationErrorData(action, err, saved)
 		rpcErr.Data.(map[string]interface{})["busy"] = busy.Data()
 		return rpcErr
 	}
@@ -1326,7 +1326,7 @@ func (d *daemon) configApplyRPCError(err error) *ipc.RPCError {
 		Code:    ipc.CodeInternalError,
 		Message: err.Error(),
 	}
-	rpcErr.Data = d.configMutationErrorData(err, configMutationWasSaved(err))
+	rpcErr.Data = d.configMutationErrorData(action, err, configMutationWasSaved(err))
 	return rpcErr
 }
 
@@ -1335,14 +1335,17 @@ func (d *daemon) runtimeIsRunning() bool {
 	return state == core.StateRunning || state == core.StateDegraded
 }
 
-func (d *daemon) configMutationSuccess(status string, reload bool, runtimeApplied bool, updated int) map[string]interface{} {
+func (d *daemon) configMutationSuccess(action string, status string, reload bool, runtimeApplied bool, updated int) map[string]interface{} {
+	runtimeApply := configRuntimeApplyStatus(reload, runtimeApplied)
+	operation := configMutationOperation(action, status, true, reload, runtimeApplied, runtimeApply, updated, "", "", nil)
 	result := map[string]interface{}{
 		"ok":              true,
 		"status":          status,
 		"reload":          reload,
 		"config_saved":    true,
 		"runtime_applied": runtimeApplied,
-		"runtime_apply":   configRuntimeApplyStatus(reload, runtimeApplied),
+		"runtime_apply":   runtimeApply,
+		"operation":       operation,
 	}
 	if updated >= 0 {
 		result["updated"] = updated
@@ -1364,21 +1367,109 @@ func configRuntimeApplyStatus(reload bool, runtimeApplied bool) string {
 	}
 }
 
-func (d *daemon) configMutationErrorData(err error, saved bool) map[string]interface{} {
+func (d *daemon) configMutationErrorData(action string, err error, saved bool) map[string]interface{} {
+	code := runtimeErrorCode(err, "CONFIG_APPLY_FAILED")
+	runtimeApply := "not_started"
+	if saved {
+		runtimeApply = "failed"
+	}
+	resetReport := resetReportFromRuntimeError(err)
 	data := map[string]interface{}{
 		"ok":              false,
 		"config_saved":    saved,
 		"runtime_applied": false,
 		"message":         err.Error(),
-		"code":            runtimeErrorCode(err, "CONFIG_APPLY_FAILED"),
+		"code":            code,
+		"runtime_apply":   runtimeApply,
+		"operation":       configMutationOperation(action, "failed", saved, saved, false, runtimeApply, -1, code, err.Error(), resetReport),
 	}
 	if d.runtimeV2 != nil {
 		data["runtimeStatus"] = d.runtimeV2.Status()
 	}
-	if resetReport := resetReportFromRuntimeError(err); resetReport != nil {
+	if resetReport != nil {
 		data["resetReport"] = resetReport
 	}
 	return data
+}
+
+func configMutationOperation(action string, status string, saved bool, reload bool, runtimeApplied bool, runtimeApply string, updated int, code string, message string, resetReport *runtimev2.ResetReport) map[string]interface{} {
+	rollback := "not_needed"
+	if resetReport != nil {
+		rollback = "cleanup_incomplete"
+		if resetReport.Status == "ok" {
+			rollback = "cleanup_succeeded"
+		}
+	} else if saved && status == "failed" {
+		rollback = "unknown"
+	}
+	stages := []map[string]interface{}{
+		{
+			"name":   "validate",
+			"status": "ok",
+		},
+	}
+	if status == "failed" && !saved && (code == runtimev2.BusyCodeRuntimeBusy || code == runtimev2.BusyCodeResetInProgress) {
+		stages = append(stages, map[string]interface{}{
+			"name":   "runtime-idle",
+			"status": "failed",
+		})
+		stages = append(stages, map[string]interface{}{
+			"name":   "persist",
+			"status": "not_started",
+		})
+	} else {
+		stages = append(stages, map[string]interface{}{
+			"name":   "persist",
+			"status": stageStatus(saved, status == "failed"),
+		})
+	}
+	if reload {
+		stages = append(stages, map[string]interface{}{
+			"name":   "runtime-apply",
+			"status": runtimeApply,
+		})
+	} else {
+		stages = append(stages, map[string]interface{}{
+			"name":   "runtime-apply",
+			"status": "not_requested",
+		})
+	}
+	if resetReport != nil {
+		stages = append(stages, map[string]interface{}{
+			"name":   "cleanup",
+			"status": resetReport.Status,
+		})
+	}
+	operation := map[string]interface{}{
+		"type":           "config-mutation",
+		"action":         action,
+		"status":         status,
+		"configSaved":    saved,
+		"runtimeApplied": runtimeApplied,
+		"runtimeApply":   runtimeApply,
+		"rollback":       rollback,
+		"stages":         stages,
+	}
+	if updated >= 0 {
+		operation["updated"] = updated
+	}
+	if code != "" {
+		operation["code"] = code
+	}
+	if message != "" {
+		operation["message"] = message
+	}
+	return operation
+}
+
+func stageStatus(ok bool, failed bool) string {
+	if ok {
+		return "ok"
+	}
+	if failed {
+		return "failed"
+	}
+	return "not_started"
 }
 
 func configMutationWasSaved(err error) bool {
@@ -1643,6 +1734,10 @@ func runtimeErrorCode(err error, fallback string) string {
 		if code := strings.TrimSpace(coded.RuntimeCode()); code != "" {
 			return code
 		}
+	}
+	var busy *runtimev2.OperationBusyError
+	if errors.As(err, &busy) && strings.TrimSpace(busy.Code) != "" {
+		return busy.Code
 	}
 	var netErr *netstack.Error
 	if errors.As(err, &netErr) && strings.TrimSpace(netErr.Code) != "" {
@@ -2640,8 +2735,15 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		d.coreMgr.GetState() == core.StateDegraded
 
 	status, err := d.runtimeV2.RunOperation(runtimev2.OperationUpdateInstall, runtimev2.PhaseStopping, func(generation int64) error {
+		installTracker := updater.NewInstallTracker(d.dataDir, generation, p.ModulePath, p.ApkPath)
+		if err := installTracker.Begin(); err != nil {
+			return fmt.Errorf("record update install state: %w", err)
+		}
 		markStep := func(name, status, code, detail string) {
 			d.runtimeV2.SetActiveOperationStep(generation, name, status, code, detail)
+			if err := installTracker.Step(name, status, code, detail); err != nil {
+				log.Printf("[updater] warning: record install step %s/%s: %v", name, status, err)
+			}
 		}
 		moduleUpdated := false
 		defer func() {
@@ -2659,6 +2761,9 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 				log.Printf("[updater] APK install failed: %v", err)
 				markStep("update-install-apk", "failed", "APK_INSTALL_FAILED", err.Error())
 				return fmt.Errorf("apk install failed: %w", err)
+			}
+			if err := installTracker.MarkAPKInstalled(); err != nil {
+				log.Printf("[updater] warning: record APK install success: %v", err)
 			}
 			markStep("update-install-apk", "ok", "", "")
 		}
@@ -2690,6 +2795,9 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 				return fmt.Errorf("module install failed: %w", err)
 			}
 			moduleUpdated = true
+			if err := installTracker.MarkModuleInstalled(); err != nil {
+				log.Printf("[updater] warning: record module install success: %v", err)
+			}
 			markStep("update-install-module", "ok", "", "")
 		}
 
@@ -2700,6 +2808,9 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 			return fmt.Errorf("update cleanup failed: %w", err)
 		}
 		markStep("update-cleanup-downloads", "ok", "", "")
+		if err := installTracker.Complete(); err != nil {
+			log.Printf("[updater] warning: record completed update install state: %v", err)
+		}
 
 		return nil
 	})

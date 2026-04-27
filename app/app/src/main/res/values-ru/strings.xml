@@ -252,6 +252,10 @@
     <string name="error_operation_failed_with_reason">Не удалось выполнить действие «%1$s»: %2$s</string>
     <string name="error_no_profile_loaded">Профиль не загружен</string>
     <string name="operation_accepted">Операция принята. Ждём завершения…</string>
+    <string name="operation_saved_runtime_stopped">Настройки сохранены. Runtime остановлен, поэтому они применятся при следующем запуске.</string>
+    <string name="operation_saved_runtime_not_applied">Настройки сохранены, но runtime их не применил.</string>
+    <string name="operation_cleanup_succeeded">Runtime cleanup выполнен.</string>
+    <string name="operation_cleanup_incomplete">Runtime cleanup требует внимания.</string>
     <string name="operation_start">запуск</string>
     <string name="operation_stop">остановка</string>
     <string name="operation_reload">перезагрузка</string>
@@ -277,6 +281,12 @@
     <string name="subscription_fetch_failed">Не удалось загрузить подписку</string>
     <string name="subscription_no_supported_links">В подписке нет поддерживаемых proxy-ссылок</string>
     <string name="subscription_empty">Подписка оказалась пустой</string>
+    <string name="subscription_refresh_summary">Подписка обновлена: узлов %1$d</string>
+    <string name="subscription_refresh_summary_with_errors">Подписка обновлена: узлов %1$d, ошибок разбора %2$d</string>
+    <string name="subscription_provider_fallback">Подписка</string>
+    <string name="subscriptions_summary_title">Подписки</string>
+    <string name="subscription_summary_line">%1$s: активных %2$d, удалённых %3$d</string>
+    <string name="subscription_summary_parse_errors">Ошибок разбора: %1$d</string>
     <string name="node_test_status_ok">ОК</string>
     <string name="node_test_status_tcp_ok">TCP ОК</string>
     <string name="node_test_status_tcp_error">TCP: %1$s</string>
@@ -330,6 +340,8 @@
     <string name="update_error_no_artifacts">Загрузка завершилась без файлов обновления</string>
     <string name="update_error_pair_required">Для этого обновления нужны и модуль, и APK.</string>
     <string name="update_error_install_without_artifacts">Установка завершилась без модуля и APK</string>
+    <string name="update_error_install_failed">Не удалось установить обновление</string>
+    <string name="update_error_install_interrupted">Установка обновления не завершилась (%1$s): %2$s</string>
     <string name="update_error_check_failed">Не удалось проверить обновления</string>
     <string name="update_error_download_failed">Не удалось скачать обновление</string>
     <string name="reset_summary_all_done">Все шаги очистки выполнены</string>

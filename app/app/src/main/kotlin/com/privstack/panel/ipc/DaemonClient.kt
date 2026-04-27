@@ -17,6 +17,7 @@ import com.privstack.panel.model.InboundsConfig
 import com.privstack.panel.model.Protocol
 import com.privstack.panel.model.RuntimeCompatibilityStatus
 import com.privstack.panel.model.SharingConfig
+import com.privstack.panel.model.Subscription
 import com.privstack.panel.model.TunConfig
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -300,6 +301,7 @@ class DaemonClient @Inject constructor(
                 name = panel.name.ifBlank { "Default" },
                 activeNodeId = activeNodeId,
                 nodes = effectiveNodes,
+                subscriptions = panel.subscriptions,
                 runtime = runtimeSection.toPanelRuntime(),
                 routing = routingSection.toPanelRouting(appsSection),
                 dns = dnsSection.toPanelDns(ipv6Section),
@@ -928,6 +930,7 @@ class DaemonClient @Inject constructor(
                 ).orEmpty(),
             code = obj["code"]?.jsonPrimitive?.contentOrNull.orEmpty(),
             message = obj["message"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            operation = obj["operation"],
             runtimeStatus = obj["runtimeStatus"]?.let {
                 json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
             },
@@ -1322,6 +1325,7 @@ data class ConfigMutationInfo(
     val runtimeApply: String = "",
     val code: String = "",
     val message: String = "",
+    val operation: JsonElement? = null,
     val runtimeStatus: BackendStatusV2? = null,
 )
 
@@ -1610,6 +1614,7 @@ private data class DaemonPanelSection(
     @SerialName("active_node_id")
     val activeNodeId: String = "",
     val nodes: List<Node> = emptyList(),
+    val subscriptions: List<Subscription> = emptyList(),
     val tun: com.privstack.panel.model.TunConfig? = null,
     val inbounds: com.privstack.panel.model.InboundsConfig? = null,
     val extra: JsonObject? = null,
@@ -2058,6 +2063,7 @@ private fun ProfileConfig.toDaemonPanelSection(): DaemonPanelSection =
         name = name,
         activeNodeId = activeNodeId.orEmpty(),
         nodes = nodes,
+        subscriptions = subscriptions,
         tun = tun,
         inbounds = inbounds,
         extra = extra?.jsonObject?.obj("panel"),

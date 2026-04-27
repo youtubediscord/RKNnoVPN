@@ -212,7 +212,7 @@ object SubscriptionHandler {
         url: String,
         nowMillis: Long = System.currentTimeMillis(),
     ): List<Node> {
-        val providerKey = providerKey(url)
+        val providerKey = providerKeyFor(url)
         return nodes.map { node ->
             node.copy(
                 stale = false,
@@ -284,7 +284,7 @@ object SubscriptionHandler {
             existing.source.providerKey == incoming.source.providerKey
     }
 
-    private fun providerKey(url: String): String =
+    fun providerKeyFor(url: String): String =
         url.trim().lowercase()
 
     /**

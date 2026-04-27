@@ -132,6 +132,9 @@ func operationFromResult(result interface{}) interface{} {
 		return nil
 	}
 	if m, ok := result.(map[string]interface{}); ok {
+		if op, ok := m["operation"]; ok {
+			return op
+		}
 		return m["activeOperation"]
 	}
 	value := reflect.ValueOf(result)
@@ -145,7 +148,16 @@ func operationFromResult(result interface{}) interface{} {
 		return nil
 	}
 	field := value.FieldByName("ActiveOperation")
-	if !field.IsValid() || field.IsNil() {
+	if !field.IsValid() {
+		return nil
+	}
+	switch field.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		if field.IsNil() {
+			return nil
+		}
+	}
+	if !field.CanInterface() {
 		return nil
 	}
 	return field.Interface()

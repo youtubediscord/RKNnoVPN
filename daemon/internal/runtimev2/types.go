@@ -105,6 +105,21 @@ type OperationResult struct {
 	ResetReport  *ResetReport  `json:"resetReport,omitempty"`
 }
 
+type UpdateInstallState struct {
+	Status          string `json:"status"`
+	Generation      int64  `json:"generation"`
+	Step            string `json:"step,omitempty"`
+	StepStatus      string `json:"stepStatus,omitempty"`
+	Code            string `json:"code,omitempty"`
+	Detail          string `json:"detail,omitempty"`
+	ModulePath      string `json:"modulePath,omitempty"`
+	ApkPath         string `json:"apkPath,omitempty"`
+	ApkInstalled    bool   `json:"apkInstalled"`
+	ModuleInstalled bool   `json:"moduleInstalled"`
+	StartedAt       string `json:"startedAt,omitempty"`
+	UpdatedAt       string `json:"updatedAt,omitempty"`
+}
+
 type HealthSnapshot struct {
 	CoreReady       bool                           `json:"coreReady"`
 	DNSReady        bool                           `json:"dnsReady"`
@@ -202,4 +217,5 @@ type Status struct {
 	Compatibility   CompatibilityStatus `json:"compatibility"`
 	ActiveOperation *OperationStatus    `json:"activeOperation,omitempty"`
 	LastOperation   *OperationResult    `json:"lastOperation,omitempty"`
+	UpdateInstall   *UpdateInstallState `json:"updateInstall,omitempty"`
 }

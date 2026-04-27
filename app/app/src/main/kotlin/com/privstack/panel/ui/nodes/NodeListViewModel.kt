@@ -9,8 +9,11 @@ import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.Node
+import com.privstack.panel.model.NodeSourceType
+import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.repository.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.net.URI
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +30,7 @@ data class NodeListUiState(
     val groups: List<String> = emptyList(),
     val selectedGroup: String = "",
     val nodes: List<Node> = emptyList(),
+    val subscriptions: List<SubscriptionUiSummary> = emptyList(),
     val activeNodeId: String? = null,
     val sortMode: NodeSortMode = NodeSortMode.NAME,
     val showImportSheet: Boolean = false,
@@ -38,6 +42,16 @@ data class NodeListUiState(
     val isTestingNodes: Boolean = false,
     /** Error message from the last operation, or null. */
     val errorMessage: String? = null,
+    /** Informational status from the last operation, or null. */
+    val statusMessage: String? = null,
+)
+
+data class SubscriptionUiSummary(
+    val providerKey: String,
+    val displayName: String,
+    val activeNodeCount: Int,
+    val staleNodeCount: Int,
+    val parseFailures: Int,
 )
 
 data class ImportCandidate(
@@ -69,7 +83,7 @@ class NodeListViewModel @Inject constructor(
     fun selectNode(nodeId: String) {
         viewModelScope.launch {
             val previousNodeId = _uiState.value.activeNodeId
-            _uiState.update { it.copy(activeNodeId = nodeId, errorMessage = null) }
+            _uiState.update { it.copy(activeNodeId = nodeId, errorMessage = null, statusMessage = null) }
             val ok = profileRepository.setActiveNode(nodeId)
             if (!ok) {
                 val err = profileRepository.error.value
@@ -78,12 +92,15 @@ class NodeListViewModel @Inject constructor(
                     it.copy(
                         activeNodeId = previousNodeId,
                         errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_set_active_failed),
+                        statusMessage = null,
                     )
                 }
             } else {
                 Log.d(TAG, "Active node set to $nodeId via panel-set")
                 profileRepository.error.value?.let { persistedWarning ->
-                    _uiState.update { it.copy(errorMessage = persistedWarning) }
+                    _uiState.update { it.copy(errorMessage = persistedWarning, statusMessage = null) }
+                } ?: profileRepository.notice.value?.let { notice ->
+                    _uiState.update { it.copy(statusMessage = notice) }
                 }
             }
         }
@@ -92,7 +109,7 @@ class NodeListViewModel @Inject constructor(
     fun selectAuto() {
         viewModelScope.launch {
             val previousNodeId = _uiState.value.activeNodeId
-            _uiState.update { it.copy(activeNodeId = null, errorMessage = null) }
+            _uiState.update { it.copy(activeNodeId = null, errorMessage = null, statusMessage = null) }
             val ok = profileRepository.clearActiveNode()
             if (!ok) {
                 val err = profileRepository.error.value
@@ -101,12 +118,15 @@ class NodeListViewModel @Inject constructor(
                     it.copy(
                         activeNodeId = previousNodeId,
                         errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_set_active_failed),
+                        statusMessage = null,
                     )
                 }
             } else {
                 Log.d(TAG, "Active node cleared; selector will use auto mode")
                 profileRepository.error.value?.let { persistedWarning ->
-                    _uiState.update { it.copy(errorMessage = persistedWarning) }
+                    _uiState.update { it.copy(errorMessage = persistedWarning, statusMessage = null) }
+                } ?: profileRepository.notice.value?.let { notice ->
+                    _uiState.update { it.copy(statusMessage = notice) }
                 }
             }
         }
@@ -123,12 +143,15 @@ class NodeListViewModel @Inject constructor(
 
     fun deleteNode(nodeId: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(errorMessage = null) }
+            _uiState.update { it.copy(errorMessage = null, statusMessage = null) }
             val ok = profileRepository.removeNode(nodeId)
             if (!ok) {
                 val err = profileRepository.error.value
                 _uiState.update {
-                    it.copy(errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_delete_failed))
+                    it.copy(
+                        errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_delete_failed),
+                        statusMessage = null,
+                    )
                 }
             }
             // UI updates via the profile observer
@@ -140,17 +163,23 @@ class NodeListViewModel @Inject constructor(
         val cleanGroup = group.trim().ifBlank { messages.defaultGroupName() }
         if (cleanName.isBlank()) {
             _uiState.update {
-                it.copy(errorMessage = messages.get(com.privstack.panel.R.string.node_name_required))
+                it.copy(
+                    errorMessage = messages.get(com.privstack.panel.R.string.node_name_required),
+                    statusMessage = null,
+                )
             }
             return
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(errorMessage = null) }
+            _uiState.update { it.copy(errorMessage = null, statusMessage = null) }
             val current = _uiState.value.nodes.firstOrNull { it.id == nodeId }
             if (current == null) {
                 _uiState.update {
-                    it.copy(errorMessage = messages.get(com.privstack.panel.R.string.node_not_found))
+                    it.copy(
+                        errorMessage = messages.get(com.privstack.panel.R.string.node_not_found),
+                        statusMessage = null,
+                    )
                 }
                 return@launch
             }
@@ -164,7 +193,10 @@ class NodeListViewModel @Inject constructor(
             if (!ok) {
                 val err = profileRepository.error.value
                 _uiState.update {
-                    it.copy(errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_update_failed))
+                    it.copy(
+                        errorMessage = err ?: messages.get(com.privstack.panel.R.string.node_update_failed),
+                        statusMessage = null,
+                    )
                 }
             } else {
                 _uiState.update { state ->
@@ -189,7 +221,7 @@ class NodeListViewModel @Inject constructor(
 
     private suspend fun runNodeTests(nodeIds: List<String>) {
         if (nodeIds.isEmpty() || _uiState.value.isTestingNodes) return
-        _uiState.update { it.copy(isTestingNodes = true, errorMessage = null) }
+        _uiState.update { it.copy(isTestingNodes = true, errorMessage = null, statusMessage = null) }
         try {
             when (val result = daemonClient.nodeTest(nodeIds)) {
                 is DaemonClientResult.Ok -> {
@@ -226,7 +258,7 @@ class NodeListViewModel @Inject constructor(
                 else -> {
                     val msg = describeError(result)
                     Log.w(TAG, "Node test failed: $msg")
-                    _uiState.update { it.copy(errorMessage = msg) }
+                    _uiState.update { it.copy(errorMessage = msg, statusMessage = null) }
                 }
             }
         } finally {
@@ -242,6 +274,7 @@ class NodeListViewModel @Inject constructor(
                 importInitialText = "",
                 importCandidates = emptyList(),
                 errorMessage = null,
+                statusMessage = null,
             )
         }
     }
@@ -253,12 +286,13 @@ class NodeListViewModel @Inject constructor(
                 importInitialText = "",
                 importCandidates = emptyList(),
                 errorMessage = null,
+                statusMessage = null,
             )
         }
     }
 
     fun clearError() {
-        _uiState.update { it.copy(errorMessage = null) }
+        _uiState.update { it.copy(errorMessage = null, statusMessage = null) }
     }
 
     fun showClipboardImport(preview: ClipboardWatcher.ImportPreview) {
@@ -270,6 +304,7 @@ class NodeListViewModel @Inject constructor(
                     importInitialText = preview.rawText.trim(),
                     importCandidates = emptyList(),
                     errorMessage = null,
+                    statusMessage = null,
                 )
             }
             return
@@ -285,6 +320,7 @@ class NodeListViewModel @Inject constructor(
                 importInitialText = preview.rawText,
                 importCandidates = candidates,
                 errorMessage = null,
+                statusMessage = null,
             )
         }
     }
@@ -306,6 +342,7 @@ class NodeListViewModel @Inject constructor(
                     errorMessage = messages.get(
                         com.privstack.panel.R.string.node_no_valid_proxy_uris_detected
                     ),
+                    statusMessage = null,
                 )
             }
             return
@@ -319,13 +356,14 @@ class NodeListViewModel @Inject constructor(
                     errorMessage = messages.get(
                         com.privstack.panel.R.string.node_detected_uris_unparsed
                     ),
+                    statusMessage = null,
                 )
             }
             return
         }
         val candidates = parsedNodes.map { ImportCandidate(node = it, selected = true) }
 
-        _uiState.update { it.copy(importCandidates = candidates, errorMessage = null) }
+        _uiState.update { it.copy(importCandidates = candidates, errorMessage = null, statusMessage = null) }
     }
 
     fun toggleImportCandidate(index: Int) {
@@ -346,7 +384,7 @@ class NodeListViewModel @Inject constructor(
         if (selected.isEmpty()) return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, statusMessage = null) }
 
             // Build a single multi-line string of share links for the daemon.
             val links = selected.mapNotNull { it.link.ifBlank { null } }.joinToString("\n")
@@ -360,6 +398,7 @@ class NodeListViewModel @Inject constructor(
                             errorMessage = err ?: messages.get(
                                 com.privstack.panel.R.string.node_import_failed
                             ),
+                            statusMessage = null,
                             isLoading = false,
                         )
                     }
@@ -369,12 +408,14 @@ class NodeListViewModel @Inject constructor(
                     // can see the results immediately.
                     val firstGroup = imported.firstOrNull()?.group
                     val persistedWarning = profileRepository.error.value
+                    val notice = profileRepository.notice.value.takeIf { persistedWarning == null }
                     _uiState.update {
                         it.copy(
                             showImportSheet = persistedWarning != null,
                             importCandidates = if (persistedWarning != null) it.importCandidates else emptyList(),
                             isLoading = false,
                             errorMessage = persistedWarning,
+                            statusMessage = notice,
                             selectedGroup = firstGroup ?: it.selectedGroup,
                         )
                     }
@@ -385,6 +426,7 @@ class NodeListViewModel @Inject constructor(
                         errorMessage = messages.get(
                             com.privstack.panel.R.string.node_no_valid_links_to_import
                         ),
+                        statusMessage = null,
                         isLoading = false,
                     )
                 }
@@ -398,7 +440,7 @@ class NodeListViewModel @Inject constructor(
      */
     fun fetchSubscription(url: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, statusMessage = null) }
 
             // The repository asks the daemon to fetch the URL, then merges the
             // parsed nodes into the stored profile locally.
@@ -410,18 +452,21 @@ class NodeListViewModel @Inject constructor(
                         errorMessage = err ?: messages.get(
                             com.privstack.panel.R.string.subscription_fetch_failed
                         ),
+                        statusMessage = null,
                         isLoading = false,
                     )
                 }
             } else {
                 val firstGroup = imported.firstOrNull()?.group
                 val persistedWarning = profileRepository.error.value
+                val notice = profileRepository.notice.value.takeIf { persistedWarning == null }
                 _uiState.update {
                     it.copy(
                         showImportSheet = persistedWarning != null,
                         importCandidates = if (persistedWarning != null) it.importCandidates else emptyList(),
                         isLoading = false,
                         errorMessage = persistedWarning,
+                        statusMessage = notice,
                         selectedGroup = firstGroup ?: it.selectedGroup,
                     )
                 }
@@ -436,6 +481,11 @@ class NodeListViewModel @Inject constructor(
      */
     private fun observeProfile() {
         viewModelScope.launch {
+            profileRepository.notice.collect { notice ->
+                _uiState.update { it.copy(statusMessage = notice) }
+            }
+        }
+        viewModelScope.launch {
             profileRepository.profile.collect { config ->
                 if (config != null) {
                     val nodes = config.nodes.map(::normalizeNode)
@@ -445,6 +495,7 @@ class NodeListViewModel @Inject constructor(
                         val selectedGroup = state.selectedGroup.takeIf { it in groups } ?: groups.first()
                         state.copy(
                             nodes = sortNodes(nodes, state.sortMode),
+                            subscriptions = subscriptionSummaries(config, nodes),
                             groups = groups,
                             selectedGroup = selectedGroup,
                             activeNodeId = config.activeNodeId?.takeIf { activeId ->
@@ -462,7 +513,7 @@ class NodeListViewModel @Inject constructor(
      */
     private fun loadNodes() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null, statusMessage = null) }
             val config = profileRepository.getOrLoad()
             if (config == null) {
                 val err = profileRepository.error.value
@@ -500,6 +551,28 @@ class NodeListViewModel @Inject constructor(
     } else {
         node
     }
+
+    private fun subscriptionSummaries(config: ProfileConfig, nodes: List<Node>): List<SubscriptionUiSummary> =
+        config.subscriptions.map { subscription ->
+            val providerNodes = nodes.filter {
+                it.source.type == NodeSourceType.SUBSCRIPTION &&
+                    it.source.providerKey == subscription.providerKey
+            }
+            SubscriptionUiSummary(
+                providerKey = subscription.providerKey,
+                displayName = subscription.name.ifBlank {
+                    hostLabel(subscription.url).ifBlank {
+                        subscription.providerKey.take(8).ifBlank { messages.get(com.privstack.panel.R.string.subscription_provider_fallback) }
+                    }
+                },
+                activeNodeCount = providerNodes.count { !it.stale },
+                staleNodeCount = providerNodes.count { it.stale }.coerceAtLeast(subscription.staleNodeCount),
+                parseFailures = subscription.parseFailures,
+            )
+        }.sortedBy { it.displayName.lowercase() }
+
+    private fun hostLabel(url: String): String =
+        runCatching { URI(url).host.orEmpty().removePrefix("www.") }.getOrDefault("")
 
     private fun extractCountryFromName(name: String): String {
         // Simple heuristic: first word before dash/space

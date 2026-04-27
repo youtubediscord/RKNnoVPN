@@ -252,6 +252,10 @@
     <string name="error_no_profile_loaded">No profile loaded</string>
     <string name="error_config_saved_not_applied">Settings were saved, but runtime did not apply them: %1$s</string>
     <string name="operation_accepted">Operation accepted. Waiting for completion…</string>
+    <string name="operation_saved_runtime_stopped">Settings were saved. Runtime is stopped, so they will apply on the next start.</string>
+    <string name="operation_saved_runtime_not_applied">Settings were saved, but runtime did not apply them.</string>
+    <string name="operation_cleanup_succeeded">Runtime cleanup completed.</string>
+    <string name="operation_cleanup_incomplete">Runtime cleanup needs attention.</string>
     <string name="operation_start">Start</string>
     <string name="operation_stop">Stop</string>
     <string name="operation_reload">Reload</string>
@@ -277,6 +281,12 @@
     <string name="subscription_fetch_failed">Subscription fetch failed</string>
     <string name="subscription_no_supported_links">Subscription did not contain any supported proxy links</string>
     <string name="subscription_empty">Subscription was empty</string>
+    <string name="subscription_refresh_summary">Subscription refreshed: %1$d nodes</string>
+    <string name="subscription_refresh_summary_with_errors">Subscription refreshed: %1$d nodes, %2$d parse errors</string>
+    <string name="subscription_provider_fallback">Subscription</string>
+    <string name="subscriptions_summary_title">Subscriptions</string>
+    <string name="subscription_summary_line">%1$s: active %2$d, removed %3$d</string>
+    <string name="subscription_summary_parse_errors">Parse errors: %1$d</string>
     <string name="node_test_status_ok">OK</string>
     <string name="node_test_status_tcp_ok">TCP OK</string>
     <string name="node_test_status_tcp_error">TCP: %1$s</string>
@@ -331,6 +341,7 @@
     <string name="update_error_pair_required">This update requires both module and APK artifacts.</string>
     <string name="update_error_install_without_artifacts">Update install completed without installing module or APK</string>
     <string name="update_error_install_failed">Update install failed</string>
+    <string name="update_error_install_interrupted">Update install did not finish (%1$s): %2$s</string>
     <string name="update_error_check_failed">Update check failed</string>
     <string name="update_error_download_failed">Update download failed</string>
     <string name="reset_summary_all_done">All backend cleanup steps completed</string>

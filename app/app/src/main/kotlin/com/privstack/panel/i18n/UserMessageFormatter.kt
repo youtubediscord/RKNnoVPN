@@ -3,13 +3,14 @@ package com.privstack.panel.i18n
 import android.content.Context
 import androidx.annotation.StringRes
 import com.privstack.panel.R
+import com.privstack.panel.ipc.ConfigMutationInfo
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.RuntimeStageReport
-import kotlinx.serialization.json.booleanOrNull
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -83,6 +84,35 @@ class UserMessageFormatter @Inject constructor(
 
     fun formatOperationFailure(@StringRes operationResId: Int, reason: String): String =
         get(R.string.error_operation_failed_with_reason, get(operationResId), reason)
+
+    fun formatConfigMutationNotice(info: ConfigMutationInfo): String? {
+        val base = when (info.runtimeApply) {
+            "skipped_runtime_stopped" -> get(R.string.operation_saved_runtime_stopped)
+            "failed" -> get(R.string.operation_saved_runtime_not_applied)
+            else -> null
+        } ?: return null
+        val rollback = runCatching {
+            info.operation
+                ?.jsonObject
+                ?.get("rollback")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                .orEmpty()
+        }.getOrDefault("")
+        val suffix = when (rollback) {
+            "cleanup_succeeded" -> get(R.string.operation_cleanup_succeeded)
+            "cleanup_incomplete", "unknown" -> get(R.string.operation_cleanup_incomplete)
+            else -> ""
+        }
+        return listOf(base, suffix).filter { it.isNotBlank() }.joinToString(" ")
+    }
+
+    fun formatSubscriptionRefresh(importedNodes: Int, parseFailures: Int): String =
+        if (parseFailures > 0) {
+            get(R.string.subscription_refresh_summary_with_errors, importedNodes, parseFailures)
+        } else {
+            get(R.string.subscription_refresh_summary, importedNodes)
+        }
 
     private fun formatRuntimeBusy(result: DaemonClientResult.DaemonError): String {
         val active = runCatching {

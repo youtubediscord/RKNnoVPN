@@ -18,6 +18,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
 )
 
 type rootBackendV2 struct {
@@ -995,7 +996,7 @@ func (d *daemon) handleBackendStatus(params *json.RawMessage) (interface{}, *ipc
 	d.refreshRuntimeV2Compatibility()
 	status := d.runtimeV2.RefreshActiveProgress()
 	if status.ActiveOperation != nil {
-		return status, nil
+		return d.statusWithUpdateInstallState(status), nil
 	}
 	state := d.coreMgr.GetState()
 	if state == core.StateRunning || state == core.StateDegraded {
@@ -1004,7 +1005,37 @@ func (d *daemon) handleBackendStatus(params *json.RawMessage) (interface{}, *ipc
 			go d.runtimeV2.RefreshHealth()
 		}
 	}
-	return d.runtimeV2.Status(), nil
+	return d.statusWithUpdateInstallState(d.runtimeV2.Status()), nil
+}
+
+func (d *daemon) statusWithUpdateInstallState(status runtimev2.Status) runtimev2.Status {
+	state, err := updater.ReadInstallState(d.dataDir)
+	if err == nil {
+		status.UpdateInstall = &runtimev2.UpdateInstallState{
+			Status:          state.Status,
+			Generation:      state.Generation,
+			Step:            state.Step,
+			StepStatus:      state.StepStatus,
+			Code:            state.Code,
+			Detail:          state.Detail,
+			ModulePath:      state.ModulePath,
+			ApkPath:         state.ApkPath,
+			ApkInstalled:    state.ApkInstalled,
+			ModuleInstalled: state.ModuleInstalled,
+			StartedAt:       state.StartedAt,
+			UpdatedAt:       state.UpdatedAt,
+		}
+		return status
+	}
+	if os.IsNotExist(err) {
+		return status
+	}
+	status.UpdateInstall = &runtimev2.UpdateInstallState{
+		Status: "unknown",
+		Code:   "UPDATE_INSTALL_STATE_INVALID",
+		Detail: err.Error(),
+	}
+	return status
 }
 
 func (d *daemon) handleBackendApplyDesiredState(params *json.RawMessage) (interface{}, *ipc.RPCError) {

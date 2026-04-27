@@ -12,8 +12,6 @@ if [ -f "${PRIVSTACK_DIR}/scripts/lib/privstack_env.sh" ]; then
     . "${PRIVSTACK_DIR}/scripts/lib/privstack_env.sh"
 fi
 SCRIPTS_DIR="${SCRIPTS_DIR:-${PRIVSTACK_DIR}/scripts}"
-RUN_DIR="${RUN_DIR:-${PRIVSTACK_DIR}/run}"
-BACKUP_DIR="${BACKUP_DIR:-${PRIVSTACK_DIR}/backup}"
 RENDERED_CONFIG_DIR="${RENDERED_CONFIG_DIR:-${PRIVSTACK_DIR}/config/rendered}"
 
 log_msg() {
@@ -33,28 +31,7 @@ run_runtime_cleanup() {
         return $?
     fi
 
-    log_err "rescue_reset.sh missing; falling back to process-only cleanup"
-    for p in /proc/[0-9]*; do
-        pid="${p##*/}"
-        [ "$pid" = "$$" ] && continue
-        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
-        case "$cmd" in
-            *"${PRIVSTACK_DIR}/bin/privd"*|*"${PRIVSTACK_DIR}/bin/sing-box"*)
-                kill -TERM "$pid" 2>/dev/null
-                ;;
-        esac
-    done
-    sleep 2
-    for p in /proc/[0-9]*; do
-        pid="${p##*/}"
-        [ "$pid" = "$$" ] && continue
-        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
-        case "$cmd" in
-            *"${PRIVSTACK_DIR}/bin/privd"*|*"${PRIVSTACK_DIR}/bin/sing-box"*)
-                kill -KILL "$pid" 2>/dev/null
-                ;;
-        esac
-    done
+    log_err "rescue_reset.sh missing; runtime cleanup is unavailable"
     return 1
 }
 
@@ -69,8 +46,7 @@ restore_kernel_params() {
 }
 
 clean_runtime_files() {
-    log_msg "Cleaning generated runtime files"
-    rm -f "${RUN_DIR}/"* 2>/dev/null
+    log_msg "Cleaning generated rendered configs"
     rm -f "${RENDERED_CONFIG_DIR}/"* 2>/dev/null
 }
 

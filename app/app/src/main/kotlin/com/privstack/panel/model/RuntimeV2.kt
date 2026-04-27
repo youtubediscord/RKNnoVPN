@@ -93,6 +93,22 @@ data class RuntimeOperationResult(
 )
 
 @Serializable
+data class UpdateInstallState(
+    val status: String = "",
+    val generation: Long = 0L,
+    val step: String = "",
+    val stepStatus: String = "",
+    val code: String = "",
+    val detail: String = "",
+    val modulePath: String = "",
+    val apkPath: String = "",
+    val apkInstalled: Boolean = false,
+    val moduleInstalled: Boolean = false,
+    val startedAt: String? = null,
+    val updatedAt: String? = null,
+)
+
+@Serializable
 data class BackendHealthSnapshot(
     val coreReady: Boolean = false,
     val dnsReady: Boolean = false,
@@ -156,6 +172,7 @@ data class BackendStatusV2(
     val compatibility: RuntimeCompatibilityStatus? = null,
     val activeOperation: RuntimeOperationStatus? = null,
     val lastOperation: RuntimeOperationResult? = null,
+    val updateInstall: UpdateInstallState? = null,
 )
 
 @Serializable

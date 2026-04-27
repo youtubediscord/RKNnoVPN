@@ -93,13 +93,14 @@ type NodeConfig struct {
 // PanelConfig stores APK-facing metadata that the daemon itself does not need
 // to understand in depth, but must persist without loss.
 type PanelConfig struct {
-	ID           string            `json:"id,omitempty"`
-	Name         string            `json:"name,omitempty"`
-	ActiveNodeID string            `json:"active_node_id,omitempty"`
-	Nodes        []json.RawMessage `json:"nodes,omitempty"`
-	Tun          json.RawMessage   `json:"tun,omitempty"`
-	Inbounds     json.RawMessage   `json:"inbounds,omitempty"`
-	Extra        json.RawMessage   `json:"extra,omitempty"`
+	ID            string            `json:"id,omitempty"`
+	Name          string            `json:"name,omitempty"`
+	ActiveNodeID  string            `json:"active_node_id,omitempty"`
+	Nodes         []json.RawMessage `json:"nodes,omitempty"`
+	Subscriptions []json.RawMessage `json:"subscriptions,omitempty"`
+	Tun           json.RawMessage   `json:"tun,omitempty"`
+	Inbounds      json.RawMessage   `json:"inbounds,omitempty"`
+	Extra         json.RawMessage   `json:"extra,omitempty"`
 }
 
 const panelFileName = "panel.json"
@@ -117,6 +118,36 @@ type PanelInboundsConfig struct {
 	SocksPort int  `json:"socksPort"`
 	HTTPPort  int  `json:"httpPort"`
 	AllowLAN  bool `json:"allowLan"`
+}
+
+type PanelNodeSourceConfig struct {
+	Type        string `json:"type,omitempty"`
+	URL         string `json:"url,omitempty"`
+	ProviderKey string `json:"providerKey,omitempty"`
+	LastSeenAt  int64  `json:"lastSeenAt,omitempty"`
+}
+
+type PanelSubscriptionConfig struct {
+	ProviderKey       string `json:"providerKey,omitempty"`
+	URL               string `json:"url,omitempty"`
+	Name              string `json:"name,omitempty"`
+	LastFetchedAt     int64  `json:"lastFetchedAt,omitempty"`
+	LastSeenNodeCount int    `json:"lastSeenNodeCount,omitempty"`
+	StaleNodeCount    int    `json:"staleNodeCount,omitempty"`
+	UploadBytes       int64  `json:"uploadBytes,omitempty"`
+	DownloadBytes     int64  `json:"downloadBytes,omitempty"`
+	TotalBytes        int64  `json:"totalBytes,omitempty"`
+	ExpireTimestamp   int64  `json:"expireTimestamp,omitempty"`
+	ParseFailures     int    `json:"parseFailures,omitempty"`
+}
+
+type panelNodeValidationConfig struct {
+	ID       string                 `json:"id,omitempty"`
+	Protocol string                 `json:"protocol,omitempty"`
+	Server   string                 `json:"server,omitempty"`
+	Port     int                    `json:"port,omitempty"`
+	Stale    bool                   `json:"stale,omitempty"`
+	Source   *PanelNodeSourceConfig `json:"source,omitempty"`
 }
 
 // RoutingConfig controls traffic routing rules.
@@ -546,6 +577,67 @@ func ValidatePanelConfig(panel PanelConfig) error {
 			return fmt.Errorf("panel.inbounds.allowLan is not supported by root helper inbounds")
 		}
 	}
+	for index, raw := range panel.Nodes {
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return fmt.Errorf("panel.nodes[%d] is empty", index)
+		}
+		var node panelNodeValidationConfig
+		if err := json.Unmarshal(raw, &node); err != nil {
+			return fmt.Errorf("panel.nodes[%d] invalid: %w", index, err)
+		}
+		if node.Port < 0 || node.Port > 65535 {
+			return fmt.Errorf("panel.nodes[%d].port must be 0-65535, got %d", index, node.Port)
+		}
+		source := normalizedPanelNodeSource(node.Stale, node.Source)
+		switch source.Type {
+		case "MANUAL":
+			if node.Stale {
+				return fmt.Errorf("panel.nodes[%d].stale requires subscription source", index)
+			}
+		case "SUBSCRIPTION":
+			if strings.TrimSpace(source.ProviderKey) == "" {
+				return fmt.Errorf("panel.nodes[%d].source.providerKey is required for subscription nodes", index)
+			}
+			if source.LastSeenAt < 0 {
+				return fmt.Errorf("panel.nodes[%d].source.lastSeenAt must be >= 0", index)
+			}
+		default:
+			return fmt.Errorf("panel.nodes[%d].source.type must be MANUAL or SUBSCRIPTION, got %q", index, source.Type)
+		}
+	}
+	for index, raw := range panel.Subscriptions {
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return fmt.Errorf("panel.subscriptions[%d] is empty", index)
+		}
+		var subscription PanelSubscriptionConfig
+		if err := json.Unmarshal(raw, &subscription); err != nil {
+			return fmt.Errorf("panel.subscriptions[%d] invalid: %w", index, err)
+		}
+		if strings.TrimSpace(subscription.ProviderKey) == "" {
+			return fmt.Errorf("panel.subscriptions[%d].providerKey is required", index)
+		}
+		if strings.TrimSpace(subscription.URL) == "" {
+			return fmt.Errorf("panel.subscriptions[%d].url is required", index)
+		}
+		if subscription.LastFetchedAt < 0 {
+			return fmt.Errorf("panel.subscriptions[%d].lastFetchedAt must be >= 0", index)
+		}
+		if subscription.LastSeenNodeCount < 0 {
+			return fmt.Errorf("panel.subscriptions[%d].lastSeenNodeCount must be >= 0", index)
+		}
+		if subscription.StaleNodeCount < 0 {
+			return fmt.Errorf("panel.subscriptions[%d].staleNodeCount must be >= 0", index)
+		}
+		if subscription.UploadBytes < 0 || subscription.DownloadBytes < 0 || subscription.TotalBytes < 0 {
+			return fmt.Errorf("panel.subscriptions[%d] traffic counters must be >= 0", index)
+		}
+		if subscription.ExpireTimestamp < 0 {
+			return fmt.Errorf("panel.subscriptions[%d].expireTimestamp must be >= 0", index)
+		}
+		if subscription.ParseFailures < 0 {
+			return fmt.Errorf("panel.subscriptions[%d].parseFailures must be >= 0", index)
+		}
+	}
 	return nil
 }
 
@@ -565,6 +657,9 @@ func (c *Config) Validate() error {
 	}
 	if c.SchemaVersion > CurrentSchemaVersion {
 		return fmt.Errorf("schema_version %d is newer than daemon supports (%d)", c.SchemaVersion, CurrentSchemaVersion)
+	}
+	if err := ValidatePanelConfig(c.Panel); err != nil {
+		return err
 	}
 	if c.Proxy.TProxyPort < 1 || c.Proxy.TProxyPort > 65535 {
 		return fmt.Errorf("proxy.tproxy_port must be 1-65535, got %d", c.Proxy.TProxyPort)
@@ -718,6 +813,12 @@ func normalizePanelConfig(panel PanelConfig) PanelConfig {
 	if panel.Nodes == nil {
 		panel.Nodes = []json.RawMessage{}
 	}
+	panel.Nodes = normalizePanelNodes(panel.Nodes)
+	if panel.Subscriptions == nil {
+		panel.Subscriptions = []json.RawMessage{}
+	}
+	panel.Subscriptions = normalizePanelSubscriptions(panel.Subscriptions)
+	panel.Subscriptions = backfillPanelSubscriptionsFromNodes(panel.Nodes, panel.Subscriptions)
 	if len(panel.Inbounds) > 0 {
 		var inbounds PanelInboundsConfig
 		if err := json.Unmarshal(panel.Inbounds, &inbounds); err == nil && inbounds.AllowLAN {
@@ -728,6 +829,158 @@ func normalizePanelConfig(panel PanelConfig) PanelConfig {
 		}
 	}
 	return panel
+}
+
+type panelSubscriptionAggregate struct {
+	URL           string
+	LastFetchedAt int64
+	NodeCount     int
+	StaleCount    int
+}
+
+func backfillPanelSubscriptionsFromNodes(nodes []json.RawMessage, subscriptions []json.RawMessage) []json.RawMessage {
+	existing := make(map[string]bool)
+	for _, raw := range subscriptions {
+		var subscription PanelSubscriptionConfig
+		if err := json.Unmarshal(raw, &subscription); err != nil {
+			continue
+		}
+		key := strings.TrimSpace(subscription.ProviderKey)
+		if key != "" {
+			existing[key] = true
+		}
+	}
+
+	aggregates := make(map[string]*panelSubscriptionAggregate)
+	for _, raw := range nodes {
+		var node panelNodeValidationConfig
+		if err := json.Unmarshal(raw, &node); err != nil {
+			continue
+		}
+		source := normalizedPanelNodeSource(node.Stale, node.Source)
+		if source.Type != "SUBSCRIPTION" || source.ProviderKey == "" || existing[source.ProviderKey] {
+			continue
+		}
+		aggregate := aggregates[source.ProviderKey]
+		if aggregate == nil {
+			aggregate = &panelSubscriptionAggregate{URL: source.URL}
+			aggregates[source.ProviderKey] = aggregate
+		}
+		if aggregate.URL == "" && source.URL != "" {
+			aggregate.URL = source.URL
+		}
+		if source.LastSeenAt > aggregate.LastFetchedAt {
+			aggregate.LastFetchedAt = source.LastSeenAt
+		}
+		aggregate.NodeCount++
+		if node.Stale {
+			aggregate.StaleCount++
+		}
+	}
+
+	for providerKey, aggregate := range aggregates {
+		url := aggregate.URL
+		if url == "" {
+			url = providerKey
+		}
+		subscription := PanelSubscriptionConfig{
+			ProviderKey:       providerKey,
+			URL:               url,
+			LastFetchedAt:     aggregate.LastFetchedAt,
+			LastSeenNodeCount: aggregate.NodeCount,
+			StaleNodeCount:    aggregate.StaleCount,
+		}
+		raw, err := json.Marshal(subscription)
+		if err != nil {
+			continue
+		}
+		subscriptions = append(subscriptions, raw)
+	}
+	return subscriptions
+}
+
+func normalizePanelSubscriptions(subscriptions []json.RawMessage) []json.RawMessage {
+	normalized := make([]json.RawMessage, 0, len(subscriptions))
+	for _, raw := range subscriptions {
+		var subscription PanelSubscriptionConfig
+		if err := json.Unmarshal(raw, &subscription); err != nil {
+			normalized = append(normalized, raw)
+			continue
+		}
+		subscription.ProviderKey = strings.TrimSpace(subscription.ProviderKey)
+		subscription.URL = strings.TrimSpace(subscription.URL)
+		subscription.Name = strings.TrimSpace(subscription.Name)
+		if subscription.ProviderKey == "" && subscription.URL != "" {
+			subscription.ProviderKey = strings.ToLower(subscription.URL)
+		}
+		normalizedRaw, err := json.Marshal(subscription)
+		if err != nil {
+			normalized = append(normalized, raw)
+			continue
+		}
+		normalized = append(normalized, normalizedRaw)
+	}
+	return normalized
+}
+
+func normalizePanelNodes(nodes []json.RawMessage) []json.RawMessage {
+	normalized := make([]json.RawMessage, 0, len(nodes))
+	for _, raw := range nodes {
+		var node map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &node); err != nil {
+			normalized = append(normalized, raw)
+			continue
+		}
+		stale := false
+		if value, ok := node["stale"]; ok {
+			_ = json.Unmarshal(value, &stale)
+		}
+		var source *PanelNodeSourceConfig
+		if value, ok := node["source"]; ok {
+			var decoded PanelNodeSourceConfig
+			if err := json.Unmarshal(value, &decoded); err == nil {
+				source = &decoded
+			}
+		}
+		normalizedSource := normalizedPanelNodeSource(stale, source)
+		sourceRaw, err := json.Marshal(normalizedSource)
+		if err != nil {
+			normalized = append(normalized, raw)
+			continue
+		}
+		node["source"] = sourceRaw
+		normalizedRaw, err := json.Marshal(node)
+		if err != nil {
+			normalized = append(normalized, raw)
+			continue
+		}
+		normalized = append(normalized, normalizedRaw)
+	}
+	return normalized
+}
+
+func normalizedPanelNodeSource(stale bool, source *PanelNodeSourceConfig) PanelNodeSourceConfig {
+	if source == nil {
+		if stale {
+			return PanelNodeSourceConfig{Type: "SUBSCRIPTION", ProviderKey: "legacy"}
+		}
+		return PanelNodeSourceConfig{Type: "MANUAL"}
+	}
+	normalized := *source
+	normalized.Type = strings.ToUpper(strings.TrimSpace(normalized.Type))
+	if normalized.Type == "" {
+		if stale {
+			normalized.Type = "SUBSCRIPTION"
+		} else {
+			normalized.Type = "MANUAL"
+		}
+	}
+	normalized.ProviderKey = strings.TrimSpace(normalized.ProviderKey)
+	normalized.URL = strings.TrimSpace(normalized.URL)
+	if normalized.Type == "SUBSCRIPTION" && normalized.ProviderKey == "" && normalized.URL != "" {
+		normalized.ProviderKey = strings.ToLower(normalized.URL)
+	}
+	return normalized
 }
 
 func loadLegacyPanel(raw map[string]json.RawMessage) (PanelConfig, bool, error) {

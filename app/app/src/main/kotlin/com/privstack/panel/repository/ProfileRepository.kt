@@ -9,7 +9,9 @@ import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.ipc.ConfigMutationInfo
 import com.privstack.panel.ipc.PollingStatusSource
 import com.privstack.panel.model.Node
+import com.privstack.panel.model.NodeSourceType
 import com.privstack.panel.model.ProfileConfig
+import com.privstack.panel.model.Subscription
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,6 +62,10 @@ class ProfileRepository @Inject constructor(
     /** Human-readable error from the last failed operation, or null. */
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    private val _notice = MutableStateFlow<String?>(null)
+    /** Human-readable status from the last successful partial or informational operation. */
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+
     // ---- Read ----
 
     /**
@@ -71,6 +77,7 @@ class ProfileRepository @Inject constructor(
     suspend fun refresh(): ProfileConfig? = mutex.withLock {
         _loading.value = true
         _error.value = null
+        _notice.value = null
         try {
             when (val result = client.configGet()) {
                 is DaemonClientResult.Ok -> {
@@ -122,6 +129,7 @@ class ProfileRepository @Inject constructor(
     suspend fun setActiveNode(nodeId: String): Boolean = mutex.withLock {
         _loading.value = true
         _error.value = null
+        _notice.value = null
         try {
             val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                 if (_error.value.isNullOrBlank()) {
@@ -166,6 +174,7 @@ class ProfileRepository @Inject constructor(
         mutex.withLock {
             _loading.value = true
             _error.value = null
+            _notice.value = null
             try {
                 val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                     if (_error.value.isNullOrBlank()) {
@@ -191,6 +200,7 @@ class ProfileRepository @Inject constructor(
     suspend fun setProfile(config: ProfileConfig): Boolean = mutex.withLock {
         _loading.value = true
         _error.value = null
+        _notice.value = null
         try {
             if (!ensureRuntimeIdle("setProfile")) {
                 return@withLock false
@@ -242,6 +252,7 @@ class ProfileRepository @Inject constructor(
     ): Boolean = mutex.withLock {
         _loading.value = true
         _error.value = null
+        _notice.value = null
         try {
             val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                 if (_error.value.isNullOrBlank()) {
@@ -279,6 +290,7 @@ class ProfileRepository @Inject constructor(
     ): Boolean = mutex.withLock {
         _loading.value = true
         _error.value = null
+        _notice.value = null
         try {
             val current = _profile.value ?: refreshUnlockedOrNull() ?: run {
                 if (_error.value.isNullOrBlank()) {
@@ -411,7 +423,17 @@ class ProfileRepository @Inject constructor(
         }
 
         val merged = mergeNodes(current, subscriptionNodes, markRemovedStale = true)
-        return if (persistPanelUnlocked(merged.updatedConfig)) {
+        val updatedConfig = merged.updatedConfig.withSubscriptionMetadata(
+            url = url,
+            info = parsed.info,
+            parseFailures = parsed.parseFailures,
+            refreshedNodes = subscriptionNodes,
+        )
+        return if (persistPanelUnlocked(updatedConfig)) {
+            _notice.value = messages.formatSubscriptionRefresh(
+                importedNodes = subscriptionNodes.size,
+                parseFailures = parsed.parseFailures,
+            )
             subscriptionNodes
         } else {
             emptyList()
@@ -472,11 +494,42 @@ class ProfileRepository @Inject constructor(
         val updatedConfig: ProfileConfig,
     )
 
+    private fun ProfileConfig.withSubscriptionMetadata(
+        url: String,
+        info: SubscriptionHandler.SubscriptionInfo?,
+        parseFailures: Int,
+        refreshedNodes: List<Node>,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): ProfileConfig {
+        val providerKey = SubscriptionHandler.providerKeyFor(url)
+        val previous = subscriptions.firstOrNull { it.providerKey == providerKey }
+        val staleNodeCount = nodes.count {
+            it.source.type == NodeSourceType.SUBSCRIPTION &&
+                it.source.providerKey == providerKey &&
+                it.stale
+        }
+        val updated = Subscription(
+            providerKey = providerKey,
+            url = url,
+            name = previous?.name.orEmpty(),
+            lastFetchedAt = nowMillis,
+            lastSeenNodeCount = refreshedNodes.size,
+            staleNodeCount = staleNodeCount,
+            uploadBytes = info?.uploadBytes ?: previous?.uploadBytes ?: 0L,
+            downloadBytes = info?.downloadBytes ?: previous?.downloadBytes ?: 0L,
+            totalBytes = info?.totalBytes ?: previous?.totalBytes ?: 0L,
+            expireTimestamp = info?.expireTimestamp ?: previous?.expireTimestamp ?: 0L,
+            parseFailures = parseFailures,
+        )
+        return copy(subscriptions = subscriptions.filterNot { it.providerKey == providerKey } + updated)
+    }
+
     private fun <T> describeFailure(result: DaemonClientResult<T>): String =
         messages.formatDaemonFailure(result)
 
     private fun publishRuntimeStatus(info: ConfigMutationInfo) {
         info.runtimeStatus?.let(poller::publishBackendStatus)
+        messages.formatConfigMutationNotice(info)?.let { _notice.value = it }
     }
 
     private suspend fun ensureRuntimeIdle(tag: String): Boolean {

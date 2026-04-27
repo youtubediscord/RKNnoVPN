@@ -163,6 +163,134 @@ func TestValidateRejectsNewerSchemaVersion(t *testing.T) {
 	}
 }
 
+func TestValidateChecksPanelSchema(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"stale":true,"source":{"type":"MANUAL"}}`),
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("config validation should reject invalid panel schema")
+	}
+}
+
+func TestNormalizePanelNodesAddsManualSource(t *testing.T) {
+	panel := DefaultPanelConfig()
+	panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443}`),
+	}
+
+	normalized := normalizePanelConfig(panel)
+	if err := ValidatePanelConfig(normalized); err != nil {
+		t.Fatalf("normalized panel should validate: %v", err)
+	}
+
+	var node map[string]json.RawMessage
+	if err := json.Unmarshal(normalized.Nodes[0], &node); err != nil {
+		t.Fatalf("parse normalized node: %v", err)
+	}
+	var source PanelNodeSourceConfig
+	if err := json.Unmarshal(node["source"], &source); err != nil {
+		t.Fatalf("parse normalized source: %v", err)
+	}
+	if source.Type != "MANUAL" {
+		t.Fatalf("expected manual source default, got %#v", source)
+	}
+}
+
+func TestNormalizePanelNodesBackfillsLegacyStaleSource(t *testing.T) {
+	panel := DefaultPanelConfig()
+	panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"stale":true}`),
+	}
+
+	normalized := normalizePanelConfig(panel)
+	if err := ValidatePanelConfig(normalized); err != nil {
+		t.Fatalf("legacy stale node should be normalized to subscription source: %v", err)
+	}
+
+	var node map[string]json.RawMessage
+	if err := json.Unmarshal(normalized.Nodes[0], &node); err != nil {
+		t.Fatalf("parse normalized node: %v", err)
+	}
+	var source PanelNodeSourceConfig
+	if err := json.Unmarshal(node["source"], &source); err != nil {
+		t.Fatalf("parse normalized source: %v", err)
+	}
+	if source.Type != "SUBSCRIPTION" || source.ProviderKey == "" {
+		t.Fatalf("expected legacy subscription source, got %#v", source)
+	}
+}
+
+func TestValidatePanelConfigRejectsManualStaleNode(t *testing.T) {
+	panel := DefaultPanelConfig()
+	panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"stale":true,"source":{"type":"MANUAL"}}`),
+	}
+
+	if err := ValidatePanelConfig(panel); err == nil {
+		t.Fatalf("manual stale node should be rejected")
+	}
+}
+
+func TestNormalizePanelSubscriptionsBackfillsProviderKey(t *testing.T) {
+	panel := DefaultPanelConfig()
+	panel.Subscriptions = []json.RawMessage{
+		json.RawMessage(`{"url":"HTTPS://Example.com/Sub","lastFetchedAt":1000,"lastSeenNodeCount":2}`),
+	}
+
+	normalized := normalizePanelConfig(panel)
+	if err := ValidatePanelConfig(normalized); err != nil {
+		t.Fatalf("normalized subscriptions should validate: %v", err)
+	}
+
+	var subscription PanelSubscriptionConfig
+	if err := json.Unmarshal(normalized.Subscriptions[0], &subscription); err != nil {
+		t.Fatalf("parse normalized subscription: %v", err)
+	}
+	if subscription.ProviderKey != "https://example.com/sub" {
+		t.Fatalf("expected provider key from URL, got %#v", subscription)
+	}
+}
+
+func TestNormalizePanelBackfillsSubscriptionsFromNodes(t *testing.T) {
+	panel := DefaultPanelConfig()
+	panel.Nodes = []json.RawMessage{
+		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"source":{"type":"SUBSCRIPTION","url":"https://example.com/sub","providerKey":"https://example.com/sub","lastSeenAt":1000}}`),
+		json.RawMessage(`{"id":"node-2","protocol":"vless","server":"old.example","port":443,"stale":true,"source":{"type":"SUBSCRIPTION","url":"https://example.com/sub","providerKey":"https://example.com/sub","lastSeenAt":900}}`),
+	}
+
+	normalized := normalizePanelConfig(panel)
+	if err := ValidatePanelConfig(normalized); err != nil {
+		t.Fatalf("backfilled subscription should validate: %v", err)
+	}
+	if len(normalized.Subscriptions) != 1 {
+		t.Fatalf("expected one backfilled subscription, got %d", len(normalized.Subscriptions))
+	}
+
+	var subscription PanelSubscriptionConfig
+	if err := json.Unmarshal(normalized.Subscriptions[0], &subscription); err != nil {
+		t.Fatalf("parse backfilled subscription: %v", err)
+	}
+	if subscription.ProviderKey != "https://example.com/sub" ||
+		subscription.LastSeenNodeCount != 2 ||
+		subscription.StaleNodeCount != 1 ||
+		subscription.LastFetchedAt != 1000 {
+		t.Fatalf("unexpected backfilled subscription: %#v", subscription)
+	}
+}
+
+func TestValidatePanelConfigRejectsSubscriptionWithoutProviderKey(t *testing.T) {
+	panel := DefaultPanelConfig()
+	panel.Subscriptions = []json.RawMessage{
+		json.RawMessage(`{"url":"","lastFetchedAt":1000}`),
+	}
+
+	if err := ValidatePanelConfig(panel); err == nil {
+		t.Fatalf("subscription without provider key should be rejected")
+	}
+}
+
 func TestLoadUsesAuthoritativeEmptySidecarToClearNode(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")

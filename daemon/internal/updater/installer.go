@@ -95,7 +95,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	// --- 3. Clean the current runtime ---
 	logger.Println("running runtime cleanup before module update")
 	if err := stopCurrentProxy(dataDir); err != nil {
-		logger.Printf("warning: runtime cleanup: %v (continuing anyway)", err)
+		return fmt.Errorf("runtime cleanup before module update: %w", err)
 	}
 
 	// --- 4. Back up current binaries ---
@@ -222,7 +222,8 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	// have failed to tear down before extraction.
 	logger.Println("running post-copy network cleanup with updated scripts")
 	if err := stopCurrentProxy(dataDir); err != nil {
-		logger.Printf("warning: post-copy cleanup: %v", err)
+		rollbackBinaries()
+		return fmt.Errorf("post-copy runtime cleanup: %w", err)
 	}
 	if err := markManualStartRequired(dataDir); err != nil {
 		rollbackBinaries()
@@ -382,7 +383,10 @@ func relaunchDaemon(dataDir string) error {
 // not have all required variables.
 func execScriptWithEnv(scriptPath string, action string, env []string) error {
 	if _, err := os.Stat(scriptPath); err != nil {
-		return nil // script doesn't exist in old version -- skip silently
+		if os.IsNotExist(err) {
+			return fmt.Errorf("required script missing: %s", scriptPath)
+		}
+		return fmt.Errorf("stat script %s: %w", scriptPath, err)
 	}
 	shell := "/system/bin/sh"
 	if _, err := os.Stat(shell); err != nil {

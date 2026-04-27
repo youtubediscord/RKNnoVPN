@@ -9,8 +9,10 @@ entrypoint.
   catalog, and disables autostart until the app starts the runtime.
 - `post-fs-data.sh` is early boot only: create the data skeleton, apply basic
   permissions, and set kernel toggles. It must not clean runtime markers.
-- `service.sh` is late boot only: wait for boot completion, run boot cleanup
-  when stale runtime markers exist, and launch `privd`.
+- `service.sh` is late boot only: wait for boot completion, ask
+  `privstack_env.sh` whether boot cleanup markers exist, run canonical boot
+  cleanup, and launch `privd`. It must not implement its own stale
+  process/socket/PID cleanup.
 - `scripts/rescue_reset.sh` is the canonical root cleanup API.
 - `uninstall.sh` delegates runtime cleanup to `scripts/rescue_reset.sh` and
   only handles uninstall-specific preservation/restoration.
@@ -70,7 +72,9 @@ PrivStack-owned cleanup of processes, DNS rules, iptables chains, policy
 routing, and runtime snapshots.
 
 Other entrypoints may call it, but should not grow a parallel netfilter cleanup
-implementation.
+implementation. If `rescue_reset.sh` is missing, entrypoints should report that
+runtime cleanup is unavailable rather than partially reimplementing process,
+marker, or netfilter cleanup.
 
 ## Netstack Ownership
 

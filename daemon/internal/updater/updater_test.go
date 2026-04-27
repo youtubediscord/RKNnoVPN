@@ -351,6 +351,60 @@ func TestStopCurrentProxyUsesCanonicalRescueReset(t *testing.T) {
 	}
 }
 
+func TestStopCurrentProxyRequiresCanonicalRescueReset(t *testing.T) {
+	if err := stopCurrentProxy(t.TempDir()); err == nil {
+		t.Fatal("expected missing rescue_reset.sh to reject module cleanup")
+	}
+}
+
+func TestInstallTrackerPersistsObservableState(t *testing.T) {
+	dataDir := t.TempDir()
+	tracker := NewInstallTracker(dataDir, 42, filepath.Join(dataDir, "update", "module.zip"), filepath.Join(dataDir, "update", "panel.apk"))
+	if err := tracker.Begin(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.Step("update-install-apk", "running", "APK_INSTALLING", "panel.apk"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.MarkAPKInstalled(); err != nil {
+		t.Fatal(err)
+	}
+	state, err := ReadInstallState(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != "running" ||
+		state.Generation != 42 ||
+		state.Step != "update-install-apk" ||
+		state.StepStatus != "running" ||
+		state.Code != "APK_INSTALLING" ||
+		!state.ApkInstalled ||
+		state.ModuleInstalled {
+		t.Fatalf("unexpected install state: %#v", state)
+	}
+}
+
+func TestInstallTrackerRecordsFailedStep(t *testing.T) {
+	dataDir := t.TempDir()
+	tracker := NewInstallTracker(dataDir, 7, "module.zip", "panel.apk")
+	if err := tracker.Begin(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.Step("update-install-module", "failed", "MODULE_INSTALL_FAILED", "boom"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := ReadInstallState(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != "failed" ||
+		state.Step != "update-install-module" ||
+		state.Code != "MODULE_INSTALL_FAILED" ||
+		state.Detail != "boom" {
+		t.Fatalf("unexpected failed install state: %#v", state)
+	}
+}
+
 func writeTestFile(t *testing.T, path string, perm os.FileMode, contents ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

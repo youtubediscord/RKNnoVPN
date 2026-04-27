@@ -14,7 +14,6 @@ PRIVSTACK_GID=23333
 
 PRIVD_BIN="${PRIVSTACK_DIR}/bin/privd"
 PRIVD_PID_FILE="${PRIVSTACK_DIR}/run/privd.pid"
-PRIVD_SOCK="${PRIVSTACK_DIR}/run/daemon.sock"
 CONFIG_FILE="${PRIVSTACK_DIR}/config/config.json"
 MANUAL_FLAG="${PRIVSTACK_DIR}/config/manual"
 LOG_FILE="${PRIVSTACK_DIR}/logs/service.log"
@@ -186,19 +185,7 @@ has_boot_cleanup_markers() {
         privstack_has_boot_cleanup_markers
         return $?
     fi
-    for marker in \
-        "$PRIVSTACK_DIR/run/active" \
-        "$PRIVSTACK_DIR/run/reset.lock" \
-        "$PRIVSTACK_DIR/run/privd.pid" \
-        "$PRIVSTACK_DIR/run/singbox.pid" \
-        "$PRIVSTACK_DIR/run/daemon.sock" \
-        "$PRIVSTACK_DIR/run/env.sh" \
-        "$PRIVSTACK_DIR/run/iptables.rules" \
-        "$PRIVSTACK_DIR/run/ip6tables.rules" \
-        "$PRIVSTACK_DIR/run/iptables_backup.rules" \
-        "$PRIVSTACK_DIR/run/ip6tables_backup.rules"; do
-        [ -e "$marker" ] && return 0
-    done
+    log_warn "privstack_env.sh marker helper unavailable; boot cleanup will run as probe"
     return 1
 }
 
@@ -239,78 +226,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-# ============================================================================
-# 5. Kill stale daemon and socket
-# ============================================================================
-
-kill_stale() {
-    # Kill by PID file
-    if [ -f "$PRIVD_PID_FILE" ]; then
-        STALE_PID="$(cat "$PRIVD_PID_FILE" 2>/dev/null)"
-        if [ -n "$STALE_PID" ]; then
-            if kill -0 "$STALE_PID" 2>/dev/null; then
-                STALE_CMD="$(tr '\000' ' ' < "/proc/${STALE_PID}/cmdline" 2>/dev/null)"
-                case "$STALE_CMD" in
-                    *"$PRIVD_BIN"*)
-                        log_info "Killing stale daemon PID ${STALE_PID}"
-                        kill -TERM "$STALE_PID" 2>/dev/null
-                        # Brief wait for graceful shutdown
-                        WAIT=0
-                        while [ "$WAIT" -lt 5 ] && kill -0 "$STALE_PID" 2>/dev/null; do
-                            sleep 1
-                            WAIT=$((WAIT + 1))
-                        done
-                        # Force kill if still alive
-                        if kill -0 "$STALE_PID" 2>/dev/null; then
-                            kill -KILL "$STALE_PID" 2>/dev/null
-                            log_warn "Force-killed stale daemon PID ${STALE_PID}"
-                        fi
-                        ;;
-                    *)
-                        log_warn "Ignoring stale PID ${STALE_PID}: not ${PRIVD_BIN}"
-                        ;;
-                esac
-            fi
-        fi
-        rm -f "$PRIVD_PID_FILE" 2>/dev/null
-    fi
-
-    # Kill remaining PrivStack daemon processes by their installed binary path.
-    for p in /proc/[0-9]*; do
-        pid="${p##*/}"
-        [ "$pid" = "$$" ] && continue
-        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
-        case "$cmd" in
-            *"$PRIVD_BIN"*)
-                log_info "Killing stale PrivStack daemon PID ${pid}"
-                kill -TERM "$pid" 2>/dev/null
-                ;;
-        esac
-    done
-    sleep 2
-    for p in /proc/[0-9]*; do
-        pid="${p##*/}"
-        [ "$pid" = "$$" ] && continue
-        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
-        case "$cmd" in
-            *"$PRIVD_BIN"*)
-                if kill -0 "$pid" 2>/dev/null; then
-                    kill -KILL "$pid" 2>/dev/null
-                    log_warn "Force-killed stale PrivStack daemon PID ${pid}"
-                fi
-                ;;
-        esac
-    done
-
-    # Remove stale socket
-    rm -f "$PRIVD_SOCK" 2>/dev/null
-
-    # Remove stale PID files
-    rm -f "${PRIVSTACK_DIR}/run/"*.pid 2>/dev/null
-}
-
-kill_stale
-
 first_pid_by_cmd_path() {
     wanted="$1"
     for p in /proc/[0-9]*; do
@@ -328,7 +243,7 @@ first_pid_by_cmd_path() {
 }
 
 # ============================================================================
-# 6. Set resource limits
+# 5. Set resource limits
 # ============================================================================
 
 # Raise file descriptor limit — sing-box may handle thousands of connections
@@ -337,7 +252,7 @@ ACTUAL_ULIMIT="$(ulimit -n 2>/dev/null)"
 log_info "File descriptor limit: ${ACTUAL_ULIMIT}"
 
 # ============================================================================
-# 7. Launch daemon
+# 6. Launch daemon
 # ============================================================================
 
 launch_daemon() {
@@ -389,7 +304,7 @@ launch_daemon
 LAUNCH_RESULT=$?
 
 # ============================================================================
-# 8. Set OOM score — keep Android UI preferred over PrivStack workers
+# 7. Set OOM score — keep Android UI preferred over PrivStack workers
 # ============================================================================
 
 if [ "$LAUNCH_RESULT" -eq 0 ]; then
@@ -415,7 +330,7 @@ if [ "$LAUNCH_RESULT" -eq 0 ]; then
 fi
 
 # ============================================================================
-# 9. Final verification
+# 8. Final verification
 # ============================================================================
 
 if [ "$LAUNCH_RESULT" -eq 0 ]; then

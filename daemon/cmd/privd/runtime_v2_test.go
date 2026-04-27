@@ -58,7 +58,7 @@ func TestBuildRuntimeV2HealthSnapshotSeparatesOperationalFailures(t *testing.T) 
 func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 	d := &daemon{}
 
-	result := d.configMutationSuccess("ok", true, true, 2)
+	result := d.configMutationSuccess("config-set-many", "ok", true, true, 2)
 
 	if result["ok"] != true {
 		t.Fatalf("mutation success must set ok=true: %#v", result)
@@ -75,12 +75,22 @@ func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 	if result["updated"] != 2 {
 		t.Fatalf("mutation success lost updated count: %#v", result)
 	}
+	operation, ok := result["operation"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("mutation success must expose transaction operation: %#v", result)
+	}
+	if operation["type"] != "config-mutation" || operation["action"] != "config-set-many" {
+		t.Fatalf("unexpected mutation operation identity: %#v", operation)
+	}
+	if operation["runtimeApply"] != "applied" {
+		t.Fatalf("mutation operation must expose runtime apply status: %#v", operation)
+	}
 }
 
 func TestConfigApplyRPCErrorEnvelopeKeepsSavedFailureVisible(t *testing.T) {
 	d := &daemon{}
 
-	rpcErr := d.configApplyRPCError(errors.New("config saved: apply config hot-swap failed"))
+	rpcErr := d.configApplyRPCError("config-set-many", errors.New("config saved: apply config hot-swap failed"))
 	data, ok := rpcErr.Data.(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected structured mutation error data, got %#v", rpcErr.Data)
@@ -96,6 +106,16 @@ func TestConfigApplyRPCErrorEnvelopeKeepsSavedFailureVisible(t *testing.T) {
 	}
 	if data["code"] == "" || data["message"] == "" {
 		t.Fatalf("saved apply failure must include code and message: %#v", data)
+	}
+	if data["runtime_apply"] != "failed" {
+		t.Fatalf("saved apply failure must expose failed runtime apply: %#v", data)
+	}
+	operation, ok := data["operation"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("saved apply failure must expose transaction operation: %#v", data)
+	}
+	if operation["status"] != "failed" || operation["configSaved"] != true {
+		t.Fatalf("unexpected failure operation: %#v", operation)
 	}
 }
 
