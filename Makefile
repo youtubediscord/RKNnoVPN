@@ -4,6 +4,7 @@
 SINGBOX_VERSION ?= stable
 SINGBOX_RESOLVED_VERSION := $(shell if [ "$(SINGBOX_VERSION)" = "stable" ]; then gh release view --repo SagerNet/sing-box --json tagName --jq .tagName 2>/dev/null | sed 's/^v//'; elif [ "$(SINGBOX_VERSION)" = "latest" ] || [ "$(SINGBOX_VERSION)" = "alpha" ] || [ "$(SINGBOX_VERSION)" = "prerelease" ]; then gh release list --repo SagerNet/sing-box --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null | sed 's/^v//'; else echo "$(SINGBOX_VERSION)" | sed 's/^v//'; fi)
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
+VERSION_CODE := $(shell echo "$(VERSION)" | awk -F. '{gsub(/^v/,"",$$1); printf "%d\n", $$1 * 1000 + $$2 * 100 + $$3}')
 OUT_DIR := out
 MODULE_DIR := module
 LAB_APK ?= $(OUT_DIR)/privstack-$(VERSION)-panel.apk
@@ -103,6 +104,7 @@ module: daemon singbox
 	chmod 755 $(MODULE_DIR)/binaries/arm64/*
 	chmod 755 $(MODULE_DIR)/binaries/armv7/*
 	sed -i "s/^version=.*/version=$(VERSION)/" $(MODULE_DIR)/module.prop
+	sed -i "s/^versionCode=.*/versionCode=$(VERSION_CODE)/" $(MODULE_DIR)/module.prop
 	cd $(MODULE_DIR) && zip -r ../$(OUT_DIR)/privstack-$(VERSION)-module.zip . \
 		-x "*.git*" "*.DS_Store"
 	@echo "  -> $(OUT_DIR)/privstack-$(VERSION)-module.zip"

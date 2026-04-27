@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.8.0
+
+- Added a runtime actor for lifecycle operations so start, stop, restart, reset, reload, network-change, rescue, and update restore no longer wait on each other through hidden long-running locks.
+- Added fail-fast `RUNTIME_BUSY` / `RESET_IN_PROGRESS` JSON-RPC errors with active operation metadata, plus APK-side Russian messaging for busy operations.
+- Kept `reset.lock` owned by reset/rescue cleanup paths instead of normal start or hot-swap, preserving the root-level reset guard.
+- Added regression coverage for lifecycle conflicts, readable status during active operations, reset lock ownership, and generation handling.
+- Extended rooted device-lab helpers with Lineage/QEMU emulator install and smoke targets.
+- Synchronized release metadata for app, daemon, module, update feed, workflow stamping, and bundled scripts to `v1.8.0`.
+
 ## v1.7.3
 
 - Fixed APK compatibility gating so a damaged `current` release catalog is shown as a repair warning instead of blocking start/restart when APK, daemon, and module versions match.

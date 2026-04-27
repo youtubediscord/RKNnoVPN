@@ -246,9 +246,18 @@ jobs:
 
       - name: Stamp version in module.prop
         run: |
+          version_code() {
+            local raw="${1#v}"
+            local major minor patch
+            IFS=. read -r major minor patch _ <<< "$raw"
+            major="${major:-0}"
+            minor="${minor:-0}"
+            patch="${patch:-0}"
+            echo $((major * 1000 + minor * 100 + patch))
+          }
           if [[ "${GITHUB_REF_NAME}" == v* ]]; then
             VERSION="${GITHUB_REF_NAME}"
-            CODE=$(echo "$VERSION" | sed 's/v//;s/\.//g')
+            CODE="$(version_code "$VERSION")"
           else
             VERSION="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
             CODE="${GITHUB_RUN_NUMBER}"
@@ -293,10 +302,19 @@ jobs:
 
       - name: Stamp version
         run: |
+          version_code() {
+            local raw="${1#v}"
+            local major minor patch
+            IFS=. read -r major minor patch _ <<< "$raw"
+            major="${major:-0}"
+            minor="${minor:-0}"
+            patch="${patch:-0}"
+            echo $((major * 1000 + minor * 100 + patch))
+          }
           if [[ "${GITHUB_REF_NAME}" == v* ]]; then
             VERSION="${GITHUB_REF_NAME}"
             VER_NAME="$VERSION"
-            VER_CODE=$(echo "$VERSION" | sed 's/v//;s/\.//g')
+            VER_CODE="$(version_code "$VERSION")"
           else
             VER_NAME="dev-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
             VER_CODE="${GITHUB_RUN_NUMBER}"
@@ -375,8 +393,17 @@ jobs:
       - name: Update update.json for Magisk manager
         if: steps.version.outputs.stable == 'true'
         run: |
+          version_code() {
+            local raw="${1#v}"
+            local major minor patch
+            IFS=. read -r major minor patch _ <<< "$raw"
+            major="${major:-0}"
+            minor="${minor:-0}"
+            patch="${patch:-0}"
+            echo $((major * 1000 + minor * 100 + patch))
+          }
           VERSION="${{ steps.version.outputs.version }}"
-          VERSION_CODE=$(echo "$VERSION" | sed 's/v//;s/\.//g')
+          VERSION_CODE="$(version_code "$VERSION")"
           cat > update.json <<ENDJSON
           {
             "version": "${VERSION}",

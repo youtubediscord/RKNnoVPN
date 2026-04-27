@@ -86,8 +86,8 @@ even when the Android UI has booted.
 To install locally built artifacts on a Magisk-enabled emulator:
 
 ```sh
-make all VERSION=v1.7.13
-make lab-emulator-install VERSION=v1.7.13
+make all VERSION=v1.8.0
+make lab-emulator-install VERSION=v1.8.0
 ```
 
 The install target pushes the APK and Magisk module ZIP, runs
