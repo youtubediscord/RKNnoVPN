@@ -811,6 +811,27 @@ func (m *CoreManager) runtimeListenerWaits() []listenerWaitSpec {
 			Timeout: 10 * time.Second,
 		})
 	}
+	panelInbounds := m.config.ResolvePanelInbounds()
+	if socksPort := panelInbounds.SocksPort; socksPort > 0 {
+		specs = append(specs, listenerWaitSpec{
+			Stage:   "wait-socks-helper",
+			Layer:   "wait SOCKS helper port",
+			Code:    "SOCKS_HELPER_DOWN",
+			Label:   "SOCKS helper",
+			Port:    socksPort,
+			Timeout: 10 * time.Second,
+		})
+	}
+	if httpPort := panelInbounds.HTTPPort; httpPort > 0 {
+		specs = append(specs, listenerWaitSpec{
+			Stage:   "wait-http-helper",
+			Layer:   "wait HTTP helper port",
+			Code:    "HTTP_HELPER_DOWN",
+			Label:   "HTTP helper",
+			Port:    httpPort,
+			Timeout: 10 * time.Second,
+		})
+	}
 	return specs
 }
 

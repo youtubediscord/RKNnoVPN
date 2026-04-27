@@ -373,7 +373,7 @@ class ProfileRepository @Inject constructor(
             return emptyList()
         }
 
-        val merged = mergeNodes(current, parsed.nodes, dropRemoved = false)
+        val merged = mergeNodes(current, parsed.nodes, markRemovedStale = true)
         return if (persistPanelUnlocked(merged.updatedConfig)) {
             parsed.nodes
         } else {
@@ -407,14 +407,20 @@ class ProfileRepository @Inject constructor(
         current: ProfileConfig,
         incoming: List<Node>,
         dropRemoved: Boolean = false,
+        markRemovedStale: Boolean = false,
     ): MergeResult {
         val preview = SubscriptionHandler.previewMerge(current.nodes, incoming)
-        val mergedNodes = SubscriptionHandler.applyMerge(preview, dropRemoved = dropRemoved)
+        val mergedNodes = SubscriptionHandler.applyMerge(
+            preview,
+            dropRemoved = dropRemoved,
+            markRemovedStale = markRemovedStale
+        )
+        val selectableNodes = mergedNodes.filterNot { it.stale }
         val nextActiveId = current.activeNodeId
-            ?.takeIf { activeId -> mergedNodes.any { it.id == activeId } }
+            ?.takeIf { activeId -> selectableNodes.any { it.id == activeId } }
             ?: preview.added.firstOrNull()?.id
             ?: preview.updated.firstOrNull()?.id
-            ?: mergedNodes.firstOrNull()?.id
+            ?: selectableNodes.firstOrNull()?.id
 
         return MergeResult(
             importedNodes = incoming,

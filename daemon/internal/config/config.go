@@ -220,6 +220,7 @@ type NodeProfile struct {
 	WGMTU           int               `json:"wg_mtu,omitempty"`
 	WGReserved      []int             `json:"wg_reserved,omitempty"`
 	Extra           map[string]string `json:"extra,omitempty"`
+	Stale           bool              `json:"stale,omitempty"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.

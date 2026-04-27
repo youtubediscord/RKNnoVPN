@@ -2534,6 +2534,12 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 			Message: "this update requires both module and APK artifacts",
 		}
 	}
+	if err := updater.VerifyDownloadedUpdate(p.ModulePath, p.ApkPath); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: "update artifacts are not checksum-verified: " + err.Error(),
+		}
+	}
 
 	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
 		d.coreMgr.GetState() == core.StateDegraded

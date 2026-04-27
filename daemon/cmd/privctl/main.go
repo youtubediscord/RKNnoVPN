@@ -153,9 +153,7 @@ func main() {
 	// Handle error response.
 	if resp.Error != nil {
 		fmt.Fprintf(os.Stderr, "error [%d]: %s\n", resp.Error.Code, resp.Error.Message)
-		if resp.Error.Data != nil {
-			prettyPrint(*resp.Error.Data)
-		}
+		prettyPrint(line)
 		os.Exit(1)
 	}
 

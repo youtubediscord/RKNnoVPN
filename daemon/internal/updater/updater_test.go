@@ -2,6 +2,8 @@ package updater
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,6 +82,40 @@ func TestVerifyChecksumsAcceptsAllDownloadedArtifacts(t *testing.T) {
 	ok, err := verifyChecksums(sumPath, dir)
 	if err != nil || !ok {
 		t.Fatalf("expected checksum verification to pass, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestDownloadUpdateRejectsMissingChecksumAsset(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/module.zip":
+			_, _ = w.Write([]byte("module"))
+		case "/panel.apk":
+			_, _ = w.Write([]byte("apk"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	_, err := DownloadUpdate(&UpdateInfo{
+		ModuleURL:  server.URL + "/module.zip",
+		ApkURL:     server.URL + "/panel.apk",
+		ModuleSize: int64(len("module")),
+		ApkSize:    int64(len("apk")),
+	}, t.TempDir(), nil)
+	if err == nil {
+		t.Fatal("expected missing checksum URL to reject downloaded update")
+	}
+}
+
+func TestVerifyDownloadedUpdateRequiresChecksumFile(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "module.zip"), 0644, "module")
+	writeTestFile(t, filepath.Join(dir, "panel.apk"), 0644, "apk")
+
+	if err := VerifyDownloadedUpdate(filepath.Join(dir, "module.zip"), filepath.Join(dir, "panel.apk")); err == nil {
+		t.Fatal("expected missing SHA256SUMS.txt to reject install")
 	}
 }
 

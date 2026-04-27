@@ -21,6 +21,7 @@ type panelNode struct {
 	Port     int             `json:"port"`
 	Link     string          `json:"link"`
 	Outbound json.RawMessage `json:"outbound"`
+	Stale    bool            `json:"stale"`
 }
 
 // RenderSingboxConfig generates a complete sing-box configuration JSON
@@ -226,6 +227,10 @@ func buildDNSServer(tag, address, detour string) map[string]interface{} {
 
 func buildInbounds(cfg *Config) []map[string]interface{} {
 	panelInbounds := cfg.ResolvePanelInbounds()
+	helperListen := "127.0.0.1"
+	if panelInbounds.AllowLAN {
+		helperListen = "0.0.0.0"
+	}
 	inbounds := []map[string]interface{}{
 		{
 			"type":        "tproxy",
@@ -246,8 +251,16 @@ func buildInbounds(cfg *Config) []map[string]interface{} {
 		inbounds = append(inbounds, map[string]interface{}{
 			"type":        "http",
 			"tag":         "status-http-in",
-			"listen":      "127.0.0.1",
+			"listen":      helperListen,
 			"listen_port": panelInbounds.HTTPPort,
+		})
+	}
+	if panelInbounds.SocksPort > 0 {
+		inbounds = append(inbounds, map[string]interface{}{
+			"type":        "socks",
+			"tag":         "status-socks-in",
+			"listen":      helperListen,
+			"listen_port": panelInbounds.SocksPort,
 		})
 	}
 	return inbounds
@@ -624,7 +637,7 @@ func ProfilesFromPanelNodes(cfg *Config) []*NodeProfile {
 		if err != nil {
 			continue
 		}
-		if profile.Address == "" || profile.Port == 0 || profile.Protocol == "" {
+		if profile.Stale || profile.Address == "" || profile.Port == 0 || profile.Protocol == "" {
 			continue
 		}
 		profiles = append(profiles, profile)
@@ -681,6 +694,7 @@ func profileFromPanelNode(raw json.RawMessage, index int) (*NodeProfile, error) 
 		Transport:   "tcp",
 		Fingerprint: "chrome",
 		Extra:       map[string]string{},
+		Stale:       node.Stale,
 	}
 
 	settings := mapFromMap(outbound, "settings")

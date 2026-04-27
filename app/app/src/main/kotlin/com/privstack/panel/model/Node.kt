@@ -29,7 +29,9 @@ data class Node(
     /** Optional measured response throughput in bytes/sec when the probe URL has a body. */
     val throughputBps: Long? = null,
     val testStatus: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /** True when a subscription refresh no longer contains this node. */
+    val stale: Boolean = false
 ) {
     /** Human-readable label: "name (server:port)" */
     val displayLabel: String

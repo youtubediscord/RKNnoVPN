@@ -746,3 +746,104 @@ func TestRenderAddsInternalStatusHTTPInboundWhenExplicitlyEnabled(t *testing.T) 
 		t.Fatal("status-http-in inbound was not rendered")
 	}
 }
+
+func TestRenderAddsInternalStatusSOCKSInboundWhenExplicitlyEnabled(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Panel.Inbounds = json.RawMessage(`{"socksPort":10808}`)
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	inbounds := rendered["inbounds"].([]any)
+	found := false
+	for _, rawInbound := range inbounds {
+		inbound := rawInbound.(map[string]any)
+		if inbound["tag"] == "status-socks-in" {
+			found = true
+			if inbound["type"] != "socks" {
+				t.Fatalf("unexpected helper inbound type: %#v", inbound)
+			}
+			if inbound["listen"] != "127.0.0.1" {
+				t.Fatalf("helper inbound must stay localhost-only by default: %#v", inbound)
+			}
+			if inbound["listen_port"].(float64) != 10808 {
+				t.Fatalf("unexpected helper inbound port: %#v", inbound)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("status-socks-in inbound was not rendered")
+	}
+}
+
+func TestRenderHelperInboundsHonorAllowLAN(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "example.com"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Panel.Inbounds = json.RawMessage(`{"httpPort":10809,"socksPort":10808,"allowLan":true}`)
+
+	var rendered map[string]any
+	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
+	if err != nil {
+		t.Fatalf("render config: %v", err)
+	}
+	if err := json.Unmarshal(data, &rendered); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	inbounds := rendered["inbounds"].([]any)
+	for _, wantTag := range []string{"status-http-in", "status-socks-in"} {
+		found := false
+		for _, rawInbound := range inbounds {
+			inbound := rawInbound.(map[string]any)
+			if inbound["tag"] != wantTag {
+				continue
+			}
+			found = true
+			if inbound["listen"] != "0.0.0.0" {
+				t.Fatalf("%s did not honor allowLan: %#v", wantTag, inbound)
+			}
+		}
+		if !found {
+			t.Fatalf("%s inbound was not rendered", wantTag)
+		}
+	}
+}
+
+func TestRenderSkipsStalePanelNodes(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Node.Address = "fallback.example"
+	cfg.Node.Port = 443
+	cfg.Node.Protocol = "vless"
+	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
+	cfg.Panel.ActiveNodeID = "stale-node"
+	cfg.Panel.Nodes = []json.RawMessage{json.RawMessage(`{
+		"id":"stale-node",
+		"name":"Removed by subscription",
+		"protocol":"VLESS",
+		"server":"stale.example",
+		"port":443,
+		"stale":true,
+		"outbound":{
+			"protocol":"vless",
+			"settings":{"vnext":[{"address":"stale.example","port":443,"users":[{"id":"11111111-1111-1111-1111-111111111111","encryption":"none"}]}]}
+		}
+	}`)}
+
+	profiles := ProfilesFromPanelNodes(cfg)
+	if len(profiles) != 0 {
+		t.Fatalf("stale panel nodes must not become runtime profiles: %#v", profiles)
+	}
+}

@@ -272,6 +272,14 @@ class PrivctlExecutor @Inject constructor() {
             }
         }
 
+        if (exitCode != 0) {
+            return PrivctlResult.Error(
+                code = exitCode,
+                message = stderr.ifBlank { "privctl exited with code $exitCode" },
+                details = jsonElement
+            )
+        }
+
         // JSON-RPC result field
         val resultField = obj["result"]
         if (resultField != null) {

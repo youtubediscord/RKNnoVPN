@@ -133,9 +133,9 @@ func NormalizeVersionTag(version string) string {
 // DownloadUpdate
 // --------------------------------------------------------------------------
 
-// DownloadUpdate downloads module.zip and panel.apk into destDir and
-// verifies SHA256 checksums when SHA256SUMS.txt is available. The progress
-// callback is called periodically with downloaded/total byte counts.
+// DownloadUpdate downloads module.zip and panel.apk into destDir and verifies
+// SHA256 checksums before the artifacts can be installed. The progress callback
+// is called periodically with downloaded/total byte counts.
 func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, total int64)) (*DownloadedUpdate, error) {
 	if err := os.MkdirAll(destDir, 0750); err != nil {
 		return nil, fmt.Errorf("updater: mkdir %s: %w", destDir, err)
@@ -171,26 +171,71 @@ func DownloadUpdate(info *UpdateInfo, destDir string, progress func(downloaded, 
 		result.ApkPath = p
 	}
 
-	// Verify checksums.
-	if info.ChecksumURL != "" {
-		checksumPath := filepath.Join(destDir, "SHA256SUMS.txt")
-		if err := downloadFile(info.ChecksumURL, checksumPath, nil); err != nil {
-			// Checksum file missing is non-fatal, but mark as unverified.
-			result.Checksums = false
-			return result, nil
-		}
+	if result.ModulePath == "" && result.ApkPath == "" {
+		return nil, fmt.Errorf("updater: no downloadable update artifacts found")
+	}
+	if info.ChecksumURL == "" {
+		return nil, fmt.Errorf("updater: release is missing sha256sums.txt")
+	}
 
-		ok, err := verifyChecksums(checksumPath, destDir)
-		if err != nil {
-			return nil, fmt.Errorf("updater: verify checksums: %w", err)
-		}
-		result.Checksums = ok
-		if !ok {
-			return nil, fmt.Errorf("updater: SHA256 checksum mismatch")
-		}
+	checksumPath := filepath.Join(destDir, "SHA256SUMS.txt")
+	if err := downloadFile(info.ChecksumURL, checksumPath, nil); err != nil {
+		return nil, fmt.Errorf("updater: download checksums: %w", err)
+	}
+
+	ok, err := verifyChecksums(checksumPath, destDir)
+	if err != nil {
+		return nil, fmt.Errorf("updater: verify checksums: %w", err)
+	}
+	result.Checksums = ok
+	if !ok {
+		return nil, fmt.Errorf("updater: SHA256 checksum mismatch")
 	}
 
 	return result, nil
+}
+
+// VerifyDownloadedUpdate verifies that the artifacts about to be installed are
+// the checksum-validated files produced by DownloadUpdate.
+func VerifyDownloadedUpdate(modulePath, apkPath string) error {
+	if modulePath == "" || apkPath == "" {
+		return fmt.Errorf("both module and APK paths are required")
+	}
+	moduleDir := filepath.Dir(modulePath)
+	apkDir := filepath.Dir(apkPath)
+	if moduleDir != apkDir {
+		return fmt.Errorf("module and APK must be in the same verified update directory")
+	}
+	if filepath.Base(modulePath) != "module.zip" || filepath.Base(apkPath) != "panel.apk" {
+		return fmt.Errorf("update artifacts must be the verified module.zip and panel.apk files")
+	}
+	if _, err := os.Stat(modulePath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("missing module.zip")
+		}
+		return fmt.Errorf("stat module.zip: %w", err)
+	}
+	if _, err := os.Stat(apkPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("missing panel.apk")
+		}
+		return fmt.Errorf("stat panel.apk: %w", err)
+	}
+	checksumPath := filepath.Join(moduleDir, "SHA256SUMS.txt")
+	if _, err := os.Stat(checksumPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("missing SHA256SUMS.txt for downloaded update")
+		}
+		return fmt.Errorf("stat SHA256SUMS.txt: %w", err)
+	}
+	ok, err := verifyChecksums(checksumPath, moduleDir)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("SHA256 checksum mismatch")
+	}
+	return nil
 }
 
 // --------------------------------------------------------------------------

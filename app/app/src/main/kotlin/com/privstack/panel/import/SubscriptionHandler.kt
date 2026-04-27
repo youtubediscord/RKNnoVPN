@@ -156,15 +156,20 @@ object SubscriptionHandler {
         val updated = mutableListOf<Node>()
         val unchanged = mutableListOf<Node>()
         val matchedExistingIds = mutableSetOf<String>()
+        val seenIncomingKeys = mutableSetOf<String>()
 
         // Walk incoming nodes.
         for (inNode in incoming) {
             val key = nodeMatchKey(inNode)
+            if (!seenIncomingKeys.add(key)) {
+                Log.d(TAG, "Skipped duplicate subscription node: ${inNode.name} ${inNode.server}:${inNode.port}")
+                continue
+            }
             val exNode = existing.firstOrNull { candidate ->
                 candidate.id !in matchedExistingIds && nodeMatchKey(candidate) == key
             }
             if (exNode == null) {
-                added += inNode
+                added += inNode.copy(stale = false)
             } else if (hasOutboundChanged(exNode, inNode)) {
                 matchedExistingIds += exNode.id
                 // Outbound changed: update but keep user overrides.
@@ -173,11 +178,12 @@ object SubscriptionHandler {
                     name = exNode.name,
                     group = exNode.group,
                     latencyMs = exNode.latencyMs,
-                    createdAt = exNode.createdAt
+                    createdAt = exNode.createdAt,
+                    stale = false
                 )
             } else {
                 matchedExistingIds += exNode.id
-                unchanged += exNode
+                unchanged += exNode.copy(stale = false)
             }
         }
 
@@ -190,16 +196,25 @@ object SubscriptionHandler {
     /**
      * Apply a [MergePreview] to produce the new node list.
      *
-     * By default, removed nodes are kept (marked stale) rather than deleted.
-     * Pass [dropRemoved] = true to actually delete them.
+     * By default, removed nodes are kept as-is. Subscription refreshes can pass
+     * [markRemovedStale] to preserve user data while preventing stale nodes from
+     * being treated as active runtime candidates.
      */
-    fun applyMerge(preview: MergePreview, dropRemoved: Boolean = false): List<Node> {
+    fun applyMerge(
+        preview: MergePreview,
+        dropRemoved: Boolean = false,
+        markRemovedStale: Boolean = false
+    ): List<Node> {
         val result = mutableListOf<Node>()
         result += preview.unchanged
         result += preview.updated
         result += preview.added
         if (!dropRemoved) {
-            result += preview.removed
+            result += if (markRemovedStale) {
+                preview.removed.map { it.copy(stale = true) }
+            } else {
+                preview.removed
+            }
         }
         return result
     }
