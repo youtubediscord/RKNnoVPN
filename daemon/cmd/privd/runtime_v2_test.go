@@ -967,6 +967,23 @@ func TestHealthEgressURLsPrefersConfiguredProbeSet(t *testing.T) {
 	}
 }
 
+func TestValidateSubscriptionFetchURLRejectsLocalTargets(t *testing.T) {
+	for _, rawURL := range []string{
+		"file:///data/local/tmp/sub.txt",
+		"http://127.0.0.1:8080/sub",
+		"http://localhost/sub",
+		"http://192.168.1.1/sub",
+		"http://[::1]/sub",
+	} {
+		if err := validateSubscriptionFetchURL(rawURL); err == nil {
+			t.Fatalf("expected %q to be rejected", rawURL)
+		}
+	}
+	if err := validateSubscriptionFetchURL("https://example.com/sub"); err != nil {
+		t.Fatalf("expected public https URL to pass, got %v", err)
+	}
+}
+
 func TestReadLogTailReturnsBoundedTail(t *testing.T) {
 	path := t.TempDir() + "/runtime.log"
 	content := strings.Join([]string{"one", "two", "three", "four"}, "\n")
