@@ -66,6 +66,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.privstack.panel.R
 import com.privstack.panel.`import`.ClipboardWatcher
 import com.privstack.panel.model.Node
+import com.privstack.panel.model.NodeSourceType
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,12 +132,14 @@ fun NodeListScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             val filteredNodes = state.nodes.filter { it.group == state.selectedGroup }
+            val selectableNodes = state.nodes.filterNot { it.stale }
+            val selectableFilteredNodes = filteredNodes.filterNot { it.stale }
             SelectionModeRow(
                 isAuto = state.activeNodeId.isNullOrBlank(),
-                hasNodes = state.nodes.isNotEmpty(),
+                hasNodes = selectableNodes.isNotEmpty(),
                 onAutoSelect = viewModel::selectAuto,
                 onManualSelect = {
-                    (filteredNodes.firstOrNull() ?: state.nodes.firstOrNull())
+                    (selectableFilteredNodes.firstOrNull() ?: selectableNodes.firstOrNull())
                         ?.let { viewModel.selectNode(it.id) }
                 },
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -149,7 +152,7 @@ fun NodeListScreen(
             ) {
                 TextButton(
                     onClick = viewModel::testAllNodes,
-                    enabled = state.nodes.isNotEmpty() && !state.isTestingNodes,
+                    enabled = selectableNodes.isNotEmpty() && !state.isTestingNodes,
                 ) {
                     Icon(Icons.Filled.Speed, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
@@ -182,11 +185,15 @@ fun NodeListScreen(
                     items(filteredNodes, key = { it.id }) { node ->
                         NodeCard(
                             node = node,
-                                isActive = node.id == state.activeNodeId,
-                                onSelect = { viewModel.selectNode(node.id) },
-                                onEdit = { nodeToEdit = node },
-                                onTestLatency = { viewModel.testLatency(node.id) },
-                                onDelete = { nodeToDelete = node },
+                            isActive = node.id == state.activeNodeId,
+                            onSelect = {
+                                if (!node.stale) {
+                                    viewModel.selectNode(node.id)
+                                }
+                            },
+                            onEdit = { nodeToEdit = node },
+                            onTestLatency = { viewModel.testLatency(node.id) },
+                            onDelete = { nodeToDelete = node },
                         )
                     }
                 }
@@ -311,10 +318,10 @@ private fun SortRow(
 @Composable
 private fun NodeCard(
     node: Node,
-        isActive: Boolean,
-        onSelect: () -> Unit,
-        onEdit: () -> Unit,
-        onTestLatency: () -> Unit,
+    isActive: Boolean,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    onTestLatency: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
@@ -388,6 +395,20 @@ private fun NodeCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                val sourceText = node.sourceLabel()
+                if (sourceText.isNotBlank()) {
+                    Text(
+                        text = sourceText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (node.stale) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (node.responseMs != null || node.testStatus != null) {
                     Text(
                         text = testSummary,
@@ -438,6 +459,7 @@ private fun NodeCard(
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.test_latency)) },
                     leadingIcon = { Icon(Icons.Filled.Speed, contentDescription = null) },
+                    enabled = !node.stale,
                     onClick = {
                         showContextMenu = false
                         onTestLatency()
@@ -465,6 +487,13 @@ private fun NodeCard(
             }
         }
     }
+}
+
+@Composable
+private fun Node.sourceLabel(): String = when {
+    stale -> stringResource(R.string.node_source_subscription_stale)
+    source.type == NodeSourceType.SUBSCRIPTION -> stringResource(R.string.node_source_subscription)
+    else -> ""
 }
 
 @Composable

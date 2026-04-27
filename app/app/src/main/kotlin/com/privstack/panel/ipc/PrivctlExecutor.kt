@@ -7,9 +7,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -254,15 +258,24 @@ class PrivctlExecutor @Inject constructor() {
             )
         }
 
+        obj.daemonEnvelopeOrNull()?.let { envelope ->
+            return resultFromEnvelope(envelope)
+        }
+
         // JSON-RPC error field present
         val errorObj = obj["error"]
         if (errorObj != null) {
             return try {
                 val errJson = errorObj.jsonObject
+                val envelope = errJson["data"]?.daemonEnvelopeOrNull()
+                val envelopeError = envelope?.get("error")?.jsonObject
                 PrivctlResult.Error(
                     code = errJson["code"]?.jsonPrimitive?.int ?: -1,
-                    message = errJson["message"]?.jsonPrimitive?.content ?: "Unknown daemon error",
-                    details = errJson["data"]
+                    message = envelopeError?.get("message")?.jsonPrimitive?.contentOrNull
+                        ?: errJson["message"]?.jsonPrimitive?.content
+                        ?: "Unknown daemon error",
+                    details = envelopeError?.get("details") ?: errJson["data"],
+                    envelope = envelope,
                 )
             } catch (e: Exception) {
                 PrivctlResult.Error(
@@ -283,6 +296,10 @@ class PrivctlExecutor @Inject constructor() {
         // JSON-RPC result field
         val resultField = obj["result"]
         if (resultField != null) {
+            val envelope = resultField.daemonEnvelopeOrNull()
+            if (envelope != null) {
+                return resultFromEnvelope(envelope)
+            }
             return PrivctlResult.Success(resultField)
         }
 
@@ -293,6 +310,33 @@ class PrivctlExecutor @Inject constructor() {
     private fun shellQuote(value: String): String {
         if (value.isEmpty()) return "''"
         return "'" + value.replace("'", "'\"'\"'") + "'"
+    }
+
+    private fun JsonElement.daemonEnvelopeOrNull(): JsonObject? {
+        val obj = runCatching { jsonObject }.getOrNull() ?: return null
+        return obj.daemonEnvelopeOrNull()
+    }
+
+    private fun JsonObject.daemonEnvelopeOrNull(): JsonObject? {
+        val hasEnvelopeStatus = this["ok"]?.jsonPrimitive?.booleanOrNull != null
+        val hasEnvelopePayload = containsKey("result") || containsKey("error")
+        return if (hasEnvelopeStatus && hasEnvelopePayload) this else null
+    }
+
+    private fun resultFromEnvelope(envelope: JsonObject): PrivctlResult {
+        val ok = envelope["ok"]?.jsonPrimitive?.booleanOrNull ?: true
+        return if (ok) {
+            PrivctlResult.Success(envelope["result"] ?: JsonNull, envelope)
+        } else {
+            val envelopeError = envelope["error"]?.jsonObject
+            PrivctlResult.Error(
+                code = envelopeError?.get("rpcCode")?.jsonPrimitive?.intOrNull ?: -1,
+                message = envelopeError?.get("message")?.jsonPrimitive?.contentOrNull
+                    ?: "Unknown daemon error",
+                details = envelopeError?.get("details"),
+                envelope = envelope,
+            )
+        }
     }
 
 }

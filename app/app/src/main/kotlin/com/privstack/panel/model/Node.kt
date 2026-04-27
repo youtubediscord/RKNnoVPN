@@ -31,11 +31,27 @@ data class Node(
     val testStatus: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     /** True when a subscription refresh no longer contains this node. */
-    val stale: Boolean = false
+    val stale: Boolean = false,
+    /** Ownership metadata used to keep manual and subscription nodes separate. */
+    val source: NodeSource = NodeSource()
 ) {
     /** Human-readable label: "name (server:port)" */
     val displayLabel: String
         get() = "$name ($server:$port)"
+}
+
+@Serializable
+data class NodeSource(
+    val type: NodeSourceType = NodeSourceType.MANUAL,
+    val url: String = "",
+    val providerKey: String = "",
+    val lastSeenAt: Long = 0L
+)
+
+@Serializable
+enum class NodeSourceType {
+    MANUAL,
+    SUBSCRIPTION
 }
 
 @Serializable

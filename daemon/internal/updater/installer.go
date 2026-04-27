@@ -169,6 +169,12 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 
 	// --- 7. Update module directory ---
 	logger.Println("updating module files")
+	if info, err := os.Stat(stagedScriptsDir); err == nil && info.IsDir() {
+		moduleScriptsDir := filepath.Join(moduleDir, "scripts")
+		if err := replaceDirFromSource(stagedScriptsDir, moduleScriptsDir, 0755); err != nil {
+			logger.Printf("warning: copy module scripts: %v", err)
+		}
+	}
 	moduleFiles := []string{
 		"OWNERSHIP.md",
 		"module.prop",

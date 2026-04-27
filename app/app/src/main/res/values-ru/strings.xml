@@ -95,6 +95,8 @@
     <string name="confirm">Подтвердить</string>
     <string name="no_nodes">Серверов нет. Нажмите + чтобы добавить.</string>
     <string name="link_copied">Ссылка скопирована</string>
+    <string name="node_source_subscription">Подписка</string>
+    <string name="node_source_subscription_stale">Удалён из подписки</string>
 
     <!-- Import sheet -->
     <string name="import_nodes">Импорт серверов</string>

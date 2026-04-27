@@ -95,6 +95,8 @@
     <string name="confirm">Confirm</string>
     <string name="no_nodes">No nodes yet. Tap + to add one.</string>
     <string name="link_copied">Link copied</string>
+    <string name="node_source_subscription">Subscription</string>
+    <string name="node_source_subscription_stale">Removed from subscription</string>
 
     <!-- Import sheet -->
     <string name="import_nodes">Import nodes</string>

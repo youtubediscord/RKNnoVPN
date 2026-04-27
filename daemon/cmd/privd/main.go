@@ -968,12 +968,19 @@ func (d *daemon) handlePanelSet(params *json.RawMessage) (interface{}, *ipc.RPCE
 			Message: "invalid params: " + err.Error(),
 		}
 	}
+	if err := config.ValidatePanelConfig(p.Panel); err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeConfigError,
+			Message: "validation failed: " + err.Error(),
+		}
+	}
 
+	runtimeWasRunning := d.runtimeIsRunning()
 	if err := d.applyPanelConfig(p.Panel, p.Reload); err != nil {
 		return nil, d.configApplyRPCError(err)
 	}
 
-	return d.configMutationSuccess("ok", p.Reload, -1), nil
+	return d.configMutationSuccess("ok", p.Reload, runtimeWasRunning && p.Reload, -1), nil
 }
 
 func (d *daemon) handleConfigGet(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1045,6 +1052,12 @@ func (d *daemon) handleConfigSet(params *json.RawMessage) (interface{}, *ipc.RPC
 			Message: "panel storage moved to panel-set",
 		}
 	}
+	if !isMutableConfigKey(p.Key) {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: fmt.Sprintf("unknown or immutable config key: %s", p.Key),
+		}
+	}
 
 	d.mu.Lock()
 	data, _ := json.Marshal(d.cfg)
@@ -1062,7 +1075,7 @@ func (d *daemon) handleConfigSet(params *json.RawMessage) (interface{}, *ipc.RPC
 	if err := d.applyConfig(newCfg, false); err != nil {
 		return nil, d.configApplyRPCError(err)
 	}
-	return d.configMutationSuccess("ok", false, 1), nil
+	return d.configMutationSuccess("ok", false, false, 1), nil
 }
 
 func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1095,6 +1108,14 @@ func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc
 			Message: "panel storage moved to panel-set",
 		}
 	}
+	for key := range p.Values {
+		if !isMutableConfigKey(key) {
+			return nil, &ipc.RPCError{
+				Code:    ipc.CodeInvalidParams,
+				Message: fmt.Sprintf("unknown or immutable config key: %s", key),
+			}
+		}
+	}
 
 	d.mu.Lock()
 	data, _ := json.Marshal(d.cfg)
@@ -1111,11 +1132,12 @@ func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc
 		return nil, rpcErr
 	}
 
+	runtimeWasRunning := d.runtimeIsRunning()
 	if err := d.applyConfig(newCfg, p.Reload); err != nil {
 		return nil, d.configApplyRPCError(err)
 	}
 
-	return d.configMutationSuccess("ok", p.Reload, len(p.Values)), nil
+	return d.configMutationSuccess("ok", p.Reload, runtimeWasRunning && p.Reload, len(p.Values)), nil
 }
 
 func (d *daemon) handleConfigList(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1179,6 +1201,7 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 			Message: "invalid config: " + err.Error(),
 		}
 	}
+	newCfg.Migrate()
 	d.mu.Lock()
 	oldPanel := d.cfg.Panel
 	newCfg.Panel = oldPanel
@@ -1190,6 +1213,12 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 			return nil, &ipc.RPCError{
 				Code:    ipc.CodeConfigError,
 				Message: "invalid panel config: " + err.Error(),
+			}
+		}
+		if err := config.ValidatePanelConfig(newCfg.Panel); err != nil {
+			return nil, &ipc.RPCError{
+				Code:    ipc.CodeConfigError,
+				Message: "validation failed: " + err.Error(),
 			}
 		}
 		newCfg.SyncFromPanel(true)
@@ -1207,6 +1236,7 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 			return nil, d.configApplyRPCError(fmt.Errorf("persist panel: %w", err))
 		}
 	}
+	runtimeWasRunning := d.runtimeIsRunning()
 	if err := d.applyConfig(newCfg, true); err != nil {
 		if panelProvided {
 			_ = config.SavePanel(d.panelPath, oldPanel)
@@ -1214,7 +1244,7 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		return nil, d.configApplyRPCError(err)
 	}
 
-	return d.configMutationSuccess("imported", true, -1), nil
+	return d.configMutationSuccess("imported", true, runtimeWasRunning, -1), nil
 }
 
 func isFullConfigImportKey(key string) bool {
@@ -1239,7 +1269,23 @@ func isFullConfigImportKey(key string) bool {
 	}
 }
 
+func isMutableConfigKey(key string) bool {
+	if key == "schema_version" || key == "panel" {
+		return false
+	}
+	return isFullConfigImportKey(key)
+}
+
 func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Config, *ipc.RPCError) {
+	for key := range full {
+		if !isFullConfigImportKey(key) {
+			return nil, &ipc.RPCError{
+				Code:    ipc.CodeInvalidParams,
+				Message: fmt.Sprintf("unknown config key: %s", key),
+			}
+		}
+	}
+	full["schema_version"] = json.RawMessage(strconv.Itoa(config.CurrentSchemaVersion))
 	patched, err := json.Marshal(full)
 	if err != nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
@@ -1252,6 +1298,7 @@ func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Co
 			Message: "invalid value: " + err.Error(),
 		}
 	}
+	newCfg.Migrate()
 	d.mu.Lock()
 	newCfg.Panel = d.cfg.Panel
 	d.mu.Unlock()
@@ -1283,13 +1330,19 @@ func (d *daemon) configApplyRPCError(err error) *ipc.RPCError {
 	return rpcErr
 }
 
-func (d *daemon) configMutationSuccess(status string, reload bool, updated int) map[string]interface{} {
+func (d *daemon) runtimeIsRunning() bool {
+	state := d.coreMgr.GetState()
+	return state == core.StateRunning || state == core.StateDegraded
+}
+
+func (d *daemon) configMutationSuccess(status string, reload bool, runtimeApplied bool, updated int) map[string]interface{} {
 	result := map[string]interface{}{
 		"ok":              true,
 		"status":          status,
 		"reload":          reload,
 		"config_saved":    true,
-		"runtime_applied": true,
+		"runtime_applied": runtimeApplied,
+		"runtime_apply":   configRuntimeApplyStatus(reload, runtimeApplied),
 	}
 	if updated >= 0 {
 		result["updated"] = updated
@@ -1298,6 +1351,17 @@ func (d *daemon) configMutationSuccess(status string, reload bool, updated int) 
 		result["runtimeStatus"] = d.runtimeV2.Status()
 	}
 	return result
+}
+
+func configRuntimeApplyStatus(reload bool, runtimeApplied bool) string {
+	switch {
+	case runtimeApplied:
+		return "applied"
+	case reload:
+		return "skipped_runtime_stopped"
+	default:
+		return "not_requested"
+	}
 }
 
 func (d *daemon) configMutationErrorData(err error, saved bool) map[string]interface{} {
@@ -1416,6 +1480,9 @@ func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) erro
 	d.mu.Unlock()
 
 	nextCfg.Panel = newPanel
+	if err := config.ValidatePanelConfig(nextCfg.Panel); err != nil {
+		return err
+	}
 	nextCfg.SyncFromPanel(true)
 	needsFullRestart := runtimeReloadNeedsFullRestart(oldCfg, &nextCfg, d.dataDir)
 

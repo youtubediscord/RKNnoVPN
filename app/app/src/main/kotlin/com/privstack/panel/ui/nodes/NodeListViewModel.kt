@@ -182,7 +182,7 @@ class NodeListViewModel @Inject constructor(
 
     fun testAllNodes() {
         viewModelScope.launch {
-            val ids = _uiState.value.nodes.map { it.id }
+            val ids = _uiState.value.nodes.filterNot { it.stale }.map { it.id }
             runNodeTests(ids)
         }
     }
@@ -438,9 +438,7 @@ class NodeListViewModel @Inject constructor(
         viewModelScope.launch {
             profileRepository.profile.collect { config ->
                 if (config != null) {
-                    val nodes = config.nodes
-                        .filterNot { it.stale }
-                        .map(::normalizeNode)
+                    val nodes = config.nodes.map(::normalizeNode)
                     val groups = nodes.map { it.group }.distinct()
                         .ifEmpty { listOf(messages.defaultGroupName()) }
                     _uiState.update { state ->
@@ -450,7 +448,7 @@ class NodeListViewModel @Inject constructor(
                             groups = groups,
                             selectedGroup = selectedGroup,
                             activeNodeId = config.activeNodeId?.takeIf { activeId ->
-                                nodes.any { it.id == activeId }
+                                nodes.any { it.id == activeId && !it.stale }
                             },
                         )
                     }

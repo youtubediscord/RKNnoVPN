@@ -770,6 +770,7 @@ func supportedCapabilities() []string {
 		"diagnostics.bundle.v2",
 		"diagnostics.health.v2",
 		"diagnostics.testNodes.v2",
+		"ipc.envelope.v1",
 		"netstack.report.v1",
 		"netstack.runtime.verify.v1",
 		"netstack.verify.v1",

@@ -58,7 +58,7 @@ func TestBuildRuntimeV2HealthSnapshotSeparatesOperationalFailures(t *testing.T) 
 func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 	d := &daemon{}
 
-	result := d.configMutationSuccess("ok", true, 2)
+	result := d.configMutationSuccess("ok", true, true, 2)
 
 	if result["ok"] != true {
 		t.Fatalf("mutation success must set ok=true: %#v", result)
@@ -68,6 +68,9 @@ func TestConfigMutationSuccessEnvelopeIsExplicit(t *testing.T) {
 	}
 	if result["runtime_applied"] != true {
 		t.Fatalf("mutation success must set runtime_applied=true: %#v", result)
+	}
+	if result["runtime_apply"] != "applied" {
+		t.Fatalf("mutation success must expose runtime apply status: %#v", result)
 	}
 	if result["updated"] != 2 {
 		t.Fatalf("mutation success lost updated count: %#v", result)

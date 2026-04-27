@@ -2,6 +2,8 @@ package com.privstack.panel.`import`
 
 import android.util.Log
 import com.privstack.panel.model.Node
+import com.privstack.panel.model.NodeSource
+import com.privstack.panel.model.NodeSourceType
 import com.privstack.panel.model.Protocol
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -157,6 +159,9 @@ object SubscriptionHandler {
         val unchanged = mutableListOf<Node>()
         val matchedExistingIds = mutableSetOf<String>()
         val seenIncomingKeys = mutableSetOf<String>()
+        val incomingProviderKeys = incoming
+            .mapNotNull { it.source.providerKey.takeIf(String::isNotBlank) }
+            .toSet()
 
         // Walk incoming nodes.
         for (inNode in incoming) {
@@ -166,7 +171,9 @@ object SubscriptionHandler {
                 continue
             }
             val exNode = existing.firstOrNull { candidate ->
-                candidate.id !in matchedExistingIds && nodeMatchKey(candidate) == key
+                candidate.id !in matchedExistingIds &&
+                    sameSourceScope(candidate, inNode) &&
+                    nodeMatchKey(candidate) == key
             }
             if (exNode == null) {
                 added += inNode.copy(stale = false)
@@ -183,14 +190,40 @@ object SubscriptionHandler {
                 )
             } else {
                 matchedExistingIds += exNode.id
-                unchanged += exNode.copy(stale = false)
+                unchanged += exNode.copy(
+                    stale = false,
+                    source = inNode.source,
+                )
             }
         }
 
         // Existing nodes not present in incoming.
-        val removed = existing.filter { it.id !in matchedExistingIds }
+        val removed = existing.filter { node ->
+            node.id !in matchedExistingIds &&
+                node.source.type == NodeSourceType.SUBSCRIPTION &&
+                node.source.providerKey in incomingProviderKeys
+        }
 
         return MergePreview(added, updated, removed, unchanged)
+    }
+
+    fun stampSubscriptionSource(
+        nodes: List<Node>,
+        url: String,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): List<Node> {
+        val providerKey = providerKey(url)
+        return nodes.map { node ->
+            node.copy(
+                stale = false,
+                source = NodeSource(
+                    type = NodeSourceType.SUBSCRIPTION,
+                    url = url,
+                    providerKey = providerKey,
+                    lastSeenAt = nowMillis,
+                ),
+            )
+        }
     }
 
     /**
@@ -241,6 +274,18 @@ object SubscriptionHandler {
         // Fallback: treat as plain text.
         return trimmed
     }
+
+    private fun sameSourceScope(existing: Node, incoming: Node): Boolean {
+        if (incoming.source.type != NodeSourceType.SUBSCRIPTION) {
+            return existing.source.type == incoming.source.type
+        }
+        return existing.source.type == NodeSourceType.SUBSCRIPTION &&
+            existing.source.providerKey.isNotBlank() &&
+            existing.source.providerKey == incoming.source.providerKey
+    }
+
+    private fun providerKey(url: String): String =
+        url.trim().lowercase()
 
     /**
      * Heuristic: does [text] look like it contains at least one proxy URI?

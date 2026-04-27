@@ -869,7 +869,7 @@ class DaemonClient @Inject constructor(
             } catch (e: Exception) {
                 DaemonClientResult.ParseError(raw.data.toString(), e)
             }
-            is PrivctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details)
+            is PrivctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details, raw.envelope)
             is PrivctlResult.RootDenied -> DaemonClientResult.RootDenied(raw.reason)
             is PrivctlResult.Timeout -> DaemonClientResult.Timeout(raw.method)
             is PrivctlResult.DaemonNotFound -> DaemonClientResult.DaemonNotFound(raw.path)
@@ -890,7 +890,7 @@ class DaemonClient @Inject constructor(
         return when (val raw = executor.execute(method, params, timeoutMs = 60_000L)) {
             is PrivctlResult.Success -> try {
                 val info = parseConfigMutationInfo(raw.data)
-                if (!info.ok || !info.runtimeApplied) {
+                if (!info.ok) {
                     DaemonClientResult.DaemonError(
                         CONFIG_APPLY_ERROR_CODE,
                         info.message.ifBlank { "configuration was not applied" },
@@ -902,7 +902,7 @@ class DaemonClient @Inject constructor(
             } catch (e: Exception) {
                 DaemonClientResult.ParseError(raw.data.toString(), e)
             }
-            is PrivctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details)
+            is PrivctlResult.Error -> DaemonClientResult.DaemonError(raw.code, raw.message, raw.details, raw.envelope)
             is PrivctlResult.RootDenied -> DaemonClientResult.RootDenied(raw.reason)
             is PrivctlResult.Timeout -> DaemonClientResult.Timeout(raw.method)
             is PrivctlResult.DaemonNotFound -> DaemonClientResult.DaemonNotFound(raw.path)
@@ -922,6 +922,10 @@ class DaemonClient @Inject constructor(
             updated = obj["updated"]?.jsonPrimitive?.intOrNull,
             configSaved = configSaved,
             runtimeApplied = runtimeApplied,
+            runtimeApply = (
+                obj["runtime_apply"]?.jsonPrimitive?.contentOrNull
+                    ?: obj["runtimeApply"]?.jsonPrimitive?.contentOrNull
+                ).orEmpty(),
             code = obj["code"]?.jsonPrimitive?.contentOrNull.orEmpty(),
             message = obj["message"]?.jsonPrimitive?.contentOrNull.orEmpty(),
             runtimeStatus = obj["runtimeStatus"]?.let {
@@ -1146,6 +1150,7 @@ sealed class DaemonClientResult<out T> {
         val code: Int,
         val message: String,
         val details: JsonElement? = null,
+        val envelope: JsonElement? = null,
     ) : DaemonClientResult<Nothing>()
     data class RootDenied(val reason: String) : DaemonClientResult<Nothing>()
     data class Timeout(val method: String) : DaemonClientResult<Nothing>()
@@ -1314,6 +1319,7 @@ data class ConfigMutationInfo(
     val updated: Int? = null,
     val configSaved: Boolean = true,
     val runtimeApplied: Boolean = true,
+    val runtimeApply: String = "",
     val code: String = "",
     val message: String = "",
     val runtimeStatus: BackendStatusV2? = null,

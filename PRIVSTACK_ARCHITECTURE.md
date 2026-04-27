@@ -86,6 +86,40 @@ Root-демон. Основные обязанности:
 - возвращать audit findings;
 - скачивать подписки и обновления, потому что APK не имеет сети.
 
+### IPC Contract
+
+Transport остаётся JSON-RPC 2.0, но daemon payload внутри `result`/`error.data`
+имеет typed envelope:
+
+```json
+{
+  "ok": true,
+  "result": {},
+  "operation": null,
+  "warnings": []
+}
+```
+
+Ошибка сохраняет JSON-RPC code для совместимости, а daemon-level details лежат
+в envelope:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "CONFIG_APPLY_FAILED",
+    "rpcCode": -32603,
+    "message": "...",
+    "details": {}
+  },
+  "operation": null,
+  "warnings": []
+}
+```
+
+APK `DaemonClient` должен читать typed envelope и не угадывать результат по
+stdout, exit code или произвольным строкам.
+
 ### sing-box
 
 Транспортный core:
@@ -115,6 +149,13 @@ Root-демон. Основные обязанности:
     dns.sh
     routing.sh
     net_handler.sh
+    rescue_reset.sh
+    lib/
+      privstack_env.sh
+      privstack_install.sh
+      privstack_installer_flow.sh
+      privstack_netstack.sh
+      privstack_iptables_rules.sh
   defaults/
     config.json
 ```
@@ -175,6 +216,18 @@ Root-демон. Основные обязанности:
 - `rescue` - политика восстановления;
 - `autostart`.
 
+Частичные мутации daemon config принимают только известные mutable секции.
+`schema_version` и `panel` нельзя менять через `config-set` /
+`config-set-many`: версия схемы принадлежит daemon, а APK-facing panel state
+пишется через `panel-set`. Неизвестные ключи должны возвращать ошибку, а не
+молча исчезать при `json.Unmarshal`.
+
+Config mutation response должен различать сохранение и runtime apply:
+`config_saved=true` означает, что persisted state изменился, а
+`runtime_applied=true` ставится только когда запущенный runtime действительно
+перезагружен/применён. Save-only операции возвращают `runtime_apply:
+not_requested`, а сохранение при остановленном runtime - `skipped_runtime_stopped`.
+
 ### Nodes
 
 APK хранит полный список nodes в `panel.nodes`. Каждый node содержит:
@@ -187,9 +240,15 @@ APK хранит полный список nodes в `panel.nodes`. Каждый 
 - `link`;
 - `outbound`;
 - `group`;
+- `source` (`MANUAL` или `SUBSCRIPTION`, provider metadata);
 - latency/response test metadata.
 
 `outbound` хранится в xray-like форме на стороне APK, а renderer демона переводит его в `sing-box` outbound.
+
+Subscription refresh работает только в своём source scope: ручные nodes не
+считаются удалёнными подпиской, а stale/removed применяется только к nodes того
+же provider. Stale nodes остаются видимыми в UI, но не участвуют в выборе
+активного runtime node и массовых node-test операциях.
 
 ## Renderer sing-box
 

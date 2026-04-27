@@ -400,7 +400,8 @@ class ProfileRepository @Inject constructor(
         }
 
         val parsed = SubscriptionHandler.parseResponse(fetched.body, fetched.headers)
-        if (parsed.nodes.isEmpty()) {
+        val subscriptionNodes = SubscriptionHandler.stampSubscriptionSource(parsed.nodes, url)
+        if (subscriptionNodes.isEmpty()) {
             _error.value = if (parsed.parseFailures > 0) {
                 messages.get(com.privstack.panel.R.string.subscription_no_supported_links)
             } else {
@@ -409,9 +410,9 @@ class ProfileRepository @Inject constructor(
             return emptyList()
         }
 
-        val merged = mergeNodes(current, parsed.nodes, markRemovedStale = true)
+        val merged = mergeNodes(current, subscriptionNodes, markRemovedStale = true)
         return if (persistPanelUnlocked(merged.updatedConfig)) {
-            parsed.nodes
+            subscriptionNodes
         } else {
             emptyList()
         }
@@ -501,7 +502,12 @@ class ProfileRepository @Inject constructor(
 
     private fun <T> DaemonClientResult<T>.configWasSaved(): Boolean {
         val error = this as? DaemonClientResult.DaemonError ?: return false
-        val details = runCatching { error.details?.jsonObject }.getOrNull() ?: return false
+        val details = runCatching {
+            error.details?.jsonObject
+                ?: error.envelope?.jsonObject
+                    ?.get("error")?.jsonObject
+                    ?.get("details")?.jsonObject
+        }.getOrNull() ?: return false
         return details["config_saved"]?.jsonPrimitive?.booleanOrNull == true ||
             details["configSaved"]?.jsonPrimitive?.booleanOrNull == true
     }

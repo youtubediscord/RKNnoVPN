@@ -1,6 +1,9 @@
 package ipc
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"reflect"
+)
 
 // Standard JSON-RPC 2.0 error codes.
 const (
@@ -33,6 +36,23 @@ type Response struct {
 	Error   *RPCError   `json:"error,omitempty"`
 }
 
+// Envelope is the typed daemon payload carried by JSON-RPC responses.
+type Envelope struct {
+	OK        bool        `json:"ok"`
+	Result    interface{} `json:"result"`
+	Error     interface{} `json:"error,omitempty"`
+	Operation interface{} `json:"operation"`
+	Warnings  []string    `json:"warnings"`
+}
+
+// EnvelopeError describes a daemon-level operation failure.
+type EnvelopeError struct {
+	Code    string      `json:"code"`
+	RPCCode int         `json:"rpcCode"`
+	Message string      `json:"message"`
+	Details interface{} `json:"details,omitempty"`
+}
+
 // RPCError is the error object inside a JSON-RPC 2.0 response.
 type RPCError struct {
 	Code    int         `json:"code"`
@@ -45,7 +65,12 @@ func NewResponse(id int, result interface{}) *Response {
 	return &Response{
 		JSONRPC: "2.0",
 		ID:      id,
-		Result:  result,
+		Result: Envelope{
+			OK:        true,
+			Result:    result,
+			Operation: operationFromResult(result),
+			Warnings:  []string{},
+		},
 	}
 }
 
@@ -57,9 +82,73 @@ func NewErrorResponse(id int, code int, message string, data interface{}) *Respo
 		Error: &RPCError{
 			Code:    code,
 			Message: message,
-			Data:    data,
+			Data: Envelope{
+				OK: false,
+				Error: EnvelopeError{
+					Code:    codeName(code, data),
+					RPCCode: code,
+					Message: message,
+					Details: data,
+				},
+				Operation: nil,
+				Warnings:  []string{},
+			},
 		},
 	}
+}
+
+func codeName(code int, data interface{}) string {
+	if m, ok := data.(map[string]interface{}); ok {
+		if raw, ok := m["code"].(string); ok && raw != "" {
+			return raw
+		}
+	}
+	switch code {
+	case CodeParseError:
+		return "PARSE_ERROR"
+	case CodeInvalidRequest:
+		return "INVALID_REQUEST"
+	case CodeMethodNotFound:
+		return "METHOD_NOT_FOUND"
+	case CodeInvalidParams:
+		return "INVALID_PARAMS"
+	case CodeInternalError:
+		return "INTERNAL_ERROR"
+	case CodeProxyNotRunning:
+		return "PROXY_NOT_RUNNING"
+	case CodeProxyAlready:
+		return "PROXY_ALREADY_RUNNING"
+	case CodeConfigError:
+		return "CONFIG_ERROR"
+	case CodeRuntimeBusy:
+		return "RUNTIME_BUSY"
+	default:
+		return "DAEMON_ERROR"
+	}
+}
+
+func operationFromResult(result interface{}) interface{} {
+	if result == nil {
+		return nil
+	}
+	if m, ok := result.(map[string]interface{}); ok {
+		return m["activeOperation"]
+	}
+	value := reflect.ValueOf(result)
+	for value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return nil
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return nil
+	}
+	field := value.FieldByName("ActiveOperation")
+	if !field.IsValid() || field.IsNil() {
+		return nil
+	}
+	return field.Interface()
 }
 
 // Validate checks that the request conforms to JSON-RPC 2.0.

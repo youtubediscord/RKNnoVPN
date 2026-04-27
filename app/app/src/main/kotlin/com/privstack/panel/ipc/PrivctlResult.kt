@@ -16,7 +16,10 @@ sealed class PrivctlResult {
      * [data] contains the `result` field from the response; may be [JsonNull]
      * for void methods like `stop`.
      */
-    data class Success(val data: JsonElement) : PrivctlResult()
+    data class Success(
+        val data: JsonElement,
+        val envelope: JsonElement? = null,
+    ) : PrivctlResult()
 
     /**
      * The daemon returned a JSON-RPC error response.
@@ -25,7 +28,8 @@ sealed class PrivctlResult {
     data class Error(
         val code: Int,
         val message: String,
-        val details: JsonElement? = null
+        val details: JsonElement? = null,
+        val envelope: JsonElement? = null,
     ) : PrivctlResult() {
         override fun toString(): String = "PrivctlError($code: $message)"
     }

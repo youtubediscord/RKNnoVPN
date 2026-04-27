@@ -86,8 +86,7 @@ class UserMessageFormatter @Inject constructor(
 
     private fun formatRuntimeBusy(result: DaemonClientResult.DaemonError): String {
         val active = runCatching {
-            result.details
-                ?.jsonObject
+            result.detailObject()
                 ?.get("activeOperation")
                 ?.jsonObject
                 ?.get("kind")
@@ -105,10 +104,17 @@ class UserMessageFormatter @Inject constructor(
     }
 
     private fun DaemonClientResult.DaemonError.configWasSaved(): Boolean {
-        val details = runCatching { this.details?.jsonObject }.getOrNull() ?: return false
+        val details = detailObject() ?: return false
         return details["config_saved"]?.jsonPrimitive?.booleanOrNull == true ||
             details["configSaved"]?.jsonPrimitive?.booleanOrNull == true
     }
+
+    private fun DaemonClientResult.DaemonError.detailObject() = runCatching {
+        details?.jsonObject
+            ?: envelope?.jsonObject
+                ?.get("error")?.jsonObject
+                ?.get("details")?.jsonObject
+    }.getOrNull()
 
     fun formatHealthIssue(
         code: String?,

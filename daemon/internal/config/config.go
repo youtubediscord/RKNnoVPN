@@ -407,6 +407,7 @@ func Load(path string) (*Config, error) {
 	if cfg.SchemaVersion == 0 {
 		cfg.SchemaVersion = CurrentSchemaVersion
 	}
+	cfg.Migrate()
 
 	panelPath := PanelPath(path)
 	panel, found, err := loadPanelFromSidecar(panelPath)
@@ -463,6 +464,15 @@ func (c *Config) Save(path string) error {
 	return nil
 }
 
+// Migrate normalizes older config shapes to the current canonical schema.
+// DefaultConfig is unmarshaled first by callers, so this only needs to apply
+// semantic migrations that cannot be represented as missing-field defaults.
+func (c *Config) Migrate() {
+	if c.SchemaVersion < CurrentSchemaVersion {
+		c.SchemaVersion = CurrentSchemaVersion
+	}
+}
+
 // PanelPath returns the sidecar path for APK-facing panel state.
 func PanelPath(configPath string) string {
 	return filepath.Join(filepath.Dir(configPath), panelFileName)
@@ -475,6 +485,9 @@ func SavePanel(path string, panel PanelConfig) error {
 	}
 
 	panel = normalizePanelConfig(panel)
+	if err := ValidatePanelConfig(panel); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(panel, "", "  ")
 	if err != nil {
 		return fmt.Errorf("panel: marshal: %w", err)
@@ -514,6 +527,25 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode, label string) e
 		return fmt.Errorf("%s: rename %s: %w", label, path, err)
 	}
 	syncDirBestEffort(filepath.Dir(path))
+	return nil
+}
+
+func ValidatePanelConfig(panel PanelConfig) error {
+	if len(panel.Inbounds) > 0 {
+		var inbounds PanelInboundsConfig
+		if err := json.Unmarshal(panel.Inbounds, &inbounds); err != nil {
+			return fmt.Errorf("panel.inbounds invalid: %w", err)
+		}
+		if inbounds.SocksPort < 0 || inbounds.SocksPort > 65535 {
+			return fmt.Errorf("panel.inbounds.socksPort must be 0-65535, got %d", inbounds.SocksPort)
+		}
+		if inbounds.HTTPPort < 0 || inbounds.HTTPPort > 65535 {
+			return fmt.Errorf("panel.inbounds.httpPort must be 0-65535, got %d", inbounds.HTTPPort)
+		}
+		if inbounds.AllowLAN {
+			return fmt.Errorf("panel.inbounds.allowLan is not supported by root helper inbounds")
+		}
+	}
 	return nil
 }
 
@@ -584,6 +616,13 @@ func (c *Config) Validate() error {
 		if !validTransport[c.Transport.Protocol] {
 			return fmt.Errorf("transport.protocol %q is not supported by sing-box V2Ray transport", c.Transport.Protocol)
 		}
+	}
+
+	validRoutingMode := map[string]bool{
+		"all": true, "whitelist": true, "blacklist": true, "rules": true, "direct": true,
+	}
+	if !validRoutingMode[c.Routing.Mode] {
+		return fmt.Errorf("routing.mode must be all/whitelist/blacklist/rules/direct, got %q", c.Routing.Mode)
 	}
 
 	validAppMode := map[string]bool{
@@ -678,6 +717,15 @@ func normalizePanelConfig(panel PanelConfig) PanelConfig {
 	}
 	if panel.Nodes == nil {
 		panel.Nodes = []json.RawMessage{}
+	}
+	if len(panel.Inbounds) > 0 {
+		var inbounds PanelInboundsConfig
+		if err := json.Unmarshal(panel.Inbounds, &inbounds); err == nil && inbounds.AllowLAN {
+			inbounds.AllowLAN = false
+			if raw, marshalErr := json.Marshal(inbounds); marshalErr == nil {
+				panel.Inbounds = raw
+			}
+		}
 	}
 	return panel
 }
