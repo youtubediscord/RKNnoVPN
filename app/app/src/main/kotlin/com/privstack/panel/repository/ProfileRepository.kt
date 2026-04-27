@@ -6,6 +6,8 @@ import com.privstack.panel.`import`.SubscriptionHandler
 import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.ipc.DaemonClient
 import com.privstack.panel.ipc.DaemonClientResult
+import com.privstack.panel.ipc.ConfigMutationInfo
+import com.privstack.panel.ipc.PollingStatusSource
 import com.privstack.panel.model.Node
 import com.privstack.panel.model.ProfileConfig
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +39,7 @@ import javax.inject.Singleton
 @Singleton
 class ProfileRepository @Inject constructor(
     private val client: DaemonClient,
+    private val poller: PollingStatusSource,
     private val messages: UserMessageFormatter,
 ) {
     companion object {
@@ -156,10 +159,17 @@ class ProfileRepository @Inject constructor(
         _loading.value = true
         _error.value = null
         try {
+            if (!ensureRuntimeIdle("setProfile")) {
+                return@withLock false
+            }
             when (val result = client.configSet(config, reload = false)) {
                 is DaemonClientResult.Ok -> {
+                    publishRuntimeStatus(result.data)
                     when (val panelResult = client.panelSet(config, reload = true)) {
-                        is DaemonClientResult.Ok -> refreshUnlockedWithStatus("setProfile")
+                        is DaemonClientResult.Ok -> {
+                            publishRuntimeStatus(panelResult.data)
+                            refreshUnlockedWithStatus("setProfile")
+                        }
                         else -> {
                             val msg = describeFailure(panelResult)
                             Log.w(TAG, "setProfile panel update failed: $msg")
@@ -207,9 +217,13 @@ class ProfileRepository @Inject constructor(
                 }
                 return@withLock false
             }
+            if (!ensureRuntimeIdle(tag)) {
+                return@withLock false
+            }
             val updated = transform(current)
             when (val result = client.configSet(updated)) {
                 is DaemonClientResult.Ok -> {
+                    publishRuntimeStatus(result.data)
                     refreshUnlockedWithStatus(tag)
                 }
                 else -> {
@@ -241,9 +255,15 @@ class ProfileRepository @Inject constructor(
                 }
                 return@withLock false
             }
+            if (!ensureRuntimeIdle(tag)) {
+                return@withLock false
+            }
             val updated = transform(current)
             when (val result = client.panelSet(updated)) {
-                is DaemonClientResult.Ok -> refreshUnlockedWithStatus(tag)
+                is DaemonClientResult.Ok -> {
+                    publishRuntimeStatus(result.data)
+                    refreshUnlockedWithStatus(tag)
+                }
                 else -> {
                     val msg = describeFailure(result)
                     Log.w(TAG, "$tag panel update failed: $msg")
@@ -362,8 +382,12 @@ class ProfileRepository @Inject constructor(
     }
 
     private suspend fun persistPanelUnlocked(config: ProfileConfig): Boolean {
+        if (!ensureRuntimeIdle("persistPanelUnlocked")) {
+            return false
+        }
         return when (val result = client.panelSet(config)) {
             is DaemonClientResult.Ok -> {
+                publishRuntimeStatus(result.data)
                 refreshUnlockedWithStatus("persistPanelUnlocked")
             }
             else -> {
@@ -408,6 +432,31 @@ class ProfileRepository @Inject constructor(
 
     private fun <T> describeFailure(result: DaemonClientResult<T>): String =
         messages.formatDaemonFailure(result)
+
+    private fun publishRuntimeStatus(info: ConfigMutationInfo) {
+        info.runtimeStatus?.let(poller::publishBackendStatus)
+    }
+
+    private suspend fun ensureRuntimeIdle(tag: String): Boolean {
+        return when (val result = client.backendStatus()) {
+            is DaemonClientResult.Ok -> {
+                poller.publishBackendStatus(result.data)
+                if (result.data.activeOperation != null) {
+                    _error.value = messages.get(com.privstack.panel.R.string.error_runtime_busy)
+                    Log.w(TAG, "$tag blocked: runtime operation is active (${result.data.activeOperation.kind})")
+                    false
+                } else {
+                    true
+                }
+            }
+            else -> {
+                val msg = describeFailure(result)
+                Log.w(TAG, "$tag runtime idle check failed: $msg")
+                _error.value = msg
+                false
+            }
+        }
+    }
 
     private fun <T> DaemonClientResult<T>.configWasSaved(): Boolean {
         val error = this as? DaemonClientResult.DaemonError ?: return false

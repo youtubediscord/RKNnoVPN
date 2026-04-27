@@ -249,41 +249,57 @@ kill_stale() {
         STALE_PID="$(cat "$PRIVD_PID_FILE" 2>/dev/null)"
         if [ -n "$STALE_PID" ]; then
             if kill -0 "$STALE_PID" 2>/dev/null; then
-                log_info "Killing stale daemon PID ${STALE_PID}"
-                kill -TERM "$STALE_PID" 2>/dev/null
-                # Brief wait for graceful shutdown
-                WAIT=0
-                while [ "$WAIT" -lt 5 ] && kill -0 "$STALE_PID" 2>/dev/null; do
-                    sleep 1
-                    WAIT=$((WAIT + 1))
-                done
-                # Force kill if still alive
-                if kill -0 "$STALE_PID" 2>/dev/null; then
-                    kill -KILL "$STALE_PID" 2>/dev/null
-                    log_warn "Force-killed stale daemon PID ${STALE_PID}"
-                fi
+                STALE_CMD="$(tr '\000' ' ' < "/proc/${STALE_PID}/cmdline" 2>/dev/null)"
+                case "$STALE_CMD" in
+                    *"$PRIVD_BIN"*)
+                        log_info "Killing stale daemon PID ${STALE_PID}"
+                        kill -TERM "$STALE_PID" 2>/dev/null
+                        # Brief wait for graceful shutdown
+                        WAIT=0
+                        while [ "$WAIT" -lt 5 ] && kill -0 "$STALE_PID" 2>/dev/null; do
+                            sleep 1
+                            WAIT=$((WAIT + 1))
+                        done
+                        # Force kill if still alive
+                        if kill -0 "$STALE_PID" 2>/dev/null; then
+                            kill -KILL "$STALE_PID" 2>/dev/null
+                            log_warn "Force-killed stale daemon PID ${STALE_PID}"
+                        fi
+                        ;;
+                    *)
+                        log_warn "Ignoring stale PID ${STALE_PID}: not ${PRIVD_BIN}"
+                        ;;
+                esac
             fi
         fi
         rm -f "$PRIVD_PID_FILE" 2>/dev/null
     fi
 
-    # Kill by process name as fallback
-    for proc_name in privd; do
-        PIDS="$(pidof "$proc_name" 2>/dev/null)"
-        if [ -n "$PIDS" ]; then
-            log_info "Killing stale ${proc_name} processes: ${PIDS}"
-            for pid in $PIDS; do
+    # Kill remaining PrivStack daemon processes by their installed binary path.
+    for p in /proc/[0-9]*; do
+        pid="${p##*/}"
+        [ "$pid" = "$$" ] && continue
+        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
+        case "$cmd" in
+            *"$PRIVD_BIN"*)
+                log_info "Killing stale PrivStack daemon PID ${pid}"
                 kill -TERM "$pid" 2>/dev/null
-            done
-            sleep 2
-            # Force kill survivors
-            PIDS="$(pidof "$proc_name" 2>/dev/null)"
-            if [ -n "$PIDS" ]; then
-                for pid in $PIDS; do
+                ;;
+        esac
+    done
+    sleep 2
+    for p in /proc/[0-9]*; do
+        pid="${p##*/}"
+        [ "$pid" = "$$" ] && continue
+        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
+        case "$cmd" in
+            *"$PRIVD_BIN"*)
+                if kill -0 "$pid" 2>/dev/null; then
                     kill -KILL "$pid" 2>/dev/null
-                done
-            fi
-        fi
+                    log_warn "Force-killed stale PrivStack daemon PID ${pid}"
+                fi
+                ;;
+        esac
     done
 
     # Remove stale socket
@@ -294,6 +310,22 @@ kill_stale() {
 }
 
 kill_stale
+
+first_pid_by_cmd_path() {
+    wanted="$1"
+    for p in /proc/[0-9]*; do
+        pid="${p##*/}"
+        [ "$pid" = "$$" ] && continue
+        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
+        case "$cmd" in
+            *"$wanted"*)
+                echo "$pid"
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
 
 # ============================================================================
 # 6. Set resource limits
@@ -339,7 +371,7 @@ launch_daemon() {
     # Check if process is still alive
     if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
         # Process died — try to find the actual PID (setsid may have forked)
-        DAEMON_PID="$(pidof privd 2>/dev/null | awk '{print $1}')"
+        DAEMON_PID="$(first_pid_by_cmd_path "$PRIVD_BIN" 2>/dev/null)"
         if [ -z "$DAEMON_PID" ]; then
             log_error "Daemon failed to start — check ${PRIVSTACK_DIR}/logs/privd.log"
             return 1
@@ -374,7 +406,7 @@ if [ "$LAUNCH_RESULT" -eq 0 ]; then
 
         # Apply the same non-critical priority to sing-box if it exists.
         sleep 3
-        SINGBOX_PID="$(pidof sing-box 2>/dev/null | awk '{print $1}')"
+        SINGBOX_PID="$(first_pid_by_cmd_path "${PRIVSTACK_DIR}/bin/sing-box" 2>/dev/null)"
         if [ -n "$SINGBOX_PID" ] && [ -d "/proc/${SINGBOX_PID}" ]; then
             echo "$OOM_SCORE_ADJ" > "/proc/${SINGBOX_PID}/oom_score_adj" 2>/dev/null
             log_info "Set oom_score_adj=${OOM_SCORE_ADJ} for sing-box PID ${SINGBOX_PID}"

@@ -2,6 +2,7 @@ package com.privstack.panel.ipc
 
 import android.util.Log
 import com.privstack.panel.i18n.UserMessageFormatter
+import com.privstack.panel.model.BackendStatusV2
 import com.privstack.panel.model.ConnectionState
 import com.privstack.panel.model.DaemonConnectionState
 import com.privstack.panel.model.DaemonStatus
@@ -94,6 +95,10 @@ class PollingStatusSource @Inject constructor(
         scope.launch { pollOnce() }
     }
 
+    fun publishBackendStatus(status: BackendStatusV2) {
+        publishStatus(client.toDaemonStatus(status))
+    }
+
     // ---- Internal ----
 
     private suspend fun pollLoop() {
@@ -109,10 +114,7 @@ class PollingStatusSource @Inject constructor(
 
         when (val result = client.status()) {
             is DaemonClientResult.Ok -> {
-                consecutiveFailures = 0
-                _status.value = result.data
-                _connectionState.value = DaemonConnectionState.REACHABLE
-                _lastError.value = null
+                publishStatus(result.data)
             }
             is DaemonClientResult.RootDenied -> {
                 consecutiveFailures++
@@ -157,6 +159,13 @@ class PollingStatusSource @Inject constructor(
                 Log.e(TAG, "Unexpected failure during poll", result.throwable)
             }
         }
+    }
+
+    private fun publishStatus(status: DaemonStatus) {
+        consecutiveFailures = 0
+        _status.value = status
+        _connectionState.value = DaemonConnectionState.REACHABLE
+        _lastError.value = null
     }
 
     private fun computeInterval(): Long {

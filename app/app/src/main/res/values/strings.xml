@@ -53,6 +53,8 @@
     <string name="error_runtime_busy">An operation is already running. Wait for the current action to finish.</string>
     <string name="error_reset_in_progress">Reset is still running. Wait for it to finish.</string>
     <string name="error_operation_busy_named">%1$s is still running. Wait for it to finish.</string>
+    <string name="daemon_status_operation_stuck">Operation is taking too long. Diagnostics are available in status and logs.</string>
+    <string name="daemon_status_operation_stuck_with_step">Operation is taking too long. Current step: %1$s.</string>
     <string name="uptime">Uptime</string>
     <string name="traffic">Traffic</string>
     <string name="upload_short">TX</string>

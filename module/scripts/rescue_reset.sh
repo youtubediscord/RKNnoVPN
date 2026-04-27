@@ -9,6 +9,7 @@
 #   daemon-reset    - called by privd; keep privd socket/process alive
 #   --boot-clean    - called from service.sh before privd starts
 #   hard-reset      - external rescue; also kill privd and remove daemon socket
+#   update-clean    - called by updater; keep privd socket/process alive
 #   uninstall-clean - called by module removal; kill runtime without changing
 #                     user config/manual state
 # ============================================================================
@@ -23,10 +24,10 @@ case "$MODE" in
     --boot-clean|boot-clean)
         MODE="boot-clean"
         ;;
-    daemon-reset|hard-reset|boot-clean|uninstall-clean)
+    daemon-reset|hard-reset|boot-clean|update-clean|uninstall-clean)
         ;;
     *)
-        echo "Usage: $0 {daemon-reset|hard-reset|--boot-clean|uninstall-clean}" >&2
+        echo "Usage: $0 {daemon-reset|hard-reset|--boot-clean|update-clean|uninstall-clean}" >&2
         exit 2
         ;;
 esac
@@ -80,12 +81,12 @@ kill_matching_processes() {
         [ -z "$cmd" ] && continue
 
         case "$cmd" in
-            *"$PRIVSTACK_DIR/bin/sing-box"*|*" sing-box "*|\
-            *"net_handler.sh"*|*"inotifyd"*"net_handler.sh"*)
+            *"$PRIVSTACK_DIR/bin/sing-box"*|\
+            *"$PRIVSTACK_DIR/scripts/net_handler.sh"*|*"inotifyd"*"${PRIVSTACK_DIR}/scripts/net_handler.sh"*)
                 log "$signal $pid :: $cmd"
                 kill "-$signal" "$pid" 2>/dev/null
                 ;;
-            *"$PRIVSTACK_DIR/bin/privd"*|*" privd "*)
+            *"$PRIVSTACK_DIR/bin/privd"*)
                 if [ "$MODE" = "hard-reset" ] || [ "$MODE" = "boot-clean" ] || [ "$MODE" = "uninstall-clean" ]; then
                     log "$signal $pid :: $cmd"
                     kill "-$signal" "$pid" 2>/dev/null

@@ -15,6 +15,7 @@ import com.privstack.panel.model.NodeProbeResultV2
 import com.privstack.panel.model.ProfileConfig
 import com.privstack.panel.model.InboundsConfig
 import com.privstack.panel.model.Protocol
+import com.privstack.panel.model.RuntimeCompatibilityStatus
 import com.privstack.panel.model.SharingConfig
 import com.privstack.panel.model.TunConfig
 import kotlinx.serialization.SerialName
@@ -98,6 +99,8 @@ class DaemonClient @Inject constructor(
         coerceInputValues = true
     }
 
+    fun toDaemonStatus(status: BackendStatusV2): DaemonStatus = status.toDaemonStatus()
+
     // ---- Connection lifecycle ----
 
     /** Get daemon runtime status (connection state, active node, health). */
@@ -121,19 +124,19 @@ class DaemonClient @Inject constructor(
     }
 
     /** Start the proxy connection using the active profile. */
-    suspend fun start(): DaemonClientResult<Unit> {
-        requireCompatible("backend.start", "backend.status")?.let { return it }
+    suspend fun start(): DaemonClientResult<BackendStatusV2> {
+        requireCompatible("backend.start", "backend.status")?.let { return it.asFailure() }
         return when (val result = backendStart()) {
-            is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
+            is DaemonClientResult.Ok -> result
             is DaemonClientResult.DaemonError -> result.asFailure()
             else -> result.asFailure()
         }
     }
 
     /** Stop the proxy connection (keeps daemon alive). */
-    suspend fun stop(): DaemonClientResult<Unit> {
+    suspend fun stop(): DaemonClientResult<BackendStatusV2> {
         return when (val result = backendStop()) {
-            is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
+            is DaemonClientResult.Ok -> result
             is DaemonClientResult.DaemonError ->
                 if (isMethodNotFound(result)) legacyStop() else result.asFailure()
             else -> result.asFailure()
@@ -141,10 +144,10 @@ class DaemonClient @Inject constructor(
     }
 
     /** Reload the active configuration without full restart. */
-    suspend fun reload(): DaemonClientResult<Unit> {
-        requireCompatible("backend.restart", "backend.status")?.let { return it }
+    suspend fun reload(): DaemonClientResult<BackendStatusV2> {
+        requireCompatible("backend.restart", "backend.status")?.let { return it.asFailure() }
         return when (val result = backendRestart()) {
-            is DaemonClientResult.Ok -> DaemonClientResult.Ok(Unit)
+            is DaemonClientResult.Ok -> result
             is DaemonClientResult.DaemonError -> result.asFailure()
             else -> result.asFailure()
         }
@@ -312,8 +315,8 @@ class DaemonClient @Inject constructor(
     suspend fun configSet(
         config: ProfileConfig,
         reload: Boolean = true,
-    ): DaemonClientResult<Unit> {
-        requireCompatible("config-set-many")?.let { return it }
+    ): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("config-set-many")?.let { return it.asFailure() }
         val activeNode = config.nodes.find { it.id == config.activeNodeId } ?: config.nodes.firstOrNull()
         val daemonNode = activeNode?.toDaemonNodeSection() ?: DaemonNodeSection()
         val daemonTransport = activeNode?.toDaemonTransportSection() ?: DaemonTransportSection()
@@ -342,7 +345,7 @@ class DaemonClient @Inject constructor(
             put("values", values)
             put("reload", reload)
         }
-        return callVoid("config-set-many", params, timeoutMs = 60_000L)
+        return callConfigMutation("config-set-many", params)
     }
 
     private suspend fun panelGet(): DaemonClientResult<DaemonPanelSection> =
@@ -353,8 +356,8 @@ class DaemonClient @Inject constructor(
     suspend fun panelSet(
         config: ProfileConfig,
         reload: Boolean = true,
-    ): DaemonClientResult<Unit> {
-        return when (val result = callVoid(
+    ): DaemonClientResult<ConfigMutationInfo> {
+        return when (val result = callConfigMutation(
             "panel-set",
             buildJsonObject {
                 put(
@@ -366,7 +369,6 @@ class DaemonClient @Inject constructor(
                 )
                 put("reload", reload)
             },
-            timeoutMs = 60_000L,
         )) {
             is DaemonClientResult.DaemonError ->
                 if (isMethodNotFound(result)) legacyPanelSet(config, reload) else result
@@ -430,7 +432,7 @@ class DaemonClient @Inject constructor(
     private suspend fun legacyPanelSet(
         config: ProfileConfig,
         reload: Boolean,
-    ): DaemonClientResult<Unit> {
+    ): DaemonClientResult<ConfigMutationInfo> {
         val activeNode = config.nodes.find { it.id == config.activeNodeId } ?: config.nodes.firstOrNull()
         val extra = config.extra?.jsonObject
         val params = buildJsonObject {
@@ -452,7 +454,7 @@ class DaemonClient @Inject constructor(
             )
             put("reload", reload)
         }
-        return callVoid("config-set-many", params, timeoutMs = 60_000L)
+        return callConfigMutation("config-set-many", params)
     }
 
     /** List all stored config sections the daemon currently understands. */
@@ -627,8 +629,11 @@ class DaemonClient @Inject constructor(
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
 
-    private suspend fun legacyStop(): DaemonClientResult<Unit> =
-        callVoid("stop", timeoutMs = 30_000L)
+    private suspend fun legacyStop(): DaemonClientResult<BackendStatusV2> =
+        when (val stopResult = callVoid("stop", timeoutMs = 30_000L)) {
+            is DaemonClientResult.Ok -> backendStatus()
+            else -> stopResult.asFailure()
+        }
 
     suspend fun backendApplyDesiredState(desiredState: DesiredStateV2): DaemonClientResult<BackendStatusV2> =
         call(
@@ -791,6 +796,7 @@ class DaemonClient @Inject constructor(
         modulePath: String = "",
         apkPath: String = "",
     ): DaemonClientResult<UpdateInstallInfo> {
+        requireCompatible("update-install")?.let { return it.asFailure() }
         val params = buildJsonObject {
             if (modulePath.isNotBlank()) {
                 put("module_path", modulePath)
@@ -804,6 +810,7 @@ class DaemonClient @Inject constructor(
             UpdateInstallInfo(
                 accepted = status.activeOperation?.kind == "update-install",
                 operationGeneration = status.activeOperation?.generation ?: 0L,
+                runtimeStatus = status,
             )
         }
     }
@@ -880,6 +887,22 @@ class DaemonClient @Inject constructor(
         params: JsonObject = emptyJsonObject(),
         timeoutMs: Long = 5_000L
     ): DaemonClientResult<Unit> = call(method, params, timeoutMs) { }
+
+    private suspend fun callConfigMutation(
+        method: String,
+        params: JsonObject,
+    ): DaemonClientResult<ConfigMutationInfo> =
+        call(method, params, timeoutMs = 60_000L) { element ->
+            val obj = element.jsonObject
+            ConfigMutationInfo(
+                status = obj["status"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                reload = obj["reload"]?.jsonPrimitive?.booleanOrNull ?: false,
+                updated = obj["updated"]?.jsonPrimitive?.intOrNull,
+                runtimeStatus = obj["runtimeStatus"]?.let {
+                    json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
+                },
+            )
+        }
 
     private fun isMethodNotFound(result: DaemonClientResult.DaemonError): Boolean =
         result.code == METHOD_NOT_FOUND_CODE ||
@@ -1233,6 +1256,7 @@ private fun capabilityForMethod(method: String): String? = when (method) {
     "node-test", "node.test" -> "node-test.tcp-direct"
     "self-check", "self.check" -> "privacy.self-check.v1"
     "logs", "doctor" -> "runtime.logs"
+    "update-install" -> "update.install.v1"
     else -> null
 }
 
@@ -1254,6 +1278,14 @@ data class UpdateDownloadInfo(
 data class UpdateInstallInfo(
     val accepted: Boolean,
     val operationGeneration: Long = 0L,
+    val runtimeStatus: BackendStatusV2? = null,
+)
+
+data class ConfigMutationInfo(
+    val status: String = "",
+    val reload: Boolean = false,
+    val updated: Int? = null,
+    val runtimeStatus: BackendStatusV2? = null,
 )
 
 data class SubscriptionFetchInfo(
@@ -1376,9 +1408,15 @@ private fun BackendStatusV2.toDaemonStatus(
     healthOverride: BackendHealthSnapshot? = null,
 ): DaemonStatus {
     val effectiveHealth = healthOverride ?: health
+    val compatibilityIssue = compatibility?.blockingCompatibilityIssue(
+        apkVersion = BuildConfig.VERSION_NAME,
+        requiredMethods = DaemonClient.REQUIRED_METHODS,
+    )
     val displayPhase = activeOperation?.phase ?: appliedState.phase
     val lastFailure = lastOperation?.takeIf { !it.succeeded && activeOperation == null }
-    val connectionState = when (displayPhase) {
+    val connectionState = if (compatibilityIssue != null) {
+        com.privstack.panel.model.ConnectionState.ERROR
+    } else when (displayPhase) {
         com.privstack.panel.model.BackendPhase.HEALTHY,
         com.privstack.panel.model.BackendPhase.RULES_APPLIED,
         com.privstack.panel.model.BackendPhase.DNS_APPLIED,
@@ -1414,17 +1452,97 @@ private fun BackendStatusV2.toDaemonStatus(
             operationalHealthy = effectiveHealth.operationalHealthy,
             backendKind = appliedState.backendKind,
             phase = displayPhase,
-            lastCode = effectiveHealth.lastCode.ifBlank { lastFailure?.errorCode?.ifBlank { null } },
-            lastError = effectiveHealth.lastError.ifBlank { lastFailure?.errorMessage?.ifBlank { null } },
-            lastUserMessage = effectiveHealth.lastUserMessage.ifBlank { null },
             lastDebug = effectiveHealth.lastDebug.ifBlank { null },
             rollbackApplied = effectiveHealth.rollbackApplied,
             stageReport = effectiveHealth.stageReport,
             checkedAt = effectiveHealth.checkedAt?.let(::epochSeconds) ?: 0L,
+            lastCode = if (compatibilityIssue != null) {
+                "DAEMON_INCOMPATIBLE"
+            } else {
+                effectiveHealth.lastCode.ifBlank { lastFailure?.errorCode?.ifBlank { null } }
+            },
+            lastError = if (compatibilityIssue != null) {
+                compatibilityIssue
+            } else {
+                effectiveHealth.lastError.ifBlank { lastFailure?.errorMessage?.ifBlank { null } }
+            },
+            lastUserMessage = compatibilityIssue
+                ?: effectiveHealth.lastUserMessage.ifBlank { null },
         ),
+        compatibility = compatibility,
         activeOperation = activeOperation,
         lastOperation = lastOperation,
     )
+}
+
+private fun RuntimeCompatibilityStatus.blockingCompatibilityIssue(
+    apkVersion: String,
+    requiredMethods: Collection<String>,
+): String? {
+    releaseMismatch(apkVersion)?.let { return it }
+    if (controlProtocolVersion < DaemonClient.MIN_CONTROL_PROTOCOL_VERSION) {
+        return "APK и модуль несовместимы: APK $apkVersion, daemon $daemonVersion, module $moduleVersion; control protocol $controlProtocolVersion, нужен ${DaemonClient.MIN_CONTROL_PROTOCOL_VERSION}"
+    }
+    if (schemaVersion < DaemonClient.MIN_SCHEMA_VERSION) {
+        return "APK и модуль несовместимы: daemon config schema $schemaVersion, нужна ${DaemonClient.MIN_SCHEMA_VERSION}"
+    }
+    val missingMethods = missingRequiredMethods(requiredMethods)
+    if (missingMethods.isNotEmpty()) {
+        return "APK и модуль несовместимы: APK $apkVersion, daemon $daemonVersion, module $moduleVersion; нет методов ${missingMethods.joinToString(", ")}"
+    }
+    val missingCapabilities = missingCapabilities(requiredMethods)
+    if (missingCapabilities.isNotEmpty()) {
+        return "APK и модуль несовместимы: daemon $daemonVersion, module $moduleVersion; нет capabilities ${missingCapabilities.joinToString(", ")}"
+    }
+    return null
+}
+
+private fun RuntimeCompatibilityStatus.missingRequiredMethods(required: Collection<String>): List<String> {
+    if (supportedMethods.isEmpty()) return required.toList()
+    val missing = mutableListOf<String>()
+    val emittedAlternativeGroups = mutableSetOf<Set<String>>()
+    for (method in required) {
+        if (method in supportedMethods) {
+            continue
+        }
+        val alternativeGroup = REQUIRED_METHOD_ALTERNATIVES.firstOrNull { method in it }
+        if (alternativeGroup != null) {
+            if (alternativeGroup.any { it in supportedMethods }) {
+                continue
+            }
+            if (emittedAlternativeGroups.add(alternativeGroup)) {
+                missing += alternativeGroup.joinToString(" or ")
+            }
+            continue
+        }
+        missing += method
+    }
+    return missing
+}
+
+private fun RuntimeCompatibilityStatus.missingCapabilities(requiredMethods: Collection<String>): List<String> {
+    if (capabilities.isEmpty()) return listOf("capabilities")
+    return requiredMethods
+        .mapNotNull(::capabilityForMethod)
+        .distinct()
+        .filterNot { it in capabilities }
+}
+
+private fun RuntimeCompatibilityStatus.releaseMismatch(apkVersion: String): String? {
+    val apk = stableReleaseVersion(apkVersion) ?: return null
+    val daemon = stableReleaseVersion(daemonVersion)
+    if (daemon != null && daemon != apk) {
+        return "APK и daemon несовместимы: APK $apkVersion, daemon $daemonVersion. Установите matching release."
+    }
+    val module = stableReleaseVersion(moduleVersion)
+    if (module != null && module != apk) {
+        return "APK и модуль несовместимы: APK $apkVersion, module $moduleVersion. Установите matching release."
+    }
+    val currentRelease = stableReleaseVersion(currentReleaseVersion)
+    if (currentRelease != null && currentRelease != apk) {
+        return "APK и current release несовместимы: APK $apkVersion, current $currentReleaseVersion. Установите matching release."
+    }
+    return null
 }
 
 private fun parseBackendKind(raw: String): com.privstack.panel.model.BackendKind =
@@ -1443,6 +1561,7 @@ private fun DaemonStatus.withV2Status(v2: DaemonStatus): DaemonStatus =
         state = v2.state,
         activeNodeId = v2.activeNodeId ?: activeNodeId,
         health = v2.health,
+        compatibility = v2.compatibility,
         activeOperation = v2.activeOperation,
         lastOperation = v2.lastOperation,
     )

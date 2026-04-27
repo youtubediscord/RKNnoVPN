@@ -78,11 +78,18 @@ type AppliedState struct {
 }
 
 type OperationStatus struct {
-	OperationID string        `json:"operationId"`
-	Kind        OperationKind `json:"kind"`
-	Generation  int64         `json:"generation"`
-	Phase       Phase         `json:"phase"`
-	StartedAt   time.Time     `json:"startedAt"`
+	OperationID     string        `json:"operationId"`
+	Kind            OperationKind `json:"kind"`
+	Generation      int64         `json:"generation"`
+	Phase           Phase         `json:"phase"`
+	StartedAt       time.Time     `json:"startedAt"`
+	Step            string        `json:"step,omitempty"`
+	StepStatus      string        `json:"stepStatus,omitempty"`
+	StepCode        string        `json:"stepCode,omitempty"`
+	StepDetail      string        `json:"stepDetail,omitempty"`
+	RuntimeMS       int64         `json:"runtimeMs,omitempty"`
+	WatchdogAfterMS int64         `json:"watchdogAfterMs,omitempty"`
+	Stuck           bool          `json:"stuck,omitempty"`
 }
 
 type OperationResult struct {
@@ -174,11 +181,25 @@ type BackendCapability struct {
 	Reason    string      `json:"reason,omitempty"`
 }
 
+type CompatibilityStatus struct {
+	DaemonVersion          string   `json:"daemonVersion,omitempty"`
+	ModuleVersion          string   `json:"moduleVersion,omitempty"`
+	CurrentReleaseVersion  string   `json:"currentReleaseVersion,omitempty"`
+	CurrentReleaseOK       bool     `json:"currentReleaseOk"`
+	CurrentReleaseError    string   `json:"currentReleaseError,omitempty"`
+	ControlProtocolVersion int      `json:"controlProtocolVersion"`
+	SchemaVersion          int      `json:"schemaVersion"`
+	PanelMinVersion        string   `json:"panelMinVersion,omitempty"`
+	Capabilities           []string `json:"capabilities,omitempty"`
+	SupportedMethods       []string `json:"supportedMethods,omitempty"`
+}
+
 type Status struct {
 	DesiredState    DesiredState        `json:"desiredState"`
 	AppliedState    AppliedState        `json:"appliedState"`
 	Health          HealthSnapshot      `json:"health"`
 	Capabilities    []BackendCapability `json:"capabilities"`
+	Compatibility   CompatibilityStatus `json:"compatibility"`
 	ActiveOperation *OperationStatus    `json:"activeOperation,omitempty"`
 	LastOperation   *OperationResult    `json:"lastOperation,omitempty"`
 }

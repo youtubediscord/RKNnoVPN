@@ -58,6 +58,8 @@ class StatusRepository @Inject constructor(
     /** Force a single immediate status poll (e.g. after user triggers start/stop). */
     fun pollNow() = poller.pollNow()
 
+    fun publishBackendStatus(status: BackendStatusV2) = poller.publishBackendStatus(status)
+
     // ---- One-shot daemon commands ----
 
     /**
@@ -66,7 +68,7 @@ class StatusRepository @Inject constructor(
      */
     suspend fun start(): CommandOutcome {
         val result = client.start()
-        poller.pollNow()
+        publishOrPoll(result)
         return toOutcome(result, R.string.operation_start)
     }
 
@@ -75,7 +77,7 @@ class StatusRepository @Inject constructor(
      */
     suspend fun stop(): CommandOutcome {
         val result = client.stop()
-        poller.pollNow()
+        publishOrPoll(result)
         return toOutcome(result, R.string.operation_stop)
     }
 
@@ -84,13 +86,13 @@ class StatusRepository @Inject constructor(
      */
     suspend fun reload(): CommandOutcome {
         val result = client.reload()
-        poller.pollNow()
+        publishOrPoll(result)
         return toOutcome(result, R.string.operation_reload)
     }
 
     suspend fun networkReset(): DaemonClientResult<BackendStatusV2> {
         val result = client.networkReset()
-        poller.pollNow()
+        publishOrPoll(result)
         return result
     }
 
@@ -145,6 +147,13 @@ class StatusRepository @Inject constructor(
                 messages.formatDaemonFailure(result),
             )
         )
+    }
+
+    private fun publishOrPoll(result: DaemonClientResult<BackendStatusV2>) {
+        when (result) {
+            is DaemonClientResult.Ok -> poller.publishBackendStatus(result.data)
+            else -> poller.pollNow()
+        }
     }
 }
 

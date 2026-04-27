@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -23,6 +24,55 @@ type rootBackendV2 struct {
 	d *daemon
 }
 
+type resetReportError struct {
+	err    error
+	report runtimev2.ResetReport
+}
+
+const resetLockStaleAfter = 10 * time.Minute
+
+func runtimeErrorWithResetReport(err error, report runtimev2.ResetReport) error {
+	if err == nil {
+		return nil
+	}
+	return resetReportError{err: err, report: report}
+}
+
+func (e resetReportError) Error() string {
+	return e.err.Error()
+}
+
+func (e resetReportError) Unwrap() error {
+	return e.err
+}
+
+func (e resetReportError) RuntimeResetReport() runtimev2.ResetReport {
+	return e.report
+}
+
+func resetReportFromRuntimeError(err error) *runtimev2.ResetReport {
+	if err == nil {
+		return nil
+	}
+	var withReport interface {
+		RuntimeResetReport() runtimev2.ResetReport
+	}
+	if errors.As(err, &withReport) {
+		report := withReport.RuntimeResetReport()
+		return &report
+	}
+	return nil
+}
+
+func firstRuntimeResetReport(reports ...*runtimev2.ResetReport) *runtimev2.ResetReport {
+	for _, report := range reports {
+		if report != nil {
+			return report
+		}
+	}
+	return nil
+}
+
 func (b *rootBackendV2) Kind() runtimev2.BackendKind {
 	return runtimev2.BackendRootTProxy
 }
@@ -31,14 +81,15 @@ func (b *rootBackendV2) Supported() (bool, string) {
 	return true, ""
 }
 
-func (b *rootBackendV2) Start(desired runtimev2.DesiredState) error {
-	if err := b.d.failIfResetInProgress(); err != nil {
-		return err
+func (b *rootBackendV2) Start(desired runtimev2.DesiredState, generation int64) (*runtimev2.ResetReport, error) {
+	recoveryReport, err := b.d.recoverStaleResetLock(generation)
+	if err != nil {
+		return recoveryReport, err
 	}
 	epoch := b.d.beginRuntimeStartOperation()
 	state := b.d.coreMgr.GetState()
 	if state == core.StateRunning || state == core.StateDegraded {
-		return nil
+		return recoveryReport, nil
 	}
 
 	b.d.mu.Lock()
@@ -48,22 +99,25 @@ func (b *rootBackendV2) Start(desired runtimev2.DesiredState) error {
 
 	if profile.Address == "" && !hasPanelNodes {
 		b.d.markRuntimeStartFailed(epoch)
-		return fmt.Errorf("no node configured (address is empty)")
+		return recoveryReport, fmt.Errorf("no node configured (address is empty)")
 	}
 	if err := b.d.coreMgr.Start(profile); err != nil {
 		b.d.markRuntimeStartFailed(epoch)
-		return err
+		return recoveryReport, err
 	}
 	b.d.rescueMgr.Reset()
 	b.d.startSubsystems()
 
 	snapshot := b.RefreshHealth()
 	if !snapshot.Healthy() {
-		b.d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		report := b.d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
 		b.d.markRuntimeStartFailed(epoch)
-		return fmt.Errorf("readiness gates failed after start: %s", snapshot.LastError)
+		return &report, runtimeErrorWithResetReport(
+			fmt.Errorf("readiness gates failed after start: %s", snapshot.LastError),
+			report,
+		)
 	}
-	return nil
+	return recoveryReport, nil
 }
 
 func (b *rootBackendV2) Stop() error {
@@ -77,16 +131,23 @@ func (b *rootBackendV2) Reset(generation int64) runtimev2.ResetReport {
 	return b.d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
 }
 
-func (b *rootBackendV2) Restart(desired runtimev2.DesiredState, generation int64) error {
-	if err := b.d.failIfResetInProgress(); err != nil {
-		return err
+func (b *rootBackendV2) Restart(desired runtimev2.DesiredState, generation int64) (*runtimev2.ResetReport, error) {
+	recoveryReport, err := b.d.recoverStaleResetLock(generation)
+	if err != nil {
+		return recoveryReport, err
 	}
 	b.d.beginRuntimeStartOperation()
-	return b.d.restartRootBackendV2()
+	err = b.d.restartRootBackendV2(generation)
+	return firstRuntimeResetReport(recoveryReport, resetReportFromRuntimeError(err)), err
 }
 
-func (b *rootBackendV2) HandleNetworkChange(generation int64) error {
-	return b.d.reconcileRootRuntime("network-change")
+func (b *rootBackendV2) HandleNetworkChange(generation int64) (*runtimev2.ResetReport, error) {
+	recoveryReport, err := b.d.recoverStaleResetLock(generation)
+	if err != nil {
+		return recoveryReport, err
+	}
+	err = b.d.reconcileRootRuntime("network-change", generation)
+	return firstRuntimeResetReport(recoveryReport, resetReportFromRuntimeError(err)), err
 }
 
 func (b *rootBackendV2) CurrentHealth() runtimev2.HealthSnapshot {
@@ -107,6 +168,49 @@ func (d *daemon) initRuntimeV2() {
 		d.desiredStateV2(),
 		&rootBackendV2{d: d},
 	)
+	d.refreshRuntimeV2Compatibility()
+}
+
+func (d *daemon) refreshRuntimeV2Compatibility() {
+	if d.runtimeV2 == nil {
+		return
+	}
+	release := doctorReleaseIntegrityReport(d.dataDir)
+	d.runtimeV2.SetCompatibility(runtimev2.CompatibilityStatus{
+		DaemonVersion:          Version,
+		ModuleVersion:          readModuleVersion()["version"],
+		CurrentReleaseVersion:  release.Version,
+		CurrentReleaseOK:       release.OK,
+		CurrentReleaseError:    releaseIntegrityStatusDetail(release),
+		ControlProtocolVersion: controlProtocolVersion,
+		SchemaVersion:          config.CurrentSchemaVersion,
+		PanelMinVersion:        Version,
+		Capabilities:           supportedCapabilities(),
+		SupportedMethods:       supportedRPCMethods(),
+	})
+}
+
+func releaseIntegrityStatusDetail(release doctorReleaseIntegrity) string {
+	if release.OK {
+		return ""
+	}
+	details := make([]string, 0, 4)
+	if release.Error != "" {
+		details = append(details, release.Error)
+	}
+	if release.MissingCurrent {
+		details = append(details, "current release link missing")
+	}
+	if release.MissingManifest {
+		details = append(details, "manifest missing")
+	}
+	if len(release.MissingFiles) > 0 {
+		details = append(details, fmt.Sprintf("%d file(s) missing", len(release.MissingFiles)))
+	}
+	if len(release.Mismatches) > 0 {
+		details = append(details, fmt.Sprintf("%d file hash mismatch(es)", len(release.Mismatches)))
+	}
+	return strings.Join(details, "; ")
 }
 
 func (d *daemon) beginRuntimeStartOperation() uint64 {
@@ -134,12 +238,73 @@ func (d *daemon) markRuntimeStartFailed(epoch uint64) {
 }
 
 func (d *daemon) failIfResetInProgress() error {
-	if _, err := os.Stat(d.resetLockPath()); err == nil {
+	active, stale, detail, err := d.inspectResetLock()
+	if err != nil {
+		return err
+	}
+	if active {
+		if stale {
+			return runtimev2.NewResetInProgressError(detail)
+		}
 		return runtimev2.NewResetInProgressError("reset is in progress")
-	} else if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("reset lock is not readable: %w", err)
 	}
 	return nil
+}
+
+func (d *daemon) recoverStaleResetLock(generation int64) (*runtimev2.ResetReport, error) {
+	active, stale, detail, err := d.inspectResetLock()
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		return nil, nil
+	}
+	if !stale {
+		return nil, runtimev2.NewResetInProgressError("reset is in progress")
+	}
+
+	report := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
+	if len(report.Errors) > 0 || report.Status == "partial" || report.Status == "failed" {
+		message := firstRuntimeResetError(report.Errors)
+		if message == "" {
+			message = "stale reset lock recovery failed"
+		}
+		err := fmt.Errorf("%s: %s", detail, message)
+		return &report, runtimeErrorWithResetReport(err, report)
+	}
+	return &report, nil
+}
+
+func (d *daemon) inspectResetLock() (active bool, stale bool, detail string, err error) {
+	info, err := os.Stat(d.resetLockPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, false, "", nil
+		}
+		return false, false, "", fmt.Errorf("reset lock is not readable: %w", err)
+	}
+
+	startedAt := info.ModTime()
+	if data, readErr := os.ReadFile(d.resetLockPath()); readErr == nil {
+		text := strings.TrimSpace(string(data))
+		if parsed, parseErr := time.Parse(time.RFC3339, text); parseErr == nil {
+			startedAt = parsed
+		}
+	}
+
+	age := time.Since(startedAt)
+	if age < 0 {
+		age = 0
+	}
+	detail = fmt.Sprintf("reset lock is present for %s", age.Truncate(time.Second))
+	return true, age > resetLockStaleAfter, detail, nil
+}
+
+func firstRuntimeResetError(errors []string) string {
+	if len(errors) == 0 {
+		return ""
+	}
+	return errors[0]
 }
 
 func (d *daemon) currentRuntimeOperationEpoch() uint64 {
@@ -224,19 +389,19 @@ func mapRoutingModeV2(cfg *config.Config) string {
 	}
 }
 
-func (d *daemon) syncRuntimeV2DesiredState() {
+func (d *daemon) syncRuntimeV2DesiredState() error {
 	if d.runtimeV2 == nil {
-		return
+		return nil
 	}
-	_ = d.runtimeV2.ApplyDesiredState(d.desiredStateV2())
+	return d.runtimeV2.ApplyDesiredState(d.desiredStateV2())
 }
 
-func (d *daemon) restartRootBackendV2() error {
+func (d *daemon) restartRootBackendV2(generation int64) error {
 	d.stopSubsystems()
 	if d.coreMgr.GetState() != core.StateStopped {
 		if err := d.coreMgr.Stop(); err != nil {
-			d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
-			return fmt.Errorf("restart stop failed: %w", err)
+			report := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
+			return runtimeErrorWithResetReport(fmt.Errorf("restart stop failed: %w", err), report)
 		}
 	}
 
@@ -249,21 +414,24 @@ func (d *daemon) restartRootBackendV2() error {
 		return fmt.Errorf("no node configured (address is empty)")
 	}
 	if err := d.coreMgr.Start(profile); err != nil {
-		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
-		return fmt.Errorf("restart start failed: %w", err)
+		report := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
+		return runtimeErrorWithResetReport(fmt.Errorf("restart start failed: %w", err), report)
 	}
 	d.rescueMgr.Reset()
 	d.startSubsystems()
 
 	snapshot := d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), false)
 	if !snapshot.Healthy() {
-		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
-		return fmt.Errorf("restart readiness gates failed: %s", snapshot.LastError)
+		report := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
+		return runtimeErrorWithResetReport(
+			fmt.Errorf("restart readiness gates failed: %s", snapshot.LastError),
+			report,
+		)
 	}
 	return nil
 }
 
-func (d *daemon) reconcileRootRuntime(reason string) error {
+func (d *daemon) reconcileRootRuntime(reason string, generation int64) error {
 	state := d.coreMgr.GetState()
 	if state != core.StateRunning && state != core.StateDegraded {
 		return nil
@@ -277,8 +445,8 @@ func (d *daemon) reconcileRootRuntime(reason string) error {
 	d.mu.Unlock()
 
 	if err := d.reapplyRuntimeRules(cfg); err != nil {
-		d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
-		return fmt.Errorf("%s reapply failed: %w", reason, err)
+		report := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
+		return runtimeErrorWithResetReport(fmt.Errorf("%s reapply failed: %w", reason, err), report)
 	}
 
 	snapshot := d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), false)
@@ -286,8 +454,11 @@ func (d *daemon) reconcileRootRuntime(reason string) error {
 		return nil
 	}
 
-	d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
-	return fmt.Errorf("%s readiness gates failed: %s", reason, snapshot.LastError)
+	report := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
+	return runtimeErrorWithResetReport(
+		fmt.Errorf("%s readiness gates failed: %s", reason, snapshot.LastError),
+		report,
+	)
 }
 
 func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allowEgressProbe bool) runtimev2.HealthSnapshot {
@@ -501,6 +672,9 @@ func (d *daemon) resetNetworkStateReport(generation int64, backend runtimev2.Bac
 	}
 
 	runStep := func(name string, fn func() (string, string, error)) {
+		if d.runtimeV2 != nil {
+			d.runtimeV2.SetActiveOperationStep(generation, name, "running", "", "")
+		}
 		status, detail, err := fn()
 		if status == "" {
 			status = "ok"
@@ -818,6 +992,11 @@ func (d *daemon) handleBackendStatus(params *json.RawMessage) (interface{}, *ipc
 	if d.runtimeV2 == nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "v2 runtime is not initialized"}
 	}
+	d.refreshRuntimeV2Compatibility()
+	status := d.runtimeV2.RefreshActiveProgress()
+	if status.ActiveOperation != nil {
+		return status, nil
+	}
 	state := d.coreMgr.GetState()
 	if state == core.StateRunning || state == core.StateDegraded {
 		healthSnapshot := d.runtimeV2.CurrentHealth()
@@ -857,12 +1036,19 @@ func (d *daemon) handleBackendApplyDesiredState(params *json.RawMessage) (interf
 	if err := d.persistDesiredStateV2(desired); err != nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "persist desired state: " + err.Error()}
 	}
-	_ = d.runtimeV2.ApplyDesiredState(d.desiredStateV2())
+	if err := d.syncRuntimeV2DesiredState(); err != nil {
+		if rpcErr := d.rpcErrorFromRuntimeError(err); rpcErr.Code == ipc.CodeRuntimeBusy {
+			return nil, rpcErr
+		}
+		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "sync desired state: " + err.Error()}
+	}
 	return d.runtimeV2.Status(), nil
 }
 
 func (d *daemon) handleBackendStart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	d.syncRuntimeV2DesiredState()
+	if err := d.syncRuntimeV2DesiredState(); err != nil {
+		return nil, d.rpcErrorFromRuntimeError(err)
+	}
 	status, err := d.runtimeV2.Start()
 	if err != nil {
 		return nil, d.rpcErrorFromRuntimeError(err)
@@ -879,7 +1065,9 @@ func (d *daemon) handleBackendStop(params *json.RawMessage) (interface{}, *ipc.R
 }
 
 func (d *daemon) handleBackendRestart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	d.syncRuntimeV2DesiredState()
+	if err := d.syncRuntimeV2DesiredState(); err != nil {
+		return nil, d.rpcErrorFromRuntimeError(err)
+	}
 	status, err := d.runtimeV2.Restart()
 	if err != nil {
 		return nil, d.rpcErrorFromRuntimeError(err)

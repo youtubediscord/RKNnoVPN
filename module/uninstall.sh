@@ -34,45 +34,28 @@ run_runtime_cleanup() {
     fi
 
     log_err "rescue_reset.sh missing; falling back to process-only cleanup"
-    for proc_name in privd sing-box; do
-        PIDS="$(pidof "$proc_name" 2>/dev/null)"
-        [ -z "$PIDS" ] && continue
-        for pid in $PIDS; do
-            kill -TERM "$pid" 2>/dev/null
-        done
+    for p in /proc/[0-9]*; do
+        pid="${p##*/}"
+        [ "$pid" = "$$" ] && continue
+        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
+        case "$cmd" in
+            *"${PRIVSTACK_DIR}/bin/privd"*|*"${PRIVSTACK_DIR}/bin/sing-box"*)
+                kill -TERM "$pid" 2>/dev/null
+                ;;
+        esac
     done
     sleep 2
-    for proc_name in privd sing-box; do
-        PIDS="$(pidof "$proc_name" 2>/dev/null)"
-        [ -z "$PIDS" ] && continue
-        for pid in $PIDS; do
-            kill -KILL "$pid" 2>/dev/null
-        done
+    for p in /proc/[0-9]*; do
+        pid="${p##*/}"
+        [ "$pid" = "$$" ] && continue
+        cmd="$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null)"
+        case "$cmd" in
+            *"${PRIVSTACK_DIR}/bin/privd"*|*"${PRIVSTACK_DIR}/bin/sing-box"*)
+                kill -KILL "$pid" 2>/dev/null
+                ;;
+        esac
     done
     return 1
-}
-
-restore_private_dns() {
-    log_msg "Checking Private DNS state"
-
-    PRIV_DNS_BAK="${BACKUP_DIR}/private_dns_mode"
-    PRIV_DNS_SPEC_BAK="${BACKUP_DIR}/private_dns_specifier"
-
-    if [ -f "$PRIV_DNS_BAK" ]; then
-        ORIG_MODE="$(cat "$PRIV_DNS_BAK" 2>/dev/null)"
-        if [ -n "$ORIG_MODE" ]; then
-            settings put global private_dns_mode "$ORIG_MODE" 2>/dev/null
-            log_msg "Restored private_dns_mode to: ${ORIG_MODE}"
-        fi
-    fi
-
-    if [ -f "$PRIV_DNS_SPEC_BAK" ]; then
-        ORIG_SPEC="$(cat "$PRIV_DNS_SPEC_BAK" 2>/dev/null)"
-        if [ -n "$ORIG_SPEC" ]; then
-            settings put global private_dns_specifier "$ORIG_SPEC" 2>/dev/null
-            log_msg "Restored private_dns_specifier to: ${ORIG_SPEC}"
-        fi
-    fi
 }
 
 restore_kernel_params() {
@@ -96,7 +79,6 @@ log_msg "PrivStack module removal starting"
 log_msg "========================================="
 
 run_runtime_cleanup || log_err "Runtime cleanup reported leftovers"
-restore_private_dns
 restore_kernel_params
 clean_runtime_files
 

@@ -782,6 +782,7 @@ func supportedCapabilities() []string {
 		"privacy.self-test-protected-apps.v1",
 		"privacy.vpn-interface-patterns.v1",
 		"runtime.logs",
+		"update.install.v1",
 	}
 }
 

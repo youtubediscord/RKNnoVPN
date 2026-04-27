@@ -98,6 +98,7 @@ fun DashboardScreen(
             ConnectButton(
                 connectionState = state.connectionState,
                 hasActiveNode = !state.activeNodeName.isNullOrBlank(),
+                runtimeActionActive = state.runtimeActionActive,
                 onClick = viewModel::toggleConnection,
             )
 
@@ -177,6 +178,7 @@ private fun StatusMessageCard(
 private fun ConnectButton(
     connectionState: ConnectionState,
     hasActiveNode: Boolean,
+    runtimeActionActive: Boolean,
     onClick: () -> Unit,
 ) {
     val isConnected = connectionState == ConnectionState.CONNECTED
@@ -202,7 +204,7 @@ private fun ConnectButton(
 
     FilledTonalButton(
         onClick = onClick,
-        enabled = !isConnecting && (isConnected || hasActiveNode),
+        enabled = !runtimeActionActive && !isConnecting && (isConnected || hasActiveNode),
         colors = ButtonDefaults.filledTonalButtonColors(
             containerColor = containerColor,
             contentColor = contentColor,

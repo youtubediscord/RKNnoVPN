@@ -50,6 +50,7 @@ private const val GITHUB_RELEASES_URL =
 @Composable
 fun UpdateSection(
     state: UpdateUiState,
+    runtimeMutationsEnabled: Boolean = true,
     onCheckForUpdates: () -> Unit,
     onDownloadUpdate: () -> Unit,
     onInstallUpdate: () -> Unit,
@@ -178,7 +179,10 @@ fun UpdateSection(
                             }
                         }
                         UpdateStatus.DOWNLOADED -> {
-                            FilledTonalButton(onClick = onInstallUpdate) {
+                            FilledTonalButton(
+                                onClick = onInstallUpdate,
+                                enabled = runtimeMutationsEnabled,
+                            ) {
                                 Text(stringResource(R.string.update_install_button))
                             }
                         }

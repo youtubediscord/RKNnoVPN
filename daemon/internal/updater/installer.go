@@ -36,7 +36,7 @@ const (
 //
 //  1. Extract the new module.zip to a temp staging directory
 //  2. Validate required binaries/scripts/module metadata before downtime
-//  3. Stop the current proxy (sing-box + iptables teardown)
+//  3. Run canonical runtime cleanup (sing-box + PrivStack netstack teardown)
 //  4. Back up current binaries so we can roll back on failure
 //  5. Atomically replace binaries in <dataDir>/bin/ (unlink+rename)
 //  6. Copy new scripts to <dataDir>/scripts/
@@ -92,10 +92,10 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 		return err
 	}
 
-	// --- 3. Stop the current proxy ---
-	logger.Println("stopping current proxy before module update")
+	// --- 3. Clean the current runtime ---
+	logger.Println("running runtime cleanup before module update")
 	if err := stopCurrentProxy(dataDir); err != nil {
-		logger.Printf("warning: stop proxy: %v (continuing anyway)", err)
+		logger.Printf("warning: runtime cleanup: %v (continuing anyway)", err)
 	}
 
 	// --- 4. Back up current binaries ---
@@ -288,7 +288,7 @@ func InstallApkUpdate(apkPath string) error {
 // Internal helpers
 // --------------------------------------------------------------------------
 
-// stopCurrentProxy invokes the iptables teardown script and kills sing-box.
+// stopCurrentProxy invokes the canonical root runtime cleanup script.
 // It does NOT kill the current privd -- that happens via ScheduleSelfExit
 // after the IPC response is sent.
 func stopCurrentProxy(dataDir string) error {
@@ -299,28 +299,7 @@ func stopCurrentProxy(dataDir string) error {
 		"PRIVSTACK_DIR=" + dataDir,
 		"PATH=" + os.Getenv("PATH"),
 	}
-
-	// First, remove iptables rules so traffic is not black-holed.
-	dnsScript := filepath.Join(dataDir, "scripts", "dns.sh")
-	_ = execScriptWithEnv(dnsScript, "stop", scriptEnv)
-
-	iptScript := filepath.Join(dataDir, "scripts", "iptables.sh")
-	_ = execScriptWithEnv(iptScript, "stop", scriptEnv)
-
-	// Kill sing-box by PID file, then by process name as fallback.
-	pidFile := filepath.Join(dataDir, "run", "singbox.pid")
-	if data, err := os.ReadFile(pidFile); err == nil {
-		pid := strings.TrimSpace(string(data))
-		if pid != "" {
-			_ = exec.Command("kill", "-TERM", pid).Run()
-			time.Sleep(2 * time.Second)
-			_ = exec.Command("kill", "-KILL", pid).Run()
-		}
-	}
-	// Fallback: kill any remaining sing-box processes.
-	_ = exec.Command("killall", "-TERM", "sing-box").Run()
-
-	return nil
+	return execScriptWithEnv(filepath.Join(dataDir, "scripts", "rescue_reset.sh"), "update-clean", scriptEnv)
 }
 
 // relaunchDaemon starts the new privd binary and waits for it to become

@@ -295,7 +295,10 @@ fun SettingsScreen(
 
             ListItem(
                 headlineContent = {
-                    FilledTonalButton(onClick = viewModel::restartDaemon) {
+                    FilledTonalButton(
+                        onClick = viewModel::restartDaemon,
+                        enabled = !state.runtimeActionActive,
+                    ) {
                         Icon(
                             Icons.Filled.RestartAlt,
                             contentDescription = null,
@@ -311,7 +314,7 @@ fun SettingsScreen(
                 headlineContent = {
                     FilledTonalButton(
                         onClick = viewModel::resetNetworkRules,
-                        enabled = !state.isResetting,
+                        enabled = !state.runtimeActionActive && !state.isResetting,
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = MaterialTheme.colorScheme.errorContainer,
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -420,6 +423,7 @@ fun SettingsScreen(
         // ===== UPDATE =====
         UpdateSection(
             state = updateState,
+            runtimeMutationsEnabled = !state.runtimeActionActive,
             onCheckForUpdates = viewModel::checkForUpdates,
             onDownloadUpdate = viewModel::downloadUpdate,
             onInstallUpdate = viewModel::installUpdate,

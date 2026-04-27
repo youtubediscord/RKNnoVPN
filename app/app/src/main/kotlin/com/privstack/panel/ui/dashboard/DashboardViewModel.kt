@@ -40,6 +40,7 @@ data class DashboardUiState(
     val operationalIssueMessage: String? = null,
     val uptimeSeconds: Long = 0L,
     val isRefreshing: Boolean = false,
+    val runtimeActionActive: Boolean = false,
     /** Error message from the last daemon operation, or null. */
     val errorMessage: String? = null,
     /** True when the daemon process is not reachable at all. */
@@ -74,6 +75,7 @@ class DashboardViewModel @Inject constructor(
     // ---- Public actions ----
 
     fun toggleConnection() {
+        if (_uiState.value.runtimeActionActive) return
         val current = _uiState.value.connectionState
         when (current) {
             ConnectionState.DISCONNECTED,
@@ -100,7 +102,11 @@ class DashboardViewModel @Inject constructor(
     private fun connect() {
         viewModelScope.launch {
             _uiState.update {
-                it.copy(connectionState = ConnectionState.CONNECTING, errorMessage = null)
+                it.copy(
+                    connectionState = ConnectionState.CONNECTING,
+                    runtimeActionActive = true,
+                    errorMessage = null,
+                )
             }
             when (val outcome = statusRepository.start()) {
                 is CommandOutcome.Success -> {
@@ -112,6 +118,7 @@ class DashboardViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             connectionState = ConnectionState.ERROR,
+                            runtimeActionActive = false,
                             errorMessage = outcome.message,
                         )
                     }
@@ -122,7 +129,14 @@ class DashboardViewModel @Inject constructor(
 
     private fun disconnect() {
         viewModelScope.launch {
-            _uiState.update { it.copy(errorMessage = null) }
+            _uiState.update {
+                it.copy(
+                    connectionState = ConnectionState.CONNECTING,
+                    runtimePhase = BackendPhase.STOPPING,
+                    runtimeActionActive = true,
+                    errorMessage = null,
+                )
+            }
             when (val outcome = statusRepository.stop()) {
                 is CommandOutcome.Success -> {
                     Log.d(TAG, "Stop command succeeded; waiting for status poll")
@@ -137,7 +151,11 @@ class DashboardViewModel @Inject constructor(
                 is CommandOutcome.Failed -> {
                     Log.w(TAG, "Stop failed: ${outcome.message}")
                     _uiState.update {
-                        it.copy(errorMessage = outcome.message)
+                        it.copy(
+                            connectionState = ConnectionState.ERROR,
+                            runtimeActionActive = false,
+                            errorMessage = outcome.message,
+                        )
                     }
                 }
             }
@@ -223,6 +241,11 @@ class DashboardViewModel @Inject constructor(
                         operation.errorMessage.ifBlank { operation.errorCode },
                     )
                 }
+            val activeOperationStuckMessage = status.activeOperation
+                ?.takeIf { operation -> operation.stuck }
+                ?.let { operation ->
+                    formatStuckOperation(operation.stepDetail, operation.step)
+                }
             it.copy(
                 connectionState = status.state,
                 runtimePhase = status.health.phase,
@@ -242,14 +265,25 @@ class DashboardViewModel @Inject constructor(
                     null
                 },
                 uptimeSeconds = status.uptime,
+                runtimeActionActive = status.activeOperation != null,
                 // Clear error when we get a successful status with a healthy state
                 errorMessage = when {
+                    activeOperationStuckMessage != null -> activeOperationStuckMessage
                     operationalDegraded -> null
                     lastOperationFailure != null -> lastOperationFailure
                     status.state == ConnectionState.ERROR -> healthIssueMessage
                     else -> null
                 },
             )
+        }
+    }
+
+    private fun formatStuckOperation(stepDetail: String, step: String): String {
+        val currentStep = stepDetail.ifBlank { step }.trim()
+        return if (currentStep.isBlank()) {
+            messages.get(com.privstack.panel.R.string.daemon_status_operation_stuck)
+        } else {
+            messages.get(com.privstack.panel.R.string.daemon_status_operation_stuck_with_step, currentStep)
         }
     }
 

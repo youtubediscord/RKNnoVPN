@@ -69,6 +69,13 @@ data class RuntimeOperationStatus(
     val generation: Long = 0L,
     val phase: BackendPhase = BackendPhase.APPLYING,
     val startedAt: String? = null,
+    val step: String = "",
+    val stepStatus: String = "",
+    val stepCode: String = "",
+    val stepDetail: String = "",
+    val runtimeMs: Long = 0L,
+    val watchdogAfterMs: Long = 0L,
+    val stuck: Boolean = false,
 )
 
 @Serializable
@@ -146,8 +153,23 @@ data class BackendStatusV2(
     val appliedState: AppliedStateV2 = AppliedStateV2(),
     val health: BackendHealthSnapshot = BackendHealthSnapshot(),
     val capabilities: List<BackendCapability> = emptyList(),
+    val compatibility: RuntimeCompatibilityStatus? = null,
     val activeOperation: RuntimeOperationStatus? = null,
     val lastOperation: RuntimeOperationResult? = null,
+)
+
+@Serializable
+data class RuntimeCompatibilityStatus(
+    val daemonVersion: String = "",
+    val moduleVersion: String = "",
+    val currentReleaseVersion: String = "",
+    val currentReleaseOk: Boolean = false,
+    val currentReleaseError: String = "",
+    val controlProtocolVersion: Int = 0,
+    val schemaVersion: Int = 0,
+    val panelMinVersion: String = "",
+    val capabilities: List<String> = emptyList(),
+    val supportedMethods: List<String> = emptyList(),
 )
 
 @Serializable

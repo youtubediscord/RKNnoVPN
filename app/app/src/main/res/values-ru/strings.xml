@@ -53,6 +53,8 @@
     <string name="error_runtime_busy">Операция уже выполняется. Дождитесь завершения текущего действия.</string>
     <string name="error_reset_in_progress">Сброс ещё выполняется. Дождитесь завершения.</string>
     <string name="error_operation_busy_named">%1$s ещё выполняется. Дождитесь завершения.</string>
+    <string name="daemon_status_operation_stuck">Операция выполняется слишком долго. Диагностика сохранена в status и logs.</string>
+    <string name="daemon_status_operation_stuck_with_step">Операция выполняется слишком долго. Текущий шаг: %1$s.</string>
     <string name="uptime">Время работы</string>
     <string name="traffic">Трафик</string>
     <string name="upload_short">TX</string>

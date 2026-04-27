@@ -262,6 +262,25 @@ func TestUpdateCurrentReleaseSymlinkReplacesDirectory(t *testing.T) {
 	}
 }
 
+func TestStopCurrentProxyUsesCanonicalRescueReset(t *testing.T) {
+	dataDir := t.TempDir()
+	logPath := filepath.Join(dataDir, "called.txt")
+	scriptPath := filepath.Join(dataDir, "scripts", "rescue_reset.sh")
+	writeTestFile(t, scriptPath, 0755, "#!/bin/sh\nprintf '%s:%s\\n' \"$1\" \"$PRIVSTACK_DIR\" > \"$PRIVSTACK_DIR/called.txt\"\n")
+
+	if err := stopCurrentProxy(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "update-clean:" + dataDir + "\n"
+	if string(data) != want {
+		t.Fatalf("rescue_reset invocation = %q, want %q", string(data), want)
+	}
+}
+
 func writeTestFile(t *testing.T, path string, perm os.FileMode, contents ...string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

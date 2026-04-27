@@ -106,6 +106,7 @@ data class SettingsUiState(
     val errorMessage: String? = null,
     val lastResetSummary: String? = null,
     val isResetting: Boolean = false,
+    val runtimeActionActive: Boolean = false,
     val logsText: String = "",
     val isLoadingLogs: Boolean = false,
     val shareLogsText: String? = null,
@@ -370,6 +371,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun restartDaemon() {
+        if (_uiState.value.runtimeActionActive) return
         _uiState.update {
             it.copy(
                 daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_restarting),
@@ -399,7 +401,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun resetNetworkRules() {
-        if (_uiState.value.isResetting) return
+        if (_uiState.value.runtimeActionActive || _uiState.value.isResetting) return
         _uiState.update {
             it.copy(
                 daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_resetting),
@@ -613,6 +615,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun installUpdate() {
+        if (_uiState.value.runtimeActionActive) return
         _updateState.update { it.copy(status = UpdateStatus.INSTALLING) }
         viewModelScope.launch {
             val current = _updateState.value
@@ -631,6 +634,7 @@ class SettingsViewModel @Inject constructor(
                 apkPath = current.apkPath,
             )) {
                 is DaemonClientResult.Ok -> {
+                    result.data.runtimeStatus?.let(statusRepository::publishBackendStatus)
                     _updateState.update {
                         it.copy(
                             status = if (result.data.accepted) UpdateStatus.INSTALLING else UpdateStatus.ERROR,
@@ -696,8 +700,8 @@ class SettingsViewModel @Inject constructor(
                             ?.takeIf { operation -> it.isResetting && operation.kind == "reset" && status.activeOperation == null }
                         if (resetResult != null) {
                             val report = resetResult.resetReport
-                            it.copy(
-                                daemonStatusText = if (resetResult.succeeded) {
+                        it.copy(
+                            daemonStatusText = if (resetResult.succeeded) {
                                     messages.get(com.privstack.panel.R.string.daemon_status_stopped)
                                 } else {
                                     messages.get(com.privstack.panel.R.string.daemon_status_partial_reset)
@@ -706,9 +710,14 @@ class SettingsViewModel @Inject constructor(
                                 lastResetSummary = report?.let(::summarizeResetReport)
                                     ?: resetResult.errorMessage.ifBlank { messages.get(com.privstack.panel.R.string.state_error) },
                                 isResetting = false,
+                                runtimeActionActive = false,
                             )
                         } else {
-                            it.copy(daemonStatusText = formatRuntimeStatus(status, it.daemonStatusText))
+                            it.copy(
+                                daemonStatusText = formatRuntimeStatus(status, it.daemonStatusText),
+                                isResetting = status.activeOperation?.kind == "reset",
+                                runtimeActionActive = status.activeOperation != null,
+                            )
                         }
                     }
                 }
@@ -901,10 +910,18 @@ class SettingsViewModel @Inject constructor(
                 }
             }
             ConnectionState.CONNECTING ->
-                when (status.activeOperation?.kind) {
-                    "reset" -> messages.get(com.privstack.panel.R.string.daemon_status_resetting)
-                    "restart", "reload" -> messages.get(com.privstack.panel.R.string.daemon_status_restarting)
-                    else -> messages.get(com.privstack.panel.R.string.state_connecting)
+                when {
+                    status.activeOperation?.stuck == true ->
+                        formatStuckOperation(
+                            status.activeOperation.stepDetail,
+                            status.activeOperation.step,
+                        )
+                    status.activeOperation?.kind == "reset" ->
+                        messages.get(com.privstack.panel.R.string.daemon_status_resetting)
+                    status.activeOperation?.kind == "restart" || status.activeOperation?.kind == "reload" ->
+                        messages.get(com.privstack.panel.R.string.daemon_status_restarting)
+                    else ->
+                        messages.get(com.privstack.panel.R.string.state_connecting)
                 }
             ConnectionState.DISCONNECTED ->
                 messages.get(com.privstack.panel.R.string.daemon_status_stopped)
@@ -915,6 +932,15 @@ class SettingsViewModel @Inject constructor(
                 )
             ConnectionState.UNKNOWN ->
                 messages.get(com.privstack.panel.R.string.daemon_status_unknown_text)
+        }
+    }
+
+    private fun formatStuckOperation(stepDetail: String, step: String): String {
+        val currentStep = stepDetail.ifBlank { step }.trim()
+        return if (currentStep.isBlank()) {
+            messages.get(com.privstack.panel.R.string.daemon_status_operation_stuck)
+        } else {
+            messages.get(com.privstack.panel.R.string.daemon_status_operation_stuck_with_step, currentStep)
         }
     }
 

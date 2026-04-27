@@ -63,6 +63,35 @@ func TestPhaseFromHealthUsesStableFailureCodeForStage(t *testing.T) {
 	}
 }
 
+func TestStatusIncludesCompatibilitySnapshot(t *testing.T) {
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, &fakeBackend{kind: BackendRootTProxy})
+	compatibility := CompatibilityStatus{
+		DaemonVersion:          "v1.7.0",
+		ModuleVersion:          "v1.7.0",
+		CurrentReleaseVersion:  "v1.7.0",
+		CurrentReleaseOK:       true,
+		ControlProtocolVersion: 3,
+		SchemaVersion:          4,
+		PanelMinVersion:        "v1.7.0",
+		Capabilities:           []string{"backend.root-tproxy"},
+		SupportedMethods:       []string{"backend.status"},
+	}
+	o.SetCompatibility(compatibility)
+	compatibility.Capabilities[0] = "mutated"
+	compatibility.SupportedMethods[0] = "mutated"
+
+	status := o.Status()
+	if status.Compatibility.ControlProtocolVersion != 3 || status.Compatibility.SchemaVersion != 4 {
+		t.Fatalf("expected compatibility protocol/schema in status, got %#v", status.Compatibility)
+	}
+	if got := status.Compatibility.Capabilities; len(got) != 1 || got[0] != "backend.root-tproxy" {
+		t.Fatalf("compatibility capabilities were not cloned: %#v", got)
+	}
+	if got := status.Compatibility.SupportedMethods; len(got) != 1 || got[0] != "backend.status" {
+		t.Fatalf("compatibility methods were not cloned: %#v", got)
+	}
+}
+
 func TestStopCallsBackendEvenWhenAppliedPhaseStopped(t *testing.T) {
 	backend := &fakeBackend{kind: BackendRootTProxy}
 	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
@@ -138,6 +167,183 @@ func TestStartSubmitReturnsBeforeBlockedBackend(t *testing.T) {
 	}
 	if status.LastOperation == nil || !status.LastOperation.Succeeded {
 		t.Fatalf("expected successful last operation, got %#v", status.LastOperation)
+	}
+}
+
+func TestActiveOperationReportsWatchdogStuck(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend := &fakeBackend{
+		kind:         BackendRootTProxy,
+		startStarted: started,
+		startBlock:   release,
+		currentHealth: HealthSnapshot{
+			StageReport: map[string]interface{}{
+				"stages": []interface{}{
+					map[string]interface{}{
+						"name":   "netstack-apply",
+						"status": "running",
+						"code":   "RULES_APPLYING",
+						"detail": "applying rules",
+					},
+				},
+			},
+			CheckedAt: time.Now(),
+		},
+	}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+	o.SetOperationWatchdog(time.Nanosecond)
+	var logs []OperationLogEvent
+	o.SetOperationLogger(func(event OperationLogEvent) {
+		logs = append(logs, event)
+	})
+
+	if _, err := o.Start(); err != nil {
+		t.Fatalf("start acceptance failed: %v", err)
+	}
+	done := operationDoneChan(o, OperationStart)
+	waitForSignal(t, started)
+	time.Sleep(time.Millisecond)
+
+	status := o.RefreshActiveProgress()
+	if status.ActiveOperation == nil {
+		t.Fatalf("expected active operation: %#v", status)
+	}
+	if !status.ActiveOperation.Stuck || status.ActiveOperation.WatchdogAfterMS == 0 {
+		t.Fatalf("expected stuck active operation with watchdog metadata, got %#v", status.ActiveOperation)
+	}
+	if status.ActiveOperation.Step != "netstack-apply" ||
+		status.ActiveOperation.StepStatus != "running" ||
+		status.ActiveOperation.StepCode != "RULES_APPLYING" ||
+		status.ActiveOperation.StepDetail != "applying rules" {
+		t.Fatalf("expected active operation step metadata, got %#v", status.ActiveOperation)
+	}
+	_, err := o.Reset()
+	busy, ok := err.(*OperationBusyError)
+	if !ok || busy.Active == nil || !busy.Active.Stuck || busy.Active.RuntimeMS == 0 {
+		t.Fatalf("expected busy error to include stuck active operation, got %T %#v", err, err)
+	}
+	if data := busy.Data(); data["stuck"] != true || data["runtimeMs"] == int64(0) || data["step"] != "netstack-apply" {
+		t.Fatalf("expected busy data to include watchdog fields, got %#v", data)
+	}
+	if countOperationLogs(logs, "stuck") != 1 {
+		t.Fatalf("expected exactly one stuck log event, got %#v", logs)
+	}
+	stuckLog := operationLogByResult(logs, "stuck")
+	if stuckLog.Step != "netstack-apply" {
+		t.Fatalf("expected stuck log to include step, got %#v", stuckLog)
+	}
+	_ = o.Status()
+	if countOperationLogs(logs, "stuck") != 1 {
+		t.Fatalf("status polling should not spam stuck log events, got %#v", logs)
+	}
+
+	close(release)
+	waitForSignal(t, done)
+}
+
+func TestSetActiveOperationStepUpdatesStatusBusyAndLogs(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	backend := &fakeBackend{
+		kind:         BackendRootTProxy,
+		startStarted: started,
+		startBlock:   release,
+	}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+	var logs []OperationLogEvent
+	o.SetOperationLogger(func(event OperationLogEvent) {
+		logs = append(logs, event)
+	})
+
+	if _, err := o.Start(); err != nil {
+		t.Fatalf("start acceptance failed: %v", err)
+	}
+	done := operationDoneChan(o, OperationStart)
+	waitForSignal(t, started)
+	status := o.Status()
+	if status.ActiveOperation == nil {
+		t.Fatalf("expected active operation: %#v", status)
+	}
+	generation := status.ActiveOperation.Generation
+
+	if !o.SetActiveOperationStep(generation, "update-install-apk", "running", "APK_INSTALLING", "installing apk") {
+		t.Fatalf("expected active step update to succeed")
+	}
+	if o.SetActiveOperationStep(generation+1, "stale", "running", "", "") {
+		t.Fatalf("stale generation must not update active step")
+	}
+	status = o.Status()
+	if status.ActiveOperation == nil ||
+		status.ActiveOperation.Step != "update-install-apk" ||
+		status.ActiveOperation.StepStatus != "running" ||
+		status.ActiveOperation.StepCode != "APK_INSTALLING" ||
+		status.ActiveOperation.StepDetail != "installing apk" {
+		t.Fatalf("expected active step metadata, got %#v", status.ActiveOperation)
+	}
+	_, err := o.Reset()
+	busy, ok := err.(*OperationBusyError)
+	if !ok || busy.Active == nil || busy.Active.Step != "update-install-apk" {
+		t.Fatalf("expected busy error to carry active step, got %T %#v", err, err)
+	}
+	stepLog := operationLogByResult(logs, "step")
+	if stepLog.Step != "update-install-apk" ||
+		stepLog.StepStatus != "running" ||
+		stepLog.StepDetail != "installing apk" ||
+		stepLog.ErrorCode != "APK_INSTALLING" {
+		t.Fatalf("expected structured step log, got %#v", stepLog)
+	}
+
+	close(release)
+	waitForSignal(t, done)
+}
+
+func TestFailedStartCanAttachRecoveryResetReport(t *testing.T) {
+	report := ResetReport{
+		BackendKind: BackendRootTProxy,
+		Status:      "clean_with_warnings",
+		Steps:       []ResetStep{{Name: "verify-cleanup", Status: "warning", Detail: "leftover"}},
+		Warnings:    []string{"leftover"},
+	}
+	backend := &fakeBackend{
+		kind:     BackendRootTProxy,
+		startErr: resetReportTestError{err: errors.New("readiness failed"), report: report},
+	}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+
+	if _, err := o.Start(); err != nil {
+		t.Fatalf("start acceptance failed: %v", err)
+	}
+	status := waitForOperationDone(t, o, OperationStart)
+	if status.LastOperation == nil || status.LastOperation.Succeeded {
+		t.Fatalf("expected failed start result, got %#v", status.LastOperation)
+	}
+	if status.LastOperation.ResetReport == nil {
+		t.Fatalf("expected recovery reset report in last operation")
+	}
+	if status.LastOperation.ResetReport.Status != "clean_with_warnings" {
+		t.Fatalf("unexpected reset report: %#v", status.LastOperation.ResetReport)
+	}
+}
+
+func TestSuccessfulStartCanAttachRecoveryResetReport(t *testing.T) {
+	report := ResetReport{
+		BackendKind: BackendRootTProxy,
+		Status:      "ok",
+		Steps:       []ResetStep{{Name: "stale-lock-recovery", Status: "ok"}},
+	}
+	backend := &fakeBackend{kind: BackendRootTProxy, startReport: &report}
+	o := NewOrchestrator(DesiredState{BackendKind: BackendRootTProxy}, backend)
+
+	if _, err := o.Start(); err != nil {
+		t.Fatalf("start acceptance failed: %v", err)
+	}
+	status := waitForOperationDone(t, o, OperationStart)
+	if status.LastOperation == nil || !status.LastOperation.Succeeded {
+		t.Fatalf("expected successful start result, got %#v", status.LastOperation)
+	}
+	if status.LastOperation.ResetReport == nil || status.LastOperation.ResetReport.Status != "ok" {
+		t.Fatalf("expected successful recovery reset report, got %#v", status.LastOperation)
 	}
 }
 
@@ -580,6 +786,7 @@ type fakeBackend struct {
 	startErr       error
 	startStarted   chan struct{}
 	startBlock     chan struct{}
+	startReport    *ResetReport
 	stopStarted    chan struct{}
 	stopBlock      chan struct{}
 	restartStarted chan struct{}
@@ -589,13 +796,14 @@ type fakeBackend struct {
 	resetReport    ResetReport
 	networkStarted chan struct{}
 	networkBlock   chan struct{}
+	currentHealth  HealthSnapshot
 }
 
 func (f *fakeBackend) Kind() BackendKind         { return f.kind }
 func (f *fakeBackend) Supported() (bool, string) { return true, "" }
-func (f *fakeBackend) Start(DesiredState) error {
+func (f *fakeBackend) Start(DesiredState, int64) (*ResetReport, error) {
 	signalAndWait(f.startStarted, f.startBlock)
-	return f.startErr
+	return f.startReport, f.startErr
 }
 func (f *fakeBackend) Stop() error {
 	signalAndWait(f.stopStarted, f.stopBlock)
@@ -611,15 +819,15 @@ func (f *fakeBackend) Reset(generation int64) ResetReport {
 	}
 	return ResetReport{BackendKind: f.kind, Generation: generation, Status: "ok"}
 }
-func (f *fakeBackend) Restart(DesiredState, int64) error {
+func (f *fakeBackend) Restart(DesiredState, int64) (*ResetReport, error) {
 	signalAndWait(f.restartStarted, f.restartBlock)
-	return nil
+	return nil, nil
 }
-func (f *fakeBackend) HandleNetworkChange(int64) error {
+func (f *fakeBackend) HandleNetworkChange(int64) (*ResetReport, error) {
 	signalAndWait(f.networkStarted, f.networkBlock)
-	return nil
+	return nil, nil
 }
-func (f *fakeBackend) CurrentHealth() HealthSnapshot { return HealthSnapshot{} }
+func (f *fakeBackend) CurrentHealth() HealthSnapshot { return f.currentHealth }
 func (f *fakeBackend) RefreshHealth() HealthSnapshot {
 	return HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true, CheckedAt: time.Now()}
 }
@@ -643,6 +851,42 @@ func (e codedTestError) RuntimeDebug() string         { return e.debug }
 func (e codedTestError) RuntimeRollbackApplied() bool { return e.rollbackApplied }
 func (e codedTestError) RuntimeStageReport() interface{} {
 	return e.stageReport
+}
+
+type resetReportTestError struct {
+	err    error
+	report ResetReport
+}
+
+func (e resetReportTestError) Error() string {
+	return e.err.Error()
+}
+
+func (e resetReportTestError) Unwrap() error {
+	return e.err
+}
+
+func (e resetReportTestError) RuntimeResetReport() ResetReport {
+	return e.report
+}
+
+func countOperationLogs(events []OperationLogEvent, result string) int {
+	count := 0
+	for _, event := range events {
+		if event.Result == result {
+			count++
+		}
+	}
+	return count
+}
+
+func operationLogByResult(events []OperationLogEvent, result string) OperationLogEvent {
+	for _, event := range events {
+		if event.Result == result {
+			return event
+		}
+	}
+	return OperationLogEvent{}
 }
 
 func signalAndWait(started chan struct{}, block chan struct{}) {

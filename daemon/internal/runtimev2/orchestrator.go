@@ -3,6 +3,7 @@ package runtimev2
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,11 +12,11 @@ import (
 type Backend interface {
 	Kind() BackendKind
 	Supported() (bool, string)
-	Start(desired DesiredState) error
+	Start(desired DesiredState, generation int64) (*ResetReport, error)
 	Stop() error
 	Reset(generation int64) ResetReport
-	Restart(desired DesiredState, generation int64) error
-	HandleNetworkChange(generation int64) error
+	Restart(desired DesiredState, generation int64) (*ResetReport, error)
+	HandleNetworkChange(generation int64) (*ResetReport, error)
 	CurrentHealth() HealthSnapshot
 	RefreshHealth() HealthSnapshot
 	TestNodes(desired DesiredState, url string, timeoutMS int, nodeIDs []string) ([]NodeProbeResult, error)
@@ -25,12 +26,17 @@ type Orchestrator struct {
 	mu       sync.Mutex
 	backends map[BackendKind]Backend
 
-	desired DesiredState
-	applied AppliedState
-	health  HealthSnapshot
-	active  *OperationStatus
-	last    *OperationResult
-	opSeq   uint64
+	desired           DesiredState
+	applied           AppliedState
+	health            HealthSnapshot
+	compatibility     CompatibilityStatus
+	active            *OperationStatus
+	last              *OperationResult
+	opSeq             uint64
+	activeStuckLogged bool
+
+	watchdogAfter time.Duration
+	logger        func(OperationLogEvent)
 }
 
 type operationCompletion struct {
@@ -40,13 +46,29 @@ type operationCompletion struct {
 	resetReport *ResetReport
 }
 
+type OperationLogEvent struct {
+	OperationID  string
+	Kind         OperationKind
+	Generation   int64
+	Phase        Phase
+	Step         string
+	StepStatus   string
+	StepDetail   string
+	Result       string
+	ErrorCode    string
+	ErrorMessage string
+	RuntimeMS    int64
+	Stuck        bool
+}
+
 func NewOrchestrator(desired DesiredState, backends ...Backend) *Orchestrator {
 	if desired.BackendKind == "" {
 		desired.BackendKind = BackendRootTProxy
 	}
 	o := &Orchestrator{
-		backends: make(map[BackendKind]Backend, len(backends)),
-		desired:  desired,
+		backends:      make(map[BackendKind]Backend, len(backends)),
+		desired:       desired,
+		watchdogAfter: 2 * time.Minute,
 		applied: AppliedState{
 			BackendKind: desired.BackendKind,
 			Phase:       PhaseStopped,
@@ -56,6 +78,49 @@ func NewOrchestrator(desired DesiredState, backends ...Backend) *Orchestrator {
 		o.backends[backend.Kind()] = backend
 	}
 	return o
+}
+
+func (o *Orchestrator) SetOperationWatchdog(after time.Duration) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.watchdogAfter = after
+}
+
+func (o *Orchestrator) SetOperationLogger(logger func(OperationLogEvent)) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.logger = logger
+}
+
+func (o *Orchestrator) SetCompatibility(compatibility CompatibilityStatus) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.compatibility = cloneCompatibilityStatus(compatibility)
+}
+
+func (o *Orchestrator) SetActiveOperationStep(generation int64, name, status, code, detail string) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.active == nil || o.active.Generation != generation {
+		return false
+	}
+	o.active.Step = name
+	o.active.StepStatus = status
+	o.active.StepCode = code
+	o.active.StepDetail = detail
+	o.logLocked(OperationLogEvent{
+		OperationID: o.active.OperationID,
+		Kind:        o.active.Kind,
+		Generation:  o.active.Generation,
+		Phase:       o.active.Phase,
+		Step:        name,
+		StepStatus:  status,
+		StepDetail:  detail,
+		Result:      "step",
+		ErrorCode:   code,
+		RuntimeMS:   int64(time.Since(o.active.StartedAt) / time.Millisecond),
+	})
+	return true
 }
 
 func (o *Orchestrator) ApplyDesiredState(desired DesiredState) error {
@@ -79,6 +144,37 @@ func (o *Orchestrator) Status() Status {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.statusLocked()
+}
+
+func (o *Orchestrator) RefreshActiveProgress() Status {
+	o.mu.Lock()
+	if o.active == nil {
+		status := o.statusLocked()
+		o.mu.Unlock()
+		return status
+	}
+	backendKind := o.applied.BackendKind
+	if backendKind == "" {
+		backendKind = o.desired.BackendKind
+	}
+	backend, err := o.backendForLocked(backendKind)
+	if err != nil {
+		o.health = HealthSnapshot{LastError: err.Error(), CheckedAt: time.Now()}
+		status := o.statusLocked()
+		o.mu.Unlock()
+		return status
+	}
+	o.mu.Unlock()
+
+	health := backend.CurrentHealth()
+
+	o.mu.Lock()
+	if o.active != nil && operationHealthHasProgress(health) {
+		o.health = mergeOperationProgress(o.health, health)
+	}
+	status := o.statusLocked()
+	o.mu.Unlock()
+	return status
 }
 
 func (o *Orchestrator) Start() (Status, error) {
@@ -117,11 +213,16 @@ func (o *Orchestrator) Start() (Status, error) {
 			}
 		},
 		func(op OperationStatus) operationCompletion {
-			if err := backend.Start(desired); err != nil {
+			resetReport, err := backend.Start(desired, op.Generation)
+			if err != nil {
 				health := healthFromError(err)
+				if errorReport := resetReportFromError(err); errorReport != nil {
+					resetReport = errorReport
+				}
 				return operationCompletion{
-					err:    err,
-					health: health,
+					err:         err,
+					health:      health,
+					resetReport: resetReport,
 					applied: AppliedState{
 						BackendKind:     desired.BackendKind,
 						Phase:           phaseFromHealth(health, PhaseFailed),
@@ -133,7 +234,8 @@ func (o *Orchestrator) Start() (Status, error) {
 
 			health := backend.RefreshHealth()
 			return operationCompletion{
-				health: health,
+				health:      health,
+				resetReport: resetReport,
 				applied: AppliedState{
 					BackendKind:     desired.BackendKind,
 					Phase:           phaseFromHealth(health, PhaseHealthy),
@@ -179,12 +281,15 @@ func (o *Orchestrator) Stop() (Status, error) {
 		},
 		func(op OperationStatus) operationCompletion {
 			stopErr := backend.Stop()
+			var resetReport *ResetReport
 			if stopErr != nil && active.Phase != PhaseStopped {
 				report := backend.Reset(op.Generation)
+				resetReport = &report
 				if report.Status != "ok" {
 					return operationCompletion{
-						err:    stopErr,
-						health: HealthSnapshot{LastError: stopErr.Error(), CheckedAt: time.Now()},
+						err:         stopErr,
+						health:      HealthSnapshot{LastError: stopErr.Error(), CheckedAt: time.Now()},
+						resetReport: resetReport,
 						applied: AppliedState{
 							BackendKind:     active.BackendKind,
 							Phase:           PhaseFailed,
@@ -200,8 +305,9 @@ func (o *Orchestrator) Stop() (Status, error) {
 				health.LastError = stopErr.Error()
 			}
 			return operationCompletion{
-				err:    stopErr,
-				health: health,
+				err:         stopErr,
+				health:      health,
+				resetReport: resetReport,
 				applied: AppliedState{
 					BackendKind:     backendKind,
 					Phase:           PhaseStopped,
@@ -248,11 +354,16 @@ func (o *Orchestrator) Restart() (Status, error) {
 			}
 		},
 		func(op OperationStatus) operationCompletion {
-			if err := backend.Restart(desired, op.Generation); err != nil {
+			resetReport, err := backend.Restart(desired, op.Generation)
+			if err != nil {
 				health := healthFromError(err)
+				if errorReport := resetReportFromError(err); errorReport != nil {
+					resetReport = errorReport
+				}
 				return operationCompletion{
-					err:    err,
-					health: health,
+					err:         err,
+					health:      health,
+					resetReport: resetReport,
 					applied: AppliedState{
 						BackendKind:     desired.BackendKind,
 						Phase:           phaseFromHealth(health, PhaseFailed),
@@ -264,7 +375,8 @@ func (o *Orchestrator) Restart() (Status, error) {
 
 			health := backend.RefreshHealth()
 			return operationCompletion{
-				health: health,
+				health:      health,
+				resetReport: resetReport,
 				applied: AppliedState{
 					BackendKind:     desired.BackendKind,
 					Phase:           phaseFromHealth(health, PhaseHealthy),
@@ -363,7 +475,7 @@ func (o *Orchestrator) HandleNetworkChange() (Status, error) {
 			o.applied.Generation = op.Generation
 		},
 		func(op OperationStatus) operationCompletion {
-			err := backend.HandleNetworkChange(op.Generation)
+			resetReport, err := backend.HandleNetworkChange(op.Generation)
 			health := backend.CurrentHealth()
 			if health.CheckedAt.IsZero() {
 				health = backend.RefreshHealth()
@@ -384,7 +496,12 @@ func (o *Orchestrator) HandleNetworkChange() (Status, error) {
 					health.CheckedAt = time.Now()
 				}
 			}
-			return operationCompletion{err: err, health: health, applied: applied}
+			return operationCompletion{
+				err:         err,
+				health:      health,
+				applied:     applied,
+				resetReport: firstResetReport(resetReport, resetReportFromError(err)),
+			}
 		},
 	)
 }
@@ -411,9 +528,11 @@ func (o *Orchestrator) RunOperation(kind OperationKind, phase Phase, fn func(gen
 			err := fn(op.Generation)
 			if err != nil {
 				health := healthFromError(err)
+				resetReport := resetReportFromError(err)
 				return operationCompletion{
-					err:    err,
-					health: health,
+					err:         err,
+					health:      health,
+					resetReport: resetReport,
 					applied: AppliedState{
 						BackendKind:     active.BackendKind,
 						Phase:           phaseFromHealth(health, PhaseFailed),
@@ -522,6 +641,7 @@ func (o *Orchestrator) beginOperationLocked(kind OperationKind, phase Phase) Ope
 		StartedAt:   time.Now(),
 	}
 	o.active = cloneOperation(op)
+	o.activeStuckLogged = false
 	return op
 }
 
@@ -535,7 +655,14 @@ func (o *Orchestrator) submitLocked(
 	if configure != nil {
 		configure(op)
 	}
-	status := o.statusLocked()
+	status := o.statusLockedWithoutStuckLog()
+	o.logLocked(OperationLogEvent{
+		OperationID: op.OperationID,
+		Kind:        op.Kind,
+		Generation:  op.Generation,
+		Phase:       op.Phase,
+		Result:      "accepted",
+	})
 	o.mu.Unlock()
 
 	go o.runSubmittedOperation(op, run)
@@ -592,16 +719,60 @@ func (o *Orchestrator) finishOperationLocked(op OperationStatus, completion oper
 	if o.active != nil && o.active.OperationID == op.OperationID {
 		o.active = nil
 	}
+	result := "ok"
+	if completion.err != nil {
+		result = "failed"
+	}
+	step := operationStepFromHealth(o.health)
+	if step.Name == "" && o.active != nil && o.active.OperationID == op.OperationID {
+		step = operationStep{
+			Name:   o.active.Step,
+			Status: o.active.StepStatus,
+			Code:   o.active.StepCode,
+			Detail: o.active.StepDetail,
+		}
+	}
+	logEvent := OperationLogEvent{
+		OperationID:  op.OperationID,
+		Kind:         op.Kind,
+		Generation:   op.Generation,
+		Phase:        o.applied.Phase,
+		Step:         step.Name,
+		StepStatus:   step.Status,
+		StepDetail:   step.Detail,
+		Result:       result,
+		ErrorCode:    errorCode(completion.err),
+		RuntimeMS:    int64(time.Since(op.StartedAt) / time.Millisecond),
+		ErrorMessage: "",
+	}
+	if completion.err != nil {
+		logEvent.ErrorMessage = completion.err.Error()
+		if logEvent.ErrorCode == "" {
+			logEvent.ErrorCode = completion.health.LastCode
+		}
+	}
+	if o.watchdogAfter > 0 {
+		logEvent.Stuck = time.Since(op.StartedAt) > o.watchdogAfter
+	}
+	o.logLocked(logEvent)
 }
 
 func (o *Orchestrator) busyLocked() error {
 	if o.active == nil {
 		return nil
 	}
-	return NewRuntimeBusyError(*o.active)
+	return NewRuntimeBusyError(*o.cloneActiveOperationLocked(time.Now()))
 }
 
 func (o *Orchestrator) statusLocked() Status {
+	return o.statusLockedWithStuckLog(true)
+}
+
+func (o *Orchestrator) statusLockedWithoutStuckLog() Status {
+	return o.statusLockedWithStuckLog(false)
+}
+
+func (o *Orchestrator) statusLockedWithStuckLog(logStuck bool) Status {
 	caps := make([]BackendCapability, 0, len(o.backends))
 	for _, kind := range []BackendKind{BackendRootTProxy} {
 		backend, ok := o.backends[kind]
@@ -617,7 +788,23 @@ func (o *Orchestrator) statusLocked() Status {
 	}
 	var active *OperationStatus
 	if o.active != nil {
-		active = cloneOperation(*o.active)
+		active = o.cloneActiveOperationLocked(time.Now())
+		if logStuck && active.Stuck && active.RuntimeMS > 0 && !o.activeStuckLogged {
+			o.activeStuckLogged = true
+			o.logLocked(OperationLogEvent{
+				OperationID: active.OperationID,
+				Kind:        active.Kind,
+				Generation:  active.Generation,
+				Phase:       active.Phase,
+				Step:        active.Step,
+				StepStatus:  active.StepStatus,
+				StepDetail:  active.StepDetail,
+				Result:      "stuck",
+				ErrorCode:   "OPERATION_STUCK",
+				RuntimeMS:   active.RuntimeMS,
+				Stuck:       true,
+			})
+		}
 	}
 	var last *OperationResult
 	if o.last != nil {
@@ -628,8 +815,56 @@ func (o *Orchestrator) statusLocked() Status {
 		AppliedState:    o.applied,
 		Health:          o.health,
 		Capabilities:    caps,
+		Compatibility:   cloneCompatibilityStatus(o.compatibility),
 		ActiveOperation: active,
 		LastOperation:   last,
+	}
+}
+
+func cloneCompatibilityStatus(compatibility CompatibilityStatus) CompatibilityStatus {
+	copy := compatibility
+	copy.Capabilities = append([]string(nil), compatibility.Capabilities...)
+	copy.SupportedMethods = append([]string(nil), compatibility.SupportedMethods...)
+	return copy
+}
+
+func (o *Orchestrator) cloneActiveOperationLocked(now time.Time) *OperationStatus {
+	if o.active == nil {
+		return nil
+	}
+	copy := *o.active
+	runtimeMS := int64(now.Sub(copy.StartedAt) / time.Millisecond)
+	if runtimeMS < 0 {
+		runtimeMS = 0
+	}
+	copy.RuntimeMS = runtimeMS
+	if o.watchdogAfter > 0 {
+		copy.WatchdogAfterMS = durationMillisCeil(o.watchdogAfter)
+		copy.Stuck = now.Sub(copy.StartedAt) > o.watchdogAfter
+	}
+	if step := operationStepFromHealth(o.health); step.Name != "" {
+		copy.Step = step.Name
+		copy.StepStatus = step.Status
+		copy.StepCode = step.Code
+		copy.StepDetail = step.Detail
+	}
+	return &copy
+}
+
+func durationMillisCeil(duration time.Duration) int64 {
+	ms := int64(duration / time.Millisecond)
+	if duration%time.Millisecond != 0 {
+		ms++
+	}
+	if ms < 1 {
+		return 1
+	}
+	return ms
+}
+
+func (o *Orchestrator) logLocked(event OperationLogEvent) {
+	if o.logger != nil {
+		o.logger(event)
 	}
 }
 
@@ -752,6 +987,192 @@ type runtimeRollbackError interface {
 
 type runtimeStageReportError interface {
 	RuntimeStageReport() interface{}
+}
+
+type runtimeResetReportError interface {
+	RuntimeResetReport() ResetReport
+}
+
+type operationStep struct {
+	Name   string
+	Status string
+	Code   string
+	Detail string
+}
+
+func operationHealthHasProgress(health HealthSnapshot) bool {
+	return health.StageReport != nil ||
+		health.LastCode != "" ||
+		health.LastError != "" ||
+		!health.CheckedAt.IsZero()
+}
+
+func mergeOperationProgress(current HealthSnapshot, progress HealthSnapshot) HealthSnapshot {
+	if progress.StageReport != nil {
+		current.StageReport = progress.StageReport
+	}
+	if progress.LastCode != "" {
+		current.LastCode = progress.LastCode
+	}
+	if progress.LastError != "" {
+		current.LastError = progress.LastError
+	}
+	if progress.LastUserMessage != "" {
+		current.LastUserMessage = progress.LastUserMessage
+	}
+	if progress.LastDebug != "" {
+		current.LastDebug = progress.LastDebug
+	}
+	if progress.RollbackApplied {
+		current.RollbackApplied = true
+	}
+	if !progress.CheckedAt.IsZero() {
+		current.CheckedAt = progress.CheckedAt
+	}
+	if len(progress.Checks) > 0 {
+		current.Checks = progress.Checks
+	}
+	return current
+}
+
+func operationStepFromHealth(health HealthSnapshot) operationStep {
+	return operationStepFromReport(health.StageReport)
+}
+
+func operationStepFromReport(report interface{}) operationStep {
+	if report == nil {
+		return operationStep{}
+	}
+	if step := operationStepFromMap(report); step.Name != "" {
+		return step
+	}
+	return operationStepFromStruct(reflect.ValueOf(report))
+}
+
+func operationStepFromMap(report interface{}) operationStep {
+	obj, ok := report.(map[string]interface{})
+	if !ok {
+		return operationStep{}
+	}
+	failedStage, _ := obj["failedStage"].(string)
+	stages, _ := obj["stages"].([]interface{})
+	if failedStage != "" {
+		for _, rawStage := range stages {
+			stage := operationStageFromMap(rawStage)
+			if stage.Name == failedStage {
+				return stage
+			}
+		}
+		return operationStep{Name: failedStage, Status: "failed"}
+	}
+	for i := len(stages) - 1; i >= 0; i-- {
+		if stage := operationStageFromMap(stages[i]); stage.Name != "" {
+			return stage
+		}
+	}
+	return operationStep{}
+}
+
+func operationStageFromMap(raw interface{}) operationStep {
+	stage, ok := raw.(map[string]interface{})
+	if !ok {
+		return operationStep{}
+	}
+	return operationStep{
+		Name:   stringFromMap(stage, "name"),
+		Status: stringFromMap(stage, "status"),
+		Code:   stringFromMap(stage, "code"),
+		Detail: stringFromMap(stage, "detail"),
+	}
+}
+
+func stringFromMap(obj map[string]interface{}, key string) string {
+	value, _ := obj[key].(string)
+	return value
+}
+
+func operationStepFromStruct(value reflect.Value) operationStep {
+	if !value.IsValid() {
+		return operationStep{}
+	}
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return operationStep{}
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return operationStep{}
+	}
+	failedStage := stringField(value, "FailedStage")
+	stages := value.FieldByName("Stages")
+	if stages.IsValid() && stages.Kind() == reflect.Slice {
+		if failedStage != "" {
+			for i := 0; i < stages.Len(); i++ {
+				stage := operationStepFromStageValue(stages.Index(i))
+				if stage.Name == failedStage {
+					return stage
+				}
+			}
+			return operationStep{Name: failedStage, Status: "failed"}
+		}
+		for i := stages.Len() - 1; i >= 0; i-- {
+			if stage := operationStepFromStageValue(stages.Index(i)); stage.Name != "" {
+				return stage
+			}
+		}
+	}
+	return operationStep{}
+}
+
+func operationStepFromStageValue(value reflect.Value) operationStep {
+	if !value.IsValid() {
+		return operationStep{}
+	}
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return operationStep{}
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return operationStep{}
+	}
+	return operationStep{
+		Name:   stringField(value, "Name"),
+		Status: stringField(value, "Status"),
+		Code:   stringField(value, "Code"),
+		Detail: stringField(value, "Detail"),
+	}
+}
+
+func stringField(value reflect.Value, name string) string {
+	field := value.FieldByName(name)
+	if !field.IsValid() || field.Kind() != reflect.String {
+		return ""
+	}
+	return field.String()
+}
+
+func resetReportFromError(err error) *ResetReport {
+	if err == nil {
+		return nil
+	}
+	var withReport runtimeResetReportError
+	if errors.As(err, &withReport) {
+		report := withReport.RuntimeResetReport()
+		return cloneResetReport(report)
+	}
+	return nil
+}
+
+func firstResetReport(reports ...*ResetReport) *ResetReport {
+	for _, report := range reports {
+		if report != nil {
+			return report
+		}
+	}
+	return nil
 }
 
 func healthFromError(err error) HealthSnapshot {

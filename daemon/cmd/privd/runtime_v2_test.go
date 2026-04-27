@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
@@ -313,13 +314,319 @@ func TestRuntimeStartFailsWhileResetLockPresent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := (&rootBackendV2{d: d}).Start(runtimev2.DesiredState{BackendKind: runtimev2.BackendRootTProxy})
+	_, err := (&rootBackendV2{d: d}).Start(runtimev2.DesiredState{BackendKind: runtimev2.BackendRootTProxy}, 1)
 	if err == nil || !strings.Contains(err.Error(), "reset is in progress") {
 		t.Fatalf("expected reset-in-progress error, got %v", err)
 	}
 	rpcErr := d.rpcErrorFromRuntimeError(err)
 	if rpcErr.Code != ipc.CodeRuntimeBusy {
 		t.Fatalf("expected runtime busy RPC code, got %#v", rpcErr)
+	}
+}
+
+func TestRecoverStaleResetLockRunsStructuredCleanup(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	old := time.Now().Add(-resetLockStaleAfter - time.Minute).Format(time.RFC3339)
+	if err := os.WriteFile(d.resetLockPath(), []byte(old+"\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(d.activeFilePath(), []byte("active\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := d.recoverStaleResetLock(12)
+	if err != nil {
+		t.Fatalf("stale lock recovery should succeed: %v", err)
+	}
+	if report == nil || report.Generation != 12 || report.Status != "ok" {
+		t.Fatalf("expected structured recovery report, got %#v", report)
+	}
+	if _, err := os.Stat(d.resetLockPath()); !os.IsNotExist(err) {
+		t.Fatalf("stale reset lock should be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(d.activeFilePath()); !os.IsNotExist(err) {
+		t.Fatalf("stale recovery should clear active marker, stat err=%v", err)
+	}
+}
+
+func TestRecoverFreshResetLockStillBlocks(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	if err := os.WriteFile(d.resetLockPath(), []byte(time.Now().Format(time.RFC3339)+"\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := d.recoverStaleResetLock(13)
+	if report != nil {
+		t.Fatalf("fresh reset lock must not run cleanup, got %#v", report)
+	}
+	if !isRuntimeBusyCode(err, runtimev2.BusyCodeResetInProgress) {
+		t.Fatalf("expected reset-in-progress busy error, got %T %v", err, err)
+	}
+}
+
+func TestBackendStatusIncludesCompatibilitySnapshot(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.initRuntimeV2()
+
+	payload, rpcErr := d.handleBackendStatus(nil)
+	if rpcErr != nil {
+		t.Fatalf("backend status failed: %#v", rpcErr)
+	}
+	status, ok := payload.(runtimev2.Status)
+	if !ok {
+		t.Fatalf("unexpected status payload type %T", payload)
+	}
+	if status.Compatibility.ControlProtocolVersion != controlProtocolVersion {
+		t.Fatalf("expected control protocol in backend.status, got %#v", status.Compatibility)
+	}
+	if status.Compatibility.SchemaVersion != config.CurrentSchemaVersion {
+		t.Fatalf("expected schema version in backend.status, got %#v", status.Compatibility)
+	}
+	if !containsString(status.Compatibility.Capabilities, "backend.root-tproxy") {
+		t.Fatalf("expected daemon capabilities in backend.status, got %#v", status.Compatibility.Capabilities)
+	}
+	if !containsString(status.Compatibility.SupportedMethods, "backend.status") {
+		t.Fatalf("expected supported methods in backend.status, got %#v", status.Compatibility.SupportedMethods)
+	}
+}
+
+func TestLegacyStartUsesRuntimeActorWhenAlreadyRunning(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.initRuntimeV2()
+	d.coreMgr.SetState(core.StateRunning)
+
+	payload, rpcErr := d.handleStart(nil)
+	if rpcErr != nil {
+		t.Fatalf("legacy start should be idempotent through runtime actor, got %#v", rpcErr)
+	}
+	status, ok := payload.(runtimev2.Status)
+	if !ok {
+		t.Fatalf("unexpected start payload type %T", payload)
+	}
+	if status.ActiveOperation == nil || status.ActiveOperation.Kind != runtimev2.OperationStart {
+		t.Fatalf("expected start operation record, got %#v", status.ActiveOperation)
+	}
+}
+
+func TestLegacyStartRecordsMissingNodeFailure(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.cfg.Node.Address = ""
+	d.cfg.Panel.Nodes = nil
+	d.initRuntimeV2()
+
+	if _, rpcErr := d.handleStart(nil); rpcErr != nil {
+		t.Fatalf("legacy start should accept through runtime actor, got %#v", rpcErr)
+	}
+	status := waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationStart)
+	if status.LastOperation == nil || status.LastOperation.Succeeded {
+		t.Fatalf("expected failed start operation, got %#v", status.LastOperation)
+	}
+	if !strings.Contains(status.LastOperation.ErrorMessage, "no node configured") {
+		t.Fatalf("expected missing node error in operation result, got %#v", status.LastOperation)
+	}
+}
+
+func TestLegacyReloadReturnsRuntimeStatus(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.panelPath = config.PanelPath(d.cfgPath)
+	if err := d.cfg.Save(d.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	d.initRuntimeV2()
+	d.coreMgr.SetState(core.StateRunning)
+
+	payload, rpcErr := d.handleReload(nil)
+	if rpcErr != nil {
+		t.Fatalf("reload failed: %#v", rpcErr)
+	}
+	status, ok := payload.(runtimev2.Status)
+	if !ok {
+		t.Fatalf("reload should return runtime status, got %T", payload)
+	}
+	if !statusHasOperation(status, runtimev2.OperationReload) {
+		t.Fatalf("reload response should expose reload operation, got %#v", status)
+	}
+}
+
+func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.panelPath = config.PanelPath(d.cfgPath)
+	d.initRuntimeV2()
+	d.coreMgr.SetState(core.StateRunning)
+
+	raw, err := json.Marshal(d.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := json.RawMessage(raw)
+	payload, rpcErr := d.handleConfigImport(&params)
+	if rpcErr != nil {
+		t.Fatalf("config import failed: %#v", rpcErr)
+	}
+	result, ok := payload.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected import payload type %T", payload)
+	}
+	if result["status"] != "imported" || result["reload"] != true {
+		t.Fatalf("unexpected import payload %#v", result)
+	}
+	status, ok := result["runtimeStatus"].(runtimev2.Status)
+	if !ok {
+		t.Fatalf("runtimeStatus missing from import payload: %#v", result)
+	}
+	if !statusHasOperation(status, runtimev2.OperationReload) {
+		t.Fatalf("config import should expose reload operation, got %#v", status)
+	}
+}
+
+func TestReloadConfigApplyBusyDoesNotPersistConfig(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.panelPath = config.PanelPath(d.cfgPath)
+	d.initRuntimeV2()
+	if err := d.cfg.Save(d.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	originalURL := d.cfg.Health.URL
+
+	release := make(chan struct{})
+	if _, err := d.runtimeV2.RunOperation(runtimev2.OperationStart, runtimev2.PhaseStarting, func(int64) error {
+		<-release
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer close(release)
+
+	nextCfg := *d.cfg
+	nextCfg.Health.URL = "https://changed.invalid/generate_204"
+	err := d.applyConfig(&nextCfg, true)
+	if !isRuntimeBusyCode(err, runtimev2.BusyCodeRuntimeBusy) {
+		t.Fatalf("expected runtime busy before config write, got %T %v", err, err)
+	}
+
+	reloaded, err := config.Load(d.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Health.URL != originalURL {
+		t.Fatalf("config was persisted while runtime busy: got %q want %q", reloaded.Health.URL, originalURL)
+	}
+}
+
+func TestConfigApplyWithoutReloadBusyDoesNotPersistConfig(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.panelPath = config.PanelPath(d.cfgPath)
+	d.initRuntimeV2()
+	if err := d.cfg.Save(d.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	originalURL := d.cfg.Health.URL
+
+	release := make(chan struct{})
+	if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReset, runtimev2.PhaseResetting, func(int64) error {
+		<-release
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer close(release)
+
+	nextCfg := *d.cfg
+	nextCfg.Health.URL = "https://changed-without-reload.invalid/generate_204"
+	err := d.applyConfig(&nextCfg, false)
+	if !isRuntimeBusyCode(err, runtimev2.BusyCodeResetInProgress) {
+		t.Fatalf("expected runtime busy before config write, got %T %v", err, err)
+	}
+
+	reloaded, err := config.Load(d.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Health.URL != originalURL {
+		t.Fatalf("config was persisted while runtime busy: got %q want %q", reloaded.Health.URL, originalURL)
+	}
+}
+
+func TestPanelApplyWithoutReloadBusyDoesNotPersistPanel(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.panelPath = config.PanelPath(d.cfgPath)
+	d.initRuntimeV2()
+	originalPanel := d.cfg.Panel
+	originalPanel.ActiveNodeID = "original"
+	if err := config.SavePanel(d.panelPath, originalPanel); err != nil {
+		t.Fatal(err)
+	}
+	d.cfg.Panel = originalPanel
+
+	release := make(chan struct{})
+	if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(int64) error {
+		<-release
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer close(release)
+
+	nextPanel := originalPanel
+	nextPanel.ActiveNodeID = "changed"
+	err := d.applyPanelConfig(nextPanel, false)
+	if !isRuntimeBusyCode(err, runtimev2.BusyCodeRuntimeBusy) {
+		t.Fatalf("expected runtime busy before panel write, got %T %v", err, err)
+	}
+
+	data, err := os.ReadFile(d.panelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reloaded config.PanelConfig
+	if err := json.Unmarshal(data, &reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ActiveNodeID != originalPanel.ActiveNodeID {
+		t.Fatalf("panel was persisted while runtime busy: got %q want %q", reloaded.ActiveNodeID, originalPanel.ActiveNodeID)
+	}
+}
+
+func TestConfigSetReturnsRuntimeStatus(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.panelPath = config.PanelPath(d.cfgPath)
+	d.initRuntimeV2()
+	if err := d.cfg.Save(d.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	rawHealth, err := json.Marshal(d.cfg.Health)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paramsRaw, err := json.Marshal(map[string]json.RawMessage{
+		"key":   json.RawMessage(`"health"`),
+		"value": rawHealth,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := json.RawMessage(paramsRaw)
+
+	payload, rpcErr := d.handleConfigSet(&params)
+	if rpcErr != nil {
+		t.Fatalf("config set failed: %#v", rpcErr)
+	}
+	result, ok := payload.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected config-set payload type %T", payload)
+	}
+	if result["status"] != "ok" || result["reload"] != false || result["updated"] != 1 {
+		t.Fatalf("unexpected config-set result %#v", result)
+	}
+	if _, ok := result["runtimeStatus"].(runtimev2.Status); !ok {
+		t.Fatalf("runtimeStatus missing from config-set result: %#v", result)
 	}
 }
 
@@ -492,6 +799,42 @@ func resetReportStep(report runtimev2.ResetReport, name string) runtimev2.ResetS
 		}
 	}
 	return runtimev2.ResetStep{}
+}
+
+func isRuntimeBusyCode(err error, code string) bool {
+	var busy *runtimev2.OperationBusyError
+	return errors.As(err, &busy) && busy.Code == code
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func statusHasOperation(status runtimev2.Status, kind runtimev2.OperationKind) bool {
+	if status.ActiveOperation != nil && status.ActiveOperation.Kind == kind {
+		return true
+	}
+	return status.LastOperation != nil && status.LastOperation.Kind == kind
+}
+
+func waitForDaemonRuntimeOperationDone(t *testing.T, orchestrator *runtimev2.Orchestrator, kind runtimev2.OperationKind) runtimev2.Status {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		status := orchestrator.Status()
+		if status.ActiveOperation == nil && status.LastOperation != nil && status.LastOperation.Kind == kind {
+			return status
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s operation to finish, status=%#v", kind, status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestBuildScriptEnvUsesExplicitDNSScopeForBlacklist(t *testing.T) {

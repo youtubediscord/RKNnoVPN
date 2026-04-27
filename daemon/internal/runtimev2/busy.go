@@ -60,6 +60,13 @@ func (e *OperationBusyError) Data() map[string]interface{} {
 		data["phase"] = e.Active.Phase
 		data["generation"] = e.Active.Generation
 		data["startedAt"] = e.Active.StartedAt
+		data["step"] = e.Active.Step
+		data["stepStatus"] = e.Active.StepStatus
+		data["stepCode"] = e.Active.StepCode
+		data["stepDetail"] = e.Active.StepDetail
+		data["runtimeMs"] = e.Active.RuntimeMS
+		data["watchdogAfterMs"] = e.Active.WatchdogAfterMS
+		data["stuck"] = e.Active.Stuck
 	}
 	return data
 }

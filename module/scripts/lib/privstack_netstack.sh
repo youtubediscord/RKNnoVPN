@@ -81,7 +81,7 @@ privstack_delete_policy_routes() {
 
 privstack_collect_netstack_leftovers() {
     _leftovers=""
-    for _ipt in iptables ip6tables; do
+    for _ipt in iptables ip6tables iptables-legacy ip6tables-legacy iptables-nft ip6tables-nft; do
         command -v "$_ipt" >/dev/null 2>&1 || continue
         for _table in raw mangle nat filter; do
             _out="$($_ipt $IPT_WAIT -t "$_table" -S 2>/dev/null | grep PRIVSTACK | head -n 1)"

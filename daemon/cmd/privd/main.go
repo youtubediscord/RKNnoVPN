@@ -203,6 +203,37 @@ func main() {
 		ipcServer:  ipc.NewServer(socketPath),
 	}
 	d.initRuntimeV2()
+	d.runtimeV2.SetOperationLogger(func(event runtimev2.OperationLogEvent) {
+		fields := []string{
+			"runtime_operation",
+			"operation=" + string(event.Kind),
+			"generation=" + strconv.FormatInt(event.Generation, 10),
+			"phase=" + string(event.Phase),
+			"result=" + event.Result,
+		}
+		if event.RuntimeMS > 0 {
+			fields = append(fields, "runtime_ms="+strconv.FormatInt(event.RuntimeMS, 10))
+		}
+		if event.Step != "" {
+			fields = append(fields, "step="+event.Step)
+		}
+		if event.StepStatus != "" {
+			fields = append(fields, "step_status="+event.StepStatus)
+		}
+		if event.StepDetail != "" {
+			fields = append(fields, "step_detail="+strconv.Quote(event.StepDetail))
+		}
+		if event.ErrorCode != "" {
+			fields = append(fields, "code="+event.ErrorCode)
+		}
+		if event.Stuck {
+			fields = append(fields, "stuck=true")
+		}
+		if event.ErrorMessage != "" {
+			fields = append(fields, "error="+strconv.Quote(event.ErrorMessage))
+		}
+		log.Print(strings.Join(fields, " "))
+	})
 
 	d.healthMon.SetOnDegraded(func() {
 		epoch := d.currentRuntimeOperationEpoch()
@@ -260,7 +291,9 @@ func main() {
 
 	if cfg.Autostart && fileMissing(filepath.Join(*dataDir, "config", "manual")) {
 		log.Printf("autostart enabled, starting proxy")
-		d.syncRuntimeV2DesiredState()
+		if err := d.syncRuntimeV2DesiredState(); err != nil {
+			log.Printf("autostart desired state sync failed: %v", err)
+		}
 		if _, err := d.runtimeV2.Start(); err != nil {
 			log.Printf("autostart failed: %v", err)
 		}
@@ -483,26 +516,9 @@ func (d *daemon) shouldKickAsyncHealth(state core.State, healthResult *health.He
 }
 
 func (d *daemon) handleStart(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	state := d.coreMgr.GetState()
-	if state == core.StateRunning || state == core.StateStarting {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeProxyAlready,
-			Message: fmt.Sprintf("proxy already %s", state),
-		}
+	if err := d.syncRuntimeV2DesiredState(); err != nil {
+		return nil, d.rpcErrorFromRuntimeError(err)
 	}
-
-	d.mu.Lock()
-	profile := d.cfg.ResolveProfile()
-	hasPanelNodes := len(d.cfg.Panel.Nodes) > 0
-	d.mu.Unlock()
-
-	if profile.Address == "" && !hasPanelNodes {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeConfigError,
-			Message: "no node configured (address is empty)",
-		}
-	}
-	d.syncRuntimeV2DesiredState()
 	status, err := d.runtimeV2.Start()
 	if err != nil {
 		return nil, d.rpcErrorFromRuntimeError(err)
@@ -522,7 +538,7 @@ func (d *daemon) handleReload(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	if err := d.reloadConfig(); err != nil {
 		return nil, d.rpcErrorFromRuntimeError(err)
 	}
-	return map[string]string{"status": "reloaded"}, nil
+	return d.runtimeV2.Status(), nil
 }
 
 func (d *daemon) handleNetworkReset(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -544,6 +560,9 @@ func (d *daemon) rpcErrorFromRuntimeError(err error) *ipc.RPCError {
 			Message: busy.Error(),
 			Data:    busy.Data(),
 		}
+	}
+	if strings.Contains(err.Error(), "no node configured") {
+		return &ipc.RPCError{Code: ipc.CodeConfigError, Message: err.Error()}
 	}
 	return &ipc.RPCError{Code: ipc.CodeInternalError, Message: err.Error()}
 }
@@ -1047,7 +1066,12 @@ func (d *daemon) handleConfigSet(params *json.RawMessage) (interface{}, *ipc.RPC
 	if err := d.applyConfig(newCfg, false); err != nil {
 		return nil, d.configApplyRPCError(err)
 	}
-	return map[string]string{"status": "ok"}, nil
+	return map[string]interface{}{
+		"status":        "ok",
+		"reload":        false,
+		"updated":       1,
+		"runtimeStatus": d.runtimeV2.Status(),
+	}, nil
 }
 
 func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -1180,7 +1204,11 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 		}
 	}
 
-	return map[string]string{"status": "imported"}, nil
+	return map[string]interface{}{
+		"status":        "imported",
+		"reload":        true,
+		"runtimeStatus": d.runtimeV2.Status(),
+	}, nil
 }
 
 func (d *daemon) buildPatchedConfig(full map[string]json.RawMessage) (*config.Config, *ipc.RPCError) {
@@ -1234,9 +1262,24 @@ func (d *daemon) configApplyRPCError(err error) *ipc.RPCError {
 	return rpcErr
 }
 
+func (d *daemon) failIfRuntimeOperationActive() error {
+	if d.runtimeV2 == nil {
+		return nil
+	}
+	status := d.runtimeV2.Status()
+	if status.ActiveOperation == nil {
+		return nil
+	}
+	return runtimev2.NewRuntimeBusyError(*status.ActiveOperation)
+}
+
 func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
 		d.coreMgr.GetState() == core.StateDegraded
+
+	if err := d.failIfRuntimeOperationActive(); err != nil {
+		return err
+	}
 
 	if err := newCfg.Save(d.cfgPath); err != nil {
 		return fmt.Errorf("persist config: %w", err)
@@ -1273,12 +1316,16 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 		routeMark = 0x2023
 	}
 	d.healthMon.SetConfig(healthInterval, healthThreshold, tproxyPort, dnsPort, routeMark, newCfg.Health.URL, newCfg.Health.DNSProbeDomains, newCfg.Health.DNSIsHardReadiness, healthTimeout)
-	d.netWatcher.SetEnv(buildScriptEnv(newCfg, d.dataDir))
-	d.syncRuntimeV2DesiredState()
+	if d.netWatcher != nil {
+		d.netWatcher.SetEnv(buildScriptEnv(newCfg, d.dataDir))
+	}
+	if err := d.syncRuntimeV2DesiredState(); err != nil {
+		return fmt.Errorf("config saved: sync runtime desired state: %w", err)
+	}
 
 	if reload && wasRunning {
 		if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(generation int64) error {
-			return d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved")
+			return d.reloadRuntimeAfterConfigChange(newCfg, "apply config", "config saved", generation)
 		}); err != nil {
 			return fmt.Errorf("config saved: %w", err)
 		}
@@ -1290,6 +1337,10 @@ func (d *daemon) applyConfig(newCfg *config.Config, reload bool) error {
 func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) error {
 	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
 		d.coreMgr.GetState() == core.StateDegraded
+
+	if err := d.failIfRuntimeOperationActive(); err != nil {
+		return err
+	}
 
 	d.mu.Lock()
 	nextCfg := *d.cfg
@@ -1310,12 +1361,16 @@ func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) erro
 	d.mu.Unlock()
 
 	d.coreMgr.SetConfig(currentCfg)
-	d.netWatcher.SetEnv(buildScriptEnv(currentCfg, d.dataDir))
-	d.syncRuntimeV2DesiredState()
+	if d.netWatcher != nil {
+		d.netWatcher.SetEnv(buildScriptEnv(currentCfg, d.dataDir))
+	}
+	if err := d.syncRuntimeV2DesiredState(); err != nil {
+		return fmt.Errorf("panel saved: sync runtime desired state: %w", err)
+	}
 
 	if reload && wasRunning {
 		if _, err := d.runtimeV2.RunOperation(runtimev2.OperationReload, runtimev2.PhaseStarting, func(generation int64) error {
-			return d.reloadRuntimeAfterConfigChange(currentCfg, "apply panel", "panel saved")
+			return d.reloadRuntimeAfterConfigChange(currentCfg, "apply panel", "panel saved", generation)
 		}); err != nil {
 			return fmt.Errorf("panel saved: %w", err)
 		}
@@ -1324,7 +1379,7 @@ func (d *daemon) applyPanelConfig(newPanel config.PanelConfig, reload bool) erro
 	return nil
 }
 
-func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string) error {
+func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context string, savedLabel string, generation int64) error {
 	if err := d.failIfResetInProgress(); err != nil {
 		return err
 	}
@@ -1344,18 +1399,24 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 	recordStage("stop-subsystems", "ok", "", "", false)
 	profile := cfg.ResolveProfile()
 	if err := d.coreMgr.HotSwap(profile); err != nil {
-		resetReport := d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		resetReport := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
 		recordStage("reset-after-hot-swap-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
 		err = failStage("hot-swap", runtimeErrorCode(err, "CORE_SPAWN_FAILED"), err, resetReport.Status != "ok")
-		return fmt.Errorf("%s hot-swap failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
+		return runtimeErrorWithResetReport(
+			fmt.Errorf("%s hot-swap failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
+			resetReport,
+		)
 	}
 	recordStage("hot-swap", "ok", "", d.coreMgr.LastRuntimeReport().Status, false)
 	netReport, err := d.reapplyRuntimeRulesReport(cfg)
 	if err != nil {
-		resetReport := d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		resetReport := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
 		recordStage("reset-after-netstack-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
 		err = failStage("netstack-reapply", runtimeErrorCode(err, "RULES_NOT_APPLIED"), err, resetReport.Status != "ok")
-		return fmt.Errorf("%s rules failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
+		return runtimeErrorWithResetReport(
+			fmt.Errorf("%s rules failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
+			resetReport,
+		)
 	}
 	recordStage("netstack-reapply", "ok", "", fmt.Sprintf("steps=%d", len(netReport.Steps)), false)
 	d.rescueMgr.Reset()
@@ -1364,11 +1425,14 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 	recordStage("start-subsystems", "ok", "", "", false)
 	snapshot := d.runtimeV2.RefreshHealth()
 	if !snapshot.Healthy() {
-		resetReport := d.resetNetworkStateReport(0, runtimev2.BackendRootTProxy)
+		resetReport := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
 		recordStage("reset-after-health-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
 		err := fmt.Errorf("%s", firstNonEmpty(snapshot.LastError, "readiness gates failed"))
 		err = failStage("health-refresh", firstNonEmpty(snapshot.LastCode, "READINESS_GATE_FAILED"), err, resetReport.Status != "ok")
-		return fmt.Errorf("%s readiness gates failed; %s, runtime stopped for safety: %w", context, savedLabel, err)
+		return runtimeErrorWithResetReport(
+			fmt.Errorf("%s readiness gates failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
+			resetReport,
+		)
 	}
 	recordStage("health-refresh", "ok", "", firstNonEmpty(snapshot.LastCode, "healthy"), false)
 	report.FinishOK()
@@ -2289,14 +2353,20 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		d.coreMgr.GetState() == core.StateDegraded
 
 	status, err := d.runtimeV2.RunOperation(runtimev2.OperationUpdateInstall, runtimev2.PhaseStopping, func(generation int64) error {
+		markStep := func(name, status, code, detail string) {
+			d.runtimeV2.SetActiveOperationStep(generation, name, status, code, detail)
+		}
 		moduleUpdated := false
 		defer func() {
 			if moduleUpdated {
+				markStep("update-schedule-self-exit", "ok", "", "daemon restart scheduled")
 				go updater.ScheduleSelfExit(updater.SelfExitDelay)
 			}
 		}()
 		if moduleExists {
+			markStep("update-stop-runtime", "running", "UPDATE_STOP_RUNTIME", "stopping runtime before module install")
 			if err := d.failIfResetInProgress(); err != nil {
+				markStep("update-stop-runtime", "failed", runtimeErrorCode(err, "RESET_IN_PROGRESS"), err.Error())
 				return err
 			}
 			// Stop subsystems before module update only when we are replacing the
@@ -2305,30 +2375,42 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 			if err := d.coreMgr.Stop(); err != nil {
 				log.Printf("[updater] warning: failed to stop core: %v", err)
 			}
+			markStep("update-stop-runtime", "ok", "", "")
 		}
 
 		// Install module (binaries + scripts + module files).
 		if moduleExists {
+			markStep("update-install-module", "running", "MODULE_INSTALLING", filepath.Base(p.ModulePath))
 			moduleDir := "/data/adb/modules/privstack"
 			if err := updater.InstallModuleUpdate(p.ModulePath, d.dataDir, moduleDir); err != nil {
 				if wasRunning {
 					d.restoreCurrentRuntimeAfterFailedUpdate()
 				}
+				markStep("update-install-module", "failed", "MODULE_INSTALL_FAILED", err.Error())
 				return fmt.Errorf("module install failed: %w", err)
 			}
 			moduleUpdated = true
+			markStep("update-install-module", "ok", "", "")
 		}
 
 		// Install APK.
 		if apkExists {
+			markStep("update-install-apk", "running", "APK_INSTALLING", filepath.Base(p.ApkPath))
 			if err := updater.InstallApkUpdate(p.ApkPath); err != nil {
 				log.Printf("[updater] APK install failed: %v", err)
+				markStep("update-install-apk", "failed", "APK_INSTALL_FAILED", err.Error())
 				return fmt.Errorf("apk install failed: %w", err)
 			}
+			markStep("update-install-apk", "ok", "", "")
 		}
 
 		// Clean up downloaded files.
-		os.RemoveAll(updateDir)
+		markStep("update-cleanup-downloads", "running", "UPDATE_CLEANUP", updateDir)
+		if err := os.RemoveAll(updateDir); err != nil {
+			markStep("update-cleanup-downloads", "failed", "UPDATE_CLEANUP_FAILED", err.Error())
+			return fmt.Errorf("update cleanup failed: %w", err)
+		}
+		markStep("update-cleanup-downloads", "ok", "", "")
 
 		return nil
 	})
