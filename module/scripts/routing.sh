@@ -23,6 +23,10 @@
 set -eu
 
 TAG="privstack:routing"
+SCRIPT_DIR="${0%/*}"
+if [ -f "${SCRIPT_DIR}/lib/privstack_env.sh" ]; then
+    . "${SCRIPT_DIR}/lib/privstack_env.sh"
+fi
 
 FWMARK="${FWMARK:-0x2023}"
 ROUTE_TABLE="${ROUTE_TABLE:-2023}"

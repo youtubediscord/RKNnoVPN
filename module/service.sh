@@ -27,6 +27,10 @@ BOOT_TIMEOUT=120
 SETTLE_DELAY=5
 OOM_SCORE_ADJ="${PRIVSTACK_OOM_SCORE_ADJ:-300}"
 
+if [ -f "${PRIVSTACK_DIR}/scripts/lib/privstack_env.sh" ]; then
+    . "${PRIVSTACK_DIR}/scripts/lib/privstack_env.sh"
+fi
+
 # ============================================================================
 # Logging
 # ============================================================================
@@ -178,6 +182,10 @@ sleep "$SETTLE_DELAY"
 # ============================================================================
 
 has_boot_cleanup_markers() {
+    if command -v privstack_has_boot_cleanup_markers >/dev/null 2>&1; then
+        privstack_has_boot_cleanup_markers
+        return $?
+    fi
     for marker in \
         "$PRIVSTACK_DIR/run/active" \
         "$PRIVSTACK_DIR/run/reset.lock" \

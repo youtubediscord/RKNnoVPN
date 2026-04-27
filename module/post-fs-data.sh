@@ -13,6 +13,10 @@ PRIVSTACK_DIR="/data/adb/privstack"
 PRIVSTACK_GID=23333
 TAG="privstack:post-fs-data"
 
+if [ -f "${MODDIR}/scripts/lib/privstack_env.sh" ]; then
+    . "${MODDIR}/scripts/lib/privstack_env.sh"
+fi
+
 # Subdirectories that must exist
 SUBDIRS="bin config config/rendered scripts run logs backup profiles"
 
@@ -172,16 +176,13 @@ else
 fi
 
 # ============================================================================
-# 6. Clean stale runtime files from previous boot
+# 6. Leave boot cleanup markers intact
 # ============================================================================
 
-# Remove stale PID file and socket — service.sh will create fresh ones
-rm -f "${PRIVSTACK_DIR}/run/privd.pid" 2>/dev/null
-rm -f "${PRIVSTACK_DIR}/run/daemon.sock" 2>/dev/null
-rm -f "${PRIVSTACK_DIR}/run/singbox.pid" 2>/dev/null
-rm -f "${PRIVSTACK_DIR}/run/active" 2>/dev/null
-rm -f "${PRIVSTACK_DIR}/run/reset.lock" 2>/dev/null
-
-log_info "Cleaned stale runtime files"
+# Runtime marker ownership belongs to rescue_reset.sh and service.sh boot-clean.
+# Do not remove run/active, run/reset.lock, PID files, sockets, env snapshots,
+# or iptables snapshots here: service.sh uses those markers to decide whether a
+# root-level cleanup is required before the daemon starts.
+log_info "Runtime markers left for service boot cleanup"
 
 log_info "post-fs-data initialization complete"

@@ -6,9 +6,11 @@
 # iptables backup. It removes only PrivStack-owned network artifacts.
 #
 # Modes:
-#   daemon-reset  - called by privd; keep privd socket/process alive
-#   --boot-clean  - called from service.sh before privd starts
-#   hard-reset    - external rescue; also kill privd and remove daemon socket
+#   daemon-reset    - called by privd; keep privd socket/process alive
+#   --boot-clean    - called from service.sh before privd starts
+#   hard-reset      - external rescue; also kill privd and remove daemon socket
+#   uninstall-clean - called by module removal; kill runtime without changing
+#                     user config/manual state
 # ============================================================================
 
 set +e
@@ -21,19 +23,23 @@ case "$MODE" in
     --boot-clean|boot-clean)
         MODE="boot-clean"
         ;;
-    daemon-reset|hard-reset|boot-clean)
+    daemon-reset|hard-reset|boot-clean|uninstall-clean)
         ;;
     *)
-        echo "Usage: $0 {daemon-reset|hard-reset|--boot-clean}" >&2
+        echo "Usage: $0 {daemon-reset|hard-reset|--boot-clean|uninstall-clean}" >&2
         exit 2
         ;;
 esac
 
-PRIVSTACK_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}"
-FWMARK="${FWMARK:-0x2023}"
-ROUTE_TABLE="${ROUTE_TABLE:-2023}"
-ROUTE_TABLE_V6="${ROUTE_TABLE_V6:-2024}"
-if [ -z "$IPT_WAIT" ]; then
+IPT_WAIT_WAS_SET="${IPT_WAIT+x}"
+SCRIPT_DIR="${0%/*}"
+if [ -f "${SCRIPT_DIR}/lib/privstack_env.sh" ]; then
+    . "${SCRIPT_DIR}/lib/privstack_env.sh"
+fi
+if [ -f "${SCRIPT_DIR}/lib/privstack_netstack.sh" ]; then
+    . "${SCRIPT_DIR}/lib/privstack_netstack.sh"
+fi
+if [ -z "$IPT_WAIT_WAS_SET" ]; then
     if [ "$MODE" = "boot-clean" ]; then
         IPT_WAIT="-w 3"
     else
@@ -41,11 +47,6 @@ if [ -z "$IPT_WAIT" ]; then
     fi
 fi
 
-RUN_DIR="$PRIVSTACK_DIR/run"
-CONFIG_DIR="$PRIVSTACK_DIR/config"
-RESET_LOCK="$RUN_DIR/reset.lock"
-ACTIVE_FILE="$RUN_DIR/active"
-MANUAL_FLAG="$CONFIG_DIR/manual"
 LOG_FILE="$PRIVSTACK_DIR/logs/rescue_reset.log"
 TAG="privstack:reset"
 
@@ -59,11 +60,10 @@ log() {
     echo "$*"
 }
 
-touch "$RESET_LOCK" 2>/dev/null
-rm -f "$ACTIVE_FILE" 2>/dev/null
+privstack_enter_reset_mode
 
-if [ "$MODE" != "boot-clean" ]; then
-    touch "$MANUAL_FLAG" 2>/dev/null
+if [ "$MODE" = "daemon-reset" ] || [ "$MODE" = "hard-reset" ]; then
+    privstack_set_manual_mode
 fi
 
 log "[1/8] asking daemon for graceful stop"
@@ -86,7 +86,7 @@ kill_matching_processes() {
                 kill "-$signal" "$pid" 2>/dev/null
                 ;;
             *"$PRIVSTACK_DIR/bin/privd"*|*" privd "*)
-                if [ "$MODE" = "hard-reset" ] || [ "$MODE" = "boot-clean" ]; then
+                if [ "$MODE" = "hard-reset" ] || [ "$MODE" = "boot-clean" ] || [ "$MODE" = "uninstall-clean" ]; then
                     log "$signal $pid :: $cmd"
                     kill "-$signal" "$pid" 2>/dev/null
                 fi
@@ -108,75 +108,16 @@ if [ -x "$PRIVSTACK_DIR/scripts/iptables.sh" ]; then
     IPT_WAIT="$IPT_WAIT" "$PRIVSTACK_DIR/scripts/iptables.sh" stop >/dev/null 2>&1 || true
 fi
 
-cleanup_ipt() {
-    ipt="$1"
-    command -v "$ipt" >/dev/null 2>&1 || return 0
-
-    for table in raw mangle nat filter; do
-        $ipt $IPT_WAIT -t "$table" -S >/dev/null 2>&1 || continue
-        log "cleaning $ipt table $table"
-
-        n=0
-        while [ "$n" -lt 200 ]; do
-            rule="$($ipt $IPT_WAIT -t "$table" -S 2>/dev/null | grep -E -- ' (-j|-g) PRIVSTACK' | head -n 1)"
-            [ -z "$rule" ] && break
-            del="$(printf '%s\n' "$rule" | sed 's/^-A /-D /')"
-            $ipt $IPT_WAIT -t "$table" $del 2>/dev/null || break
-            n=$((n + 1))
-        done
-
-        n=0
-        while [ "$n" -lt 200 ]; do
-            ch="$($ipt $IPT_WAIT -t "$table" -S 2>/dev/null | awk '/^-N PRIVSTACK/ {print $2; exit}')"
-            [ -z "$ch" ] && break
-            $ipt $IPT_WAIT -t "$table" -F "$ch" 2>/dev/null || true
-            $ipt $IPT_WAIT -t "$table" -X "$ch" 2>/dev/null || true
-            n=$((n + 1))
-        done
-    done
-}
-
 log "[4/8] deleting PrivStack iptables/ip6tables artifacts"
-cleanup_ipt iptables
-cleanup_ipt ip6tables
-cleanup_ipt iptables-legacy
-cleanup_ipt ip6tables-legacy
-cleanup_ipt iptables-nft
-cleanup_ipt ip6tables-nft
-
-delete_rules() {
-    i=0
-    while [ "$i" -lt 100 ]; do
-        ip rule del fwmark "$FWMARK" table "$ROUTE_TABLE" 2>/dev/null && { i=$((i + 1)); continue; }
-        ip rule del fwmark "$FWMARK" 2>/dev/null && { i=$((i + 1)); continue; }
-        ip rule del table "$ROUTE_TABLE" 2>/dev/null && { i=$((i + 1)); continue; }
-        break
-    done
-
-    i=0
-    while [ "$i" -lt 100 ]; do
-        ip -6 rule del fwmark "$FWMARK" table "$ROUTE_TABLE_V6" 2>/dev/null && { i=$((i + 1)); continue; }
-        ip -6 rule del fwmark "$FWMARK" 2>/dev/null && { i=$((i + 1)); continue; }
-        ip -6 rule del table "$ROUTE_TABLE_V6" 2>/dev/null && { i=$((i + 1)); continue; }
-        break
-    done
-}
+privstack_cleanup_iptables_all
 
 log "[5/8] deleting PrivStack policy routing"
-delete_rules
-ip route del local default dev lo table "$ROUTE_TABLE" 2>/dev/null || true
-ip route flush table "$ROUTE_TABLE" 2>/dev/null || true
-ip -6 route del local default dev lo table "$ROUTE_TABLE_V6" 2>/dev/null || true
-ip -6 route flush table "$ROUTE_TABLE_V6" 2>/dev/null || true
+privstack_delete_policy_routes
 
 log "[6/8] removing stale runtime files"
-rm -f "$RUN_DIR/singbox.pid" 2>/dev/null
-rm -f "$RUN_DIR/net_change.lock" 2>/dev/null
-rm -f "$RUN_DIR/env.sh" 2>/dev/null
-rm -f "$RUN_DIR/iptables.rules" "$RUN_DIR/ip6tables.rules" 2>/dev/null
-rm -f "$RUN_DIR/iptables_backup.rules" "$RUN_DIR/ip6tables_backup.rules" 2>/dev/null
-if [ "$MODE" = "hard-reset" ] || [ "$MODE" = "boot-clean" ]; then
-    rm -f "$RUN_DIR/privd.pid" "$RUN_DIR/daemon.sock" 2>/dev/null
+privstack_remove_runtime_snapshots
+if [ "$MODE" = "hard-reset" ] || [ "$MODE" = "boot-clean" ] || [ "$MODE" = "uninstall-clean" ]; then
+    privstack_remove_daemon_runtime_files
 fi
 
 leftovers=""
@@ -189,26 +130,12 @@ add_leftover() {
 }
 
 log "[7/8] verifying cleanup"
-for ipt in iptables ip6tables; do
-    command -v "$ipt" >/dev/null 2>&1 || continue
-    for table in raw mangle nat filter; do
-        out="$($ipt $IPT_WAIT -t "$table" -S 2>/dev/null | grep PRIVSTACK | head -n 1)"
-        [ -n "$out" ] && add_leftover "$ipt/$table: $out"
-    done
-done
-
-out="$(ip rule show 2>/dev/null | grep -E "$ROUTE_TABLE|$FWMARK" | head -n 1)"
-[ -n "$out" ] && add_leftover "ip rule: $out"
-out="$(ip -6 rule show 2>/dev/null | grep -E "$ROUTE_TABLE_V6|$FWMARK" | head -n 1)"
-[ -n "$out" ] && add_leftover "ip -6 rule: $out"
-out="$(ip route show table "$ROUTE_TABLE" 2>/dev/null | head -n 1)"
-[ -n "$out" ] && add_leftover "ip route table $ROUTE_TABLE: $out"
-out="$(ip -6 route show table "$ROUTE_TABLE_V6" 2>/dev/null | head -n 1)"
-[ -n "$out" ] && add_leftover "ip -6 route table $ROUTE_TABLE_V6: $out"
+out="$(privstack_collect_netstack_leftovers)"
+[ -n "$out" ] && add_leftover "$out"
 
 log "[8/8] finishing"
 if [ "$MODE" != "daemon-reset" ]; then
-    rm -f "$RESET_LOCK" 2>/dev/null
+    privstack_leave_reset_mode
 fi
 
 if [ -n "$leftovers" ]; then

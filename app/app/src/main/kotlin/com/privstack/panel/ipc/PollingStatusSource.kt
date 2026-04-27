@@ -164,7 +164,9 @@ class PollingStatusSource @Inject constructor(
         if (consecutiveFailures >= FAILURE_THRESHOLD) return SLOW_INTERVAL_MS
 
         // Adapt based on daemon's connection state
-        val daemonState = _status.value?.state
+        val status = _status.value
+        if (status?.activeOperation != null) return FAST_INTERVAL_MS
+        val daemonState = status?.state
         return when (daemonState) {
             ConnectionState.CONNECTED,
             ConnectionState.CONNECTING -> FAST_INTERVAL_MS

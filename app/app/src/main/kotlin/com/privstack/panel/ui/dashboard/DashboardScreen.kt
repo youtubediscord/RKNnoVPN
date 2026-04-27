@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.privstack.panel.R
+import com.privstack.panel.model.BackendPhase
 import com.privstack.panel.model.ConnectionState
 import com.privstack.panel.ui.common.ConnectionIndicator
 import com.privstack.panel.ui.common.TrafficSparkline
@@ -86,7 +87,7 @@ fun DashboardScreen(
 
             // -- State label --
             Text(
-                text = connectionStateLabel(state.connectionState),
+                text = connectionStateLabel(state.connectionState, state.runtimePhase),
                 style = MaterialTheme.typography.titleMedium,
                 color = connectionStateColor(state.connectionState),
             )
@@ -411,12 +412,18 @@ private fun TrafficCard(
 // ---- Helpers ----
 
 @Composable
-private fun connectionStateLabel(state: ConnectionState): String = when (state) {
-    ConnectionState.DISCONNECTED -> stringResource(R.string.state_disconnected)
-    ConnectionState.CONNECTING -> stringResource(R.string.state_connecting)
-    ConnectionState.CONNECTED -> stringResource(R.string.state_connected)
-    ConnectionState.ERROR -> stringResource(R.string.state_error)
-    ConnectionState.UNKNOWN -> stringResource(R.string.state_unknown)
+private fun connectionStateLabel(state: ConnectionState, phase: BackendPhase): String = when {
+    state == ConnectionState.CONNECTING && phase == BackendPhase.STARTING -> stringResource(R.string.state_starting)
+    state == ConnectionState.CONNECTING && phase == BackendPhase.STOPPING -> stringResource(R.string.state_stopping)
+    state == ConnectionState.CONNECTING && phase == BackendPhase.RESETTING -> stringResource(R.string.state_resetting)
+    state == ConnectionState.CONNECTING && phase == BackendPhase.APPLYING -> stringResource(R.string.state_applying)
+    else -> when (state) {
+        ConnectionState.DISCONNECTED -> stringResource(R.string.state_disconnected)
+        ConnectionState.CONNECTING -> stringResource(R.string.state_connecting)
+        ConnectionState.CONNECTED -> stringResource(R.string.state_connected)
+        ConnectionState.ERROR -> stringResource(R.string.state_error)
+        ConnectionState.UNKNOWN -> stringResource(R.string.state_unknown)
+    }
 }
 
 @Composable

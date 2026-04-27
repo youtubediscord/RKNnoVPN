@@ -170,6 +170,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	// --- 7. Update module directory ---
 	logger.Println("updating module files")
 	moduleFiles := []string{
+		"OWNERSHIP.md",
 		"module.prop",
 		"service.sh",
 		"post-fs-data.sh",
@@ -457,6 +458,7 @@ func validateModuleStaging(staging string, stagedBinDir string) error {
 	}
 
 	for _, path := range []string{
+		"OWNERSHIP.md",
 		"module.prop",
 		"service.sh",
 		"post-fs-data.sh",
@@ -467,6 +469,11 @@ func validateModuleStaging(staging string, stagedBinDir string) error {
 		"scripts/net_handler.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
+		"scripts/lib/privstack_env.sh",
+		"scripts/lib/privstack_install.sh",
+		"scripts/lib/privstack_installer_flow.sh",
+		"scripts/lib/privstack_netstack.sh",
+		"scripts/lib/privstack_iptables_rules.sh",
 		"defaults/config.json",
 	} {
 		fullPath := filepath.Join(staging, path)
@@ -557,6 +564,7 @@ func prepareVersionedRelease(staging string, stagedBinDir string, dataDir string
 		return "", fmt.Errorf("mkdir release module: %w", err)
 	}
 	for _, name := range []string{
+		"OWNERSHIP.md",
 		"module.prop",
 		"service.sh",
 		"post-fs-data.sh",

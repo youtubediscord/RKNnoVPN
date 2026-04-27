@@ -6,6 +6,9 @@ import com.privstack.panel.R
 import com.privstack.panel.ipc.DaemonClientResult
 import com.privstack.panel.model.RuntimeStageReport
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,7 +35,7 @@ class UserMessageFormatter @Inject constructor(
         is DaemonClientResult.DaemonError ->
             when (result.code) {
                 COMPATIBILITY_ERROR_CODE -> result.message
-                RUNTIME_BUSY_CODE -> get(R.string.error_runtime_busy)
+                RUNTIME_BUSY_CODE -> formatRuntimeBusy(result)
                 else -> get(
                     R.string.error_daemon_with_code,
                     result.code,
@@ -74,6 +77,26 @@ class UserMessageFormatter @Inject constructor(
 
     fun formatOperationFailure(@StringRes operationResId: Int, reason: String): String =
         get(R.string.error_operation_failed_with_reason, get(operationResId), reason)
+
+    private fun formatRuntimeBusy(result: DaemonClientResult.DaemonError): String {
+        val active = runCatching {
+            result.details
+                ?.jsonObject
+                ?.get("activeOperation")
+                ?.jsonObject
+                ?.get("kind")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                .orEmpty()
+        }.getOrDefault("")
+        return when (active) {
+            "reset" -> get(R.string.error_reset_in_progress)
+            "start" -> get(R.string.error_operation_busy_named, get(R.string.operation_start))
+            "stop" -> get(R.string.error_operation_busy_named, get(R.string.operation_stop))
+            "restart", "reload" -> get(R.string.error_operation_busy_named, get(R.string.operation_reload))
+            else -> get(R.string.error_runtime_busy)
+        }
+    }
 
     fun formatHealthIssue(
         code: String?,

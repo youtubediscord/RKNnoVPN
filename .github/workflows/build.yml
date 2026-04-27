@@ -31,8 +31,32 @@ jobs:
       - name: Check APK privacy surface
         run: bash .github/scripts/check_apk_privacy.sh
 
+      - name: Check reset.lock script contract
+        run: bash .github/scripts/check_reset_lock_contract.sh
+
+      - name: Check release manifest metadata
+        run: bash .github/scripts/check_release_manifest.sh
+
   # ============================================================
-  # Job 0: Resolve sing-box release tag
+  # Job 0: Go unit/policy tests
+  # ============================================================
+  go-test:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Test daemon packages
+        working-directory: daemon
+        run: go test ./...
+
+  # ============================================================
+  # Job 1: Resolve sing-box release tag
   # ============================================================
   resolve-singbox:
     name: Resolve sing-box release
@@ -66,11 +90,12 @@ jobs:
           echo "Resolved sing-box $VERSION"
 
   # ============================================================
-  # Job 1: Build Go daemon (privd + privctl) for Android ABIs
+  # Job 2: Build Go daemon (privd + privctl) for Android ABIs
   # ============================================================
   build-daemon:
     name: Build Daemon (${{ matrix.arch }})
     runs-on: ubuntu-latest
+    needs: [go-test]
     strategy:
       fail-fast: false
       matrix:
@@ -123,7 +148,7 @@ jobs:
           retention-days: 1
 
   # ============================================================
-  # Job 2: Build Android sing-box binaries for Android module runtime
+  # Job 3: Build Android sing-box binaries for Android module runtime
   # ============================================================
   build-singbox:
     name: Build sing-box (${{ matrix.arch }})
@@ -206,7 +231,7 @@ jobs:
           retention-days: 1
 
   # ============================================================
-  # Job 3: Assemble Magisk module ZIP
+  # Job 4: Assemble Magisk module ZIP
   # ============================================================
   build-module:
     name: Build Magisk Module
@@ -282,7 +307,7 @@ jobs:
           retention-days: 5
 
   # ============================================================
-  # Job 4: Build Android APK
+  # Job 5: Build Android APK
   # ============================================================
   build-apk:
     name: Build APK
@@ -347,7 +372,7 @@ jobs:
           retention-days: 5
 
   # ============================================================
-  # Job 5: Create GitHub Release
+  # Job 6: Create GitHub Release
   # ============================================================
   release:
     name: Create Release

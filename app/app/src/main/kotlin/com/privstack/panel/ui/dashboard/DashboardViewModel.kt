@@ -25,6 +25,7 @@ import javax.inject.Inject
  */
 data class DashboardUiState(
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
+    val runtimePhase: BackendPhase = BackendPhase.STOPPED,
     val activeNodeName: String? = null,
     val activeNodeProtocol: String? = null,
     val traffic: TrafficStats = TrafficStats(),
@@ -214,8 +215,17 @@ class DashboardViewModel @Inject constructor(
                 status.health.lastUserMessage,
                 status.health.stageReport,
             )
+            val lastOperationFailure = status.lastOperation
+                ?.takeIf { operation -> !operation.succeeded && status.activeOperation == null }
+                ?.let { operation ->
+                    messages.formatOperationFailure(
+                        operation.kind.operationNameRes(),
+                        operation.errorMessage.ifBlank { operation.errorCode },
+                    )
+                }
             it.copy(
                 connectionState = status.state,
+                runtimePhase = status.health.phase,
                 activeNodeName = status.activeNodeName,
                 activeNodeProtocol = formatActiveNodeSubtitle(status),
                 egressIp = status.egressIp,
@@ -235,6 +245,7 @@ class DashboardViewModel @Inject constructor(
                 // Clear error when we get a successful status with a healthy state
                 errorMessage = when {
                     operationalDegraded -> null
+                    lastOperationFailure != null -> lastOperationFailure
                     status.state == ConnectionState.ERROR -> healthIssueMessage
                     else -> null
                 },
@@ -264,6 +275,14 @@ class DashboardViewModel @Inject constructor(
         super.onCleared()
         statusRepository.stopPolling()
     }
+}
+
+private fun String.operationNameRes(): Int = when (this) {
+    "start" -> com.privstack.panel.R.string.operation_start
+    "stop" -> com.privstack.panel.R.string.operation_stop
+    "restart", "reload" -> com.privstack.panel.R.string.operation_reload
+    "reset" -> com.privstack.panel.R.string.reset_network_rules
+    else -> com.privstack.panel.R.string.operation_runtime
 }
 
 private val TRANSIENT_OR_STOPPED_PHASES = setOf(

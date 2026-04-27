@@ -529,11 +529,11 @@ func (d *daemon) handleNetworkReset(params *json.RawMessage) (interface{}, *ipc.
 	if d.runtimeV2 == nil {
 		return nil, &ipc.RPCError{Code: ipc.CodeInternalError, Message: "v2 runtime is not initialized"}
 	}
-	report, err := d.runtimeV2.Reset()
+	status, err := d.runtimeV2.Reset()
 	if err != nil {
 		return nil, d.rpcErrorFromRuntimeError(err)
 	}
-	return report, nil
+	return status, nil
 }
 
 func (d *daemon) rpcErrorFromRuntimeError(err error) *ipc.RPCError {
@@ -955,8 +955,9 @@ func (d *daemon) handlePanelSet(params *json.RawMessage) (interface{}, *ipc.RPCE
 	}
 
 	return map[string]interface{}{
-		"status": "ok",
-		"reload": p.Reload,
+		"status":        "ok",
+		"reload":        p.Reload,
+		"runtimeStatus": d.runtimeV2.Status(),
 	}, nil
 }
 
@@ -1100,9 +1101,10 @@ func (d *daemon) handleConfigSetMany(params *json.RawMessage) (interface{}, *ipc
 	}
 
 	return map[string]interface{}{
-		"status":  "ok",
-		"reload":  p.Reload,
-		"updated": len(p.Values),
+		"status":        "ok",
+		"reload":        p.Reload,
+		"updated":       len(p.Values),
+		"runtimeStatus": d.runtimeV2.Status(),
 	}, nil
 }
 
@@ -2262,11 +2264,6 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		p.ApkPath = filepath.Join(updateDir, "panel.apk")
 	}
 
-	result := map[string]interface{}{
-		"module_installed": false,
-		"apk_installed":    false,
-	}
-
 	moduleExists := false
 	if _, err := os.Stat(p.ModulePath); err == nil {
 		moduleExists = true
@@ -2291,8 +2288,13 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 	wasRunning := d.coreMgr.GetState() == core.StateRunning ||
 		d.coreMgr.GetState() == core.StateDegraded
 
-	moduleUpdated := false
-	if _, err := d.runtimeV2.RunOperation(runtimev2.OperationUpdateInstall, runtimev2.PhaseStopping, func(generation int64) error {
+	status, err := d.runtimeV2.RunOperation(runtimev2.OperationUpdateInstall, runtimev2.PhaseStopping, func(generation int64) error {
+		moduleUpdated := false
+		defer func() {
+			if moduleUpdated {
+				go updater.ScheduleSelfExit(updater.SelfExitDelay)
+			}
+		}()
 		if moduleExists {
 			if err := d.failIfResetInProgress(); err != nil {
 				return err
@@ -2314,7 +2316,6 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 				}
 				return fmt.Errorf("module install failed: %w", err)
 			}
-			result["module_installed"] = true
 			moduleUpdated = true
 		}
 
@@ -2322,30 +2323,20 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		if apkExists {
 			if err := updater.InstallApkUpdate(p.ApkPath); err != nil {
 				log.Printf("[updater] APK install failed: %v", err)
-				result["apk_error"] = err.Error()
-			} else {
-				result["apk_installed"] = true
+				return fmt.Errorf("apk install failed: %w", err)
 			}
 		}
 
 		// Clean up downloaded files.
 		os.RemoveAll(updateDir)
 
-		result["status"] = "installed"
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, d.rpcErrorFromRuntimeError(err)
 	}
 
-	// If we installed a new module (which includes a new privd binary),
-	// the new daemon is already forked and listening. Schedule this old
-	// daemon to exit after the IPC response has been written back to the
-	// client, so we don't cut the connection mid-reply.
-	if moduleUpdated {
-		go updater.ScheduleSelfExit(updater.SelfExitDelay)
-	}
-
-	return result, nil
+	return status, nil
 }
 
 func (d *daemon) restoreCurrentRuntimeAfterFailedUpdate() {

@@ -33,6 +33,10 @@ TAG="privstack:net"
 
 # Defaults matching config.json.
 PRIVSTACK_DIR="${PRIVSTACK_DIR:-/data/adb/privstack}"
+SCRIPT_DIR="${0%/*}"
+if [ -f "${SCRIPT_DIR}/lib/privstack_env.sh" ]; then
+    . "${SCRIPT_DIR}/lib/privstack_env.sh"
+fi
 FWMARK="${FWMARK:-0x2023}"
 ROUTE_TABLE="${ROUTE_TABLE:-2023}"
 ROUTE_TABLE_V6="${ROUTE_TABLE_V6:-2024}"
@@ -41,11 +45,8 @@ SHARING_MODE="${SHARING_MODE:-off}"
 SHARING_IFACES="${SHARING_IFACES:-}"
 IPT_WAIT="${IPT_WAIT:--w 30}"
 
-LOG_FILE="$PRIVSTACK_DIR/logs/net_change.log"
-LOCK_FILE="$PRIVSTACK_DIR/run/net_change.lock"
-ACTIVE_FILE="$PRIVSTACK_DIR/run/active"
-RESET_LOCK="$PRIVSTACK_DIR/run/reset.lock"
-MANUAL_FLAG="$PRIVSTACK_DIR/config/manual"
+LOG_FILE="$LOG_DIR/net_change.log"
+LOCK_FILE="$RUN_DIR/net_change.lock"
 
 # inotifyd arguments.
 EVENT="${1:-unknown}"
@@ -73,17 +74,17 @@ mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || true
 
 # A network event must never resurrect proxy rules while reset is in progress
 # or after the user explicitly disabled automatic runtime startup.
-if [ -f "$RESET_LOCK" ]; then
+if privstack_is_reset_active; then
     log "reset lock present - exiting"
     exit 0
 fi
 
-if [ ! -f "$ACTIVE_FILE" ]; then
+if ! privstack_is_active; then
     log "PrivStack is not active - exiting"
     exit 0
 fi
 
-if [ -f "$MANUAL_FLAG" ]; then
+if privstack_is_manual_mode; then
     log "manual mode enabled - exiting"
     exit 0
 fi

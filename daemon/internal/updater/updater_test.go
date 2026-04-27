@@ -60,6 +60,7 @@ func TestValidateModuleStagingAcceptsCompleteBundle(t *testing.T) {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 	for _, path := range []string{
+		"OWNERSHIP.md",
 		"service.sh",
 		"post-fs-data.sh",
 		"uninstall.sh",
@@ -69,6 +70,11 @@ func TestValidateModuleStagingAcceptsCompleteBundle(t *testing.T) {
 		"scripts/net_handler.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
+		"scripts/lib/privstack_env.sh",
+		"scripts/lib/privstack_install.sh",
+		"scripts/lib/privstack_installer_flow.sh",
+		"scripts/lib/privstack_netstack.sh",
+		"scripts/lib/privstack_iptables_rules.sh",
 		"defaults/config.json",
 	} {
 		writeTestFile(t, filepath.Join(staging, path), 0644)
@@ -90,6 +96,7 @@ func TestValidateModuleStagingRejectsBadModuleProp(t *testing.T) {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 	for _, path := range []string{
+		"OWNERSHIP.md",
 		"service.sh",
 		"post-fs-data.sh",
 		"uninstall.sh",
@@ -99,6 +106,11 @@ func TestValidateModuleStagingRejectsBadModuleProp(t *testing.T) {
 		"scripts/net_handler.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
+		"scripts/lib/privstack_env.sh",
+		"scripts/lib/privstack_install.sh",
+		"scripts/lib/privstack_installer_flow.sh",
+		"scripts/lib/privstack_netstack.sh",
+		"scripts/lib/privstack_iptables_rules.sh",
 		"defaults/config.json",
 	} {
 		writeTestFile(t, filepath.Join(staging, path), 0644)
@@ -121,6 +133,7 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		writeTestFile(t, filepath.Join(binDir, name), 0755)
 	}
 	for _, path := range []string{
+		"OWNERSHIP.md",
 		"service.sh",
 		"post-fs-data.sh",
 		"uninstall.sh",
@@ -130,6 +143,11 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		"scripts/net_handler.sh",
 		"scripts/rescue_reset.sh",
 		"scripts/routing.sh",
+		"scripts/lib/privstack_env.sh",
+		"scripts/lib/privstack_install.sh",
+		"scripts/lib/privstack_installer_flow.sh",
+		"scripts/lib/privstack_netstack.sh",
+		"scripts/lib/privstack_iptables_rules.sh",
 		"defaults/config.json",
 	} {
 		writeTestFile(t, filepath.Join(staging, path), 0644)
@@ -145,7 +163,13 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		filepath.Join(releaseDir, "bin", "privctl"),
 		filepath.Join(releaseDir, "bin", "sing-box"),
 		filepath.Join(releaseDir, "module", "module.prop"),
+		filepath.Join(releaseDir, "module", "OWNERSHIP.md"),
 		filepath.Join(releaseDir, "module", "scripts", "rescue_reset.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_env.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_install.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_installer_flow.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_netstack.sh"),
+		filepath.Join(releaseDir, "module", "scripts", "lib", "privstack_iptables_rules.sh"),
 		filepath.Join(releaseDir, "install-manifest.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
@@ -180,7 +204,13 @@ func TestPrepareVersionedReleasePublishesNormalizedBundle(t *testing.T) {
 		"bin/privctl",
 		"bin/sing-box",
 		"module/module.prop",
+		"module/OWNERSHIP.md",
 		"module/scripts/rescue_reset.sh",
+		"module/scripts/lib/privstack_env.sh",
+		"module/scripts/lib/privstack_install.sh",
+		"module/scripts/lib/privstack_installer_flow.sh",
+		"module/scripts/lib/privstack_netstack.sh",
+		"module/scripts/lib/privstack_iptables_rules.sh",
 	} {
 		got := manifest.Files[rel]
 		if got == "" {

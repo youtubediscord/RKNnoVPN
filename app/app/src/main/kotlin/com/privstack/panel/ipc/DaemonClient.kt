@@ -13,7 +13,6 @@ import com.privstack.panel.model.HealthConfig
 import com.privstack.panel.model.Node
 import com.privstack.panel.model.NodeProbeResultV2
 import com.privstack.panel.model.ProfileConfig
-import com.privstack.panel.model.ResetReport
 import com.privstack.panel.model.InboundsConfig
 import com.privstack.panel.model.Protocol
 import com.privstack.panel.model.SharingConfig
@@ -152,7 +151,7 @@ class DaemonClient @Inject constructor(
     }
 
     /** Force-remove PrivStack network rules and stop the proxy core. */
-    suspend fun networkReset(): DaemonClientResult<ResetReport> {
+    suspend fun networkReset(): DaemonClientResult<BackendStatusV2> {
         return when (val result = backendReset()) {
             is DaemonClientResult.Ok -> result
             is DaemonClientResult.DaemonError ->
@@ -604,28 +603,28 @@ class DaemonClient @Inject constructor(
         call("backend.status") { json.decodeFromJsonElement(BackendStatusV2.serializer(), it) }
 
     suspend fun backendStart(): DaemonClientResult<BackendStatusV2> =
-        call("backend.start", timeoutMs = START_TIMEOUT_MS) {
+        call("backend.start", timeoutMs = ACCEPT_TIMEOUT_MS) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
 
     suspend fun backendStop(): DaemonClientResult<BackendStatusV2> =
-        call("backend.stop", timeoutMs = 30_000L) {
+        call("backend.stop", timeoutMs = ACCEPT_TIMEOUT_MS) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
 
     suspend fun backendRestart(): DaemonClientResult<BackendStatusV2> =
-        call("backend.restart", timeoutMs = START_TIMEOUT_MS) {
+        call("backend.restart", timeoutMs = ACCEPT_TIMEOUT_MS) {
             json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
 
-    suspend fun backendReset(): DaemonClientResult<ResetReport> =
-        call("backend.reset", timeoutMs = RESET_TIMEOUT_MS) {
-            json.decodeFromJsonElement(ResetReport.serializer(), it)
+    suspend fun backendReset(): DaemonClientResult<BackendStatusV2> =
+        call("backend.reset", timeoutMs = ACCEPT_TIMEOUT_MS) {
+            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
 
-    suspend fun legacyNetworkReset(): DaemonClientResult<ResetReport> =
-        call("network-reset", timeoutMs = RESET_TIMEOUT_MS) {
-            json.decodeFromJsonElement(ResetReport.serializer(), it)
+    suspend fun legacyNetworkReset(): DaemonClientResult<BackendStatusV2> =
+        call("network-reset", timeoutMs = ACCEPT_TIMEOUT_MS) {
+            json.decodeFromJsonElement(BackendStatusV2.serializer(), it)
         }
 
     private suspend fun legacyStop(): DaemonClientResult<Unit> =
@@ -800,12 +799,11 @@ class DaemonClient @Inject constructor(
                 put("apk_path", apkPath)
             }
         }
-        return call("update-install", params, timeoutMs = 120_000L) { element ->
-            val obj = element as JsonObject
+        return call("update-install", params, timeoutMs = ACCEPT_TIMEOUT_MS) { element ->
+            val status = json.decodeFromJsonElement(BackendStatusV2.serializer(), element)
             UpdateInstallInfo(
-                moduleInstalled = obj["module_installed"]?.jsonPrimitive?.booleanOrNull ?: false,
-                apkInstalled = obj["apk_installed"]?.jsonPrimitive?.booleanOrNull ?: false,
-                apkError = obj["apk_error"]?.jsonPrimitive?.content,
+                accepted = status.activeOperation?.kind == "update-install",
+                operationGeneration = status.activeOperation?.generation ?: 0L,
             )
         }
     }
@@ -1209,8 +1207,7 @@ private fun stableReleaseVersion(raw: String): String? {
 }
 
 private val REPAIR_METHODS = setOf("backend.stop", "backend.reset", "network-reset", "network.reset")
-private const val START_TIMEOUT_MS = 120_000L
-private const val RESET_TIMEOUT_MS = 240_000L
+private const val ACCEPT_TIMEOUT_MS = 10_000L
 private val REQUIRED_METHOD_ALTERNATIVES = listOf(
     setOf("backend.reset", "network-reset", "network.reset"),
     setOf("config-import", "config.import"),
@@ -1255,9 +1252,8 @@ data class UpdateDownloadInfo(
 )
 
 data class UpdateInstallInfo(
-    val moduleInstalled: Boolean,
-    val apkInstalled: Boolean,
-    val apkError: String? = null,
+    val accepted: Boolean,
+    val operationGeneration: Long = 0L,
 )
 
 data class SubscriptionFetchInfo(
@@ -1380,7 +1376,9 @@ private fun BackendStatusV2.toDaemonStatus(
     healthOverride: BackendHealthSnapshot? = null,
 ): DaemonStatus {
     val effectiveHealth = healthOverride ?: health
-    val connectionState = when (appliedState.phase) {
+    val displayPhase = activeOperation?.phase ?: appliedState.phase
+    val lastFailure = lastOperation?.takeIf { !it.succeeded && activeOperation == null }
+    val connectionState = when (displayPhase) {
         com.privstack.panel.model.BackendPhase.HEALTHY,
         com.privstack.panel.model.BackendPhase.RULES_APPLIED,
         com.privstack.panel.model.BackendPhase.DNS_APPLIED,
@@ -1415,15 +1413,17 @@ private fun BackendStatusV2.toDaemonStatus(
             egressReady = effectiveHealth.egressReady,
             operationalHealthy = effectiveHealth.operationalHealthy,
             backendKind = appliedState.backendKind,
-            phase = appliedState.phase,
-            lastCode = effectiveHealth.lastCode.ifBlank { null },
-            lastError = effectiveHealth.lastError.ifBlank { null },
+            phase = displayPhase,
+            lastCode = effectiveHealth.lastCode.ifBlank { lastFailure?.errorCode?.ifBlank { null } },
+            lastError = effectiveHealth.lastError.ifBlank { lastFailure?.errorMessage?.ifBlank { null } },
             lastUserMessage = effectiveHealth.lastUserMessage.ifBlank { null },
             lastDebug = effectiveHealth.lastDebug.ifBlank { null },
             rollbackApplied = effectiveHealth.rollbackApplied,
             stageReport = effectiveHealth.stageReport,
             checkedAt = effectiveHealth.checkedAt?.let(::epochSeconds) ?: 0L,
         ),
+        activeOperation = activeOperation,
+        lastOperation = lastOperation,
     )
 }
 
@@ -1443,6 +1443,8 @@ private fun DaemonStatus.withV2Status(v2: DaemonStatus): DaemonStatus =
         state = v2.state,
         activeNodeId = v2.activeNodeId ?: activeNodeId,
         health = v2.health,
+        activeOperation = v2.activeOperation,
+        lastOperation = v2.lastOperation,
     )
 
 @Serializable

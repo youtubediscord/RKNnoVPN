@@ -11,6 +11,10 @@
     <!-- Connection states -->
     <string name="state_disconnected">Отключено</string>
     <string name="state_connecting">Подключение…</string>
+    <string name="state_starting">Запуск…</string>
+    <string name="state_stopping">Остановка…</string>
+    <string name="state_resetting">Сброс…</string>
+    <string name="state_applying">Применение…</string>
     <string name="state_connected">Подключено</string>
     <string name="state_error">Ошибка</string>
     <string name="state_unknown">Неизвестно</string>
@@ -47,6 +51,8 @@
     <string name="health_issue_readiness_failed">Проверки готовности runtime не пройдены.</string>
     <string name="health_issue_operational_degraded">Runtime запущен, но data-plane проверки degraded.</string>
     <string name="error_runtime_busy">Операция уже выполняется. Дождитесь завершения текущего действия.</string>
+    <string name="error_reset_in_progress">Сброс ещё выполняется. Дождитесь завершения.</string>
+    <string name="error_operation_busy_named">%1$s ещё выполняется. Дождитесь завершения.</string>
     <string name="uptime">Время работы</string>
     <string name="traffic">Трафик</string>
     <string name="upload_short">TX</string>
@@ -240,9 +246,11 @@
     <string name="error_unexpected_with_reason">Неожиданная ошибка: %1$s</string>
     <string name="error_operation_failed_with_reason">Не удалось выполнить действие «%1$s»: %2$s</string>
     <string name="error_no_profile_loaded">Профиль не загружен</string>
+    <string name="operation_accepted">Операция принята. Ждём завершения…</string>
     <string name="operation_start">запуск</string>
     <string name="operation_stop">остановка</string>
     <string name="operation_reload">перезагрузка</string>
+    <string name="operation_runtime">runtime-операция</string>
     <string name="log_level_debug">DEBUG</string>
     <string name="log_level_info">INFO</string>
     <string name="log_level_warning">WARNING</string>

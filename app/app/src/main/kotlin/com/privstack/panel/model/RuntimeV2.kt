@@ -63,6 +63,29 @@ data class AppliedStateV2(
 )
 
 @Serializable
+data class RuntimeOperationStatus(
+    val operationId: String = "",
+    val kind: String = "",
+    val generation: Long = 0L,
+    val phase: BackendPhase = BackendPhase.APPLYING,
+    val startedAt: String? = null,
+)
+
+@Serializable
+data class RuntimeOperationResult(
+    val operationId: String = "",
+    val kind: String = "",
+    val generation: Long = 0L,
+    val phase: BackendPhase = BackendPhase.APPLYING,
+    val startedAt: String? = null,
+    val finishedAt: String? = null,
+    val succeeded: Boolean = false,
+    val errorCode: String = "",
+    val errorMessage: String = "",
+    val resetReport: ResetReport? = null,
+)
+
+@Serializable
 data class BackendHealthSnapshot(
     val coreReady: Boolean = false,
     val dnsReady: Boolean = false,
@@ -123,6 +146,8 @@ data class BackendStatusV2(
     val appliedState: AppliedStateV2 = AppliedStateV2(),
     val health: BackendHealthSnapshot = BackendHealthSnapshot(),
     val capabilities: List<BackendCapability> = emptyList(),
+    val activeOperation: RuntimeOperationStatus? = null,
+    val lastOperation: RuntimeOperationResult? = null,
 )
 
 @Serializable

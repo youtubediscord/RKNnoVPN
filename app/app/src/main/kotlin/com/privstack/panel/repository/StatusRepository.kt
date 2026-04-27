@@ -7,6 +7,7 @@ import com.privstack.panel.ipc.SelfCheckSummary
 import com.privstack.panel.i18n.UserMessageFormatter
 import com.privstack.panel.R
 import com.privstack.panel.model.AuditReport
+import com.privstack.panel.model.BackendStatusV2
 import com.privstack.panel.model.DaemonConnectionState
 import com.privstack.panel.model.DaemonStatus
 import com.privstack.panel.model.HealthResult
@@ -87,7 +88,7 @@ class StatusRepository @Inject constructor(
         return toOutcome(result, R.string.operation_reload)
     }
 
-    suspend fun networkReset(): DaemonClientResult<com.privstack.panel.model.ResetReport> {
+    suspend fun networkReset(): DaemonClientResult<BackendStatusV2> {
         val result = client.networkReset()
         poller.pollNow()
         return result

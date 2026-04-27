@@ -85,6 +85,19 @@ type OperationStatus struct {
 	StartedAt   time.Time     `json:"startedAt"`
 }
 
+type OperationResult struct {
+	OperationID  string        `json:"operationId"`
+	Kind         OperationKind `json:"kind"`
+	Generation   int64         `json:"generation"`
+	Phase        Phase         `json:"phase"`
+	StartedAt    time.Time     `json:"startedAt"`
+	FinishedAt   time.Time     `json:"finishedAt"`
+	Succeeded    bool          `json:"succeeded"`
+	ErrorCode    string        `json:"errorCode,omitempty"`
+	ErrorMessage string        `json:"errorMessage,omitempty"`
+	ResetReport  *ResetReport  `json:"resetReport,omitempty"`
+}
+
 type HealthSnapshot struct {
 	CoreReady       bool                           `json:"coreReady"`
 	DNSReady        bool                           `json:"dnsReady"`
@@ -167,4 +180,5 @@ type Status struct {
 	Health          HealthSnapshot      `json:"health"`
 	Capabilities    []BackendCapability `json:"capabilities"`
 	ActiveOperation *OperationStatus    `json:"activeOperation,omitempty"`
+	LastOperation   *OperationResult    `json:"lastOperation,omitempty"`
 }

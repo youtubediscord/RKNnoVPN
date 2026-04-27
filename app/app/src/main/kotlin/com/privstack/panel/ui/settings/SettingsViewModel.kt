@@ -411,18 +411,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = statusRepository.networkReset()) {
                 is DaemonClientResult.Ok -> {
-                    val report = result.data
-                    Log.d(TAG, "Backend reset finished with status=${report.status}")
+                    Log.d(TAG, "Backend reset accepted; waiting for status result")
                     _uiState.update {
                         it.copy(
-                            daemonStatusText = if (report.status == "ok") {
-                                messages.get(com.privstack.panel.R.string.daemon_status_stopped)
-                            } else {
-                                messages.get(com.privstack.panel.R.string.daemon_status_partial_reset)
-                            },
-                            errorMessage = report.errors.takeIf { it.isNotEmpty() }?.joinToString("\n"),
-                            lastResetSummary = summarizeResetReport(report),
-                            isResetting = false,
+                            daemonStatusText = messages.get(com.privstack.panel.R.string.daemon_status_resetting),
+                            errorMessage = null,
+                            lastResetSummary = messages.get(com.privstack.panel.R.string.operation_accepted),
+                            isResetting = true,
                         )
                     }
                 }
@@ -636,16 +631,13 @@ class SettingsViewModel @Inject constructor(
                 apkPath = current.apkPath,
             )) {
                 is DaemonClientResult.Ok -> {
-                    val installedSomething = result.data.moduleInstalled || result.data.apkInstalled
                     _updateState.update {
                         it.copy(
-                            status = if (installedSomething) UpdateStatus.INSTALLED else UpdateStatus.ERROR,
-                            errorMessage = if (installedSomething) {
-                                ""
+                            status = if (result.data.accepted) UpdateStatus.INSTALLING else UpdateStatus.ERROR,
+                            errorMessage = if (result.data.accepted) {
+                                messages.get(com.privstack.panel.R.string.operation_accepted)
                             } else {
-                                result.data.apkError ?: messages.get(
-                                    com.privstack.panel.R.string.update_error_install_without_artifacts
-                                )
+                                messages.get(com.privstack.panel.R.string.update_error_install_without_artifacts)
                             },
                         )
                     }
@@ -700,7 +692,24 @@ class SettingsViewModel @Inject constructor(
                 .filterNotNull()
                 .collect { status ->
                     _uiState.update {
-                        it.copy(daemonStatusText = formatRuntimeStatus(status, it.daemonStatusText))
+                        val resetResult = status.lastOperation
+                            ?.takeIf { operation -> it.isResetting && operation.kind == "reset" && status.activeOperation == null }
+                        if (resetResult != null) {
+                            val report = resetResult.resetReport
+                            it.copy(
+                                daemonStatusText = if (resetResult.succeeded) {
+                                    messages.get(com.privstack.panel.R.string.daemon_status_stopped)
+                                } else {
+                                    messages.get(com.privstack.panel.R.string.daemon_status_partial_reset)
+                                },
+                                errorMessage = resetResult.errorMessage.ifBlank { null },
+                                lastResetSummary = report?.let(::summarizeResetReport)
+                                    ?: resetResult.errorMessage.ifBlank { messages.get(com.privstack.panel.R.string.state_error) },
+                                isResetting = false,
+                            )
+                        } else {
+                            it.copy(daemonStatusText = formatRuntimeStatus(status, it.daemonStatusText))
+                        }
                     }
                 }
         }
@@ -892,7 +901,11 @@ class SettingsViewModel @Inject constructor(
                 }
             }
             ConnectionState.CONNECTING ->
-                messages.get(com.privstack.panel.R.string.state_connecting)
+                when (status.activeOperation?.kind) {
+                    "reset" -> messages.get(com.privstack.panel.R.string.daemon_status_resetting)
+                    "restart", "reload" -> messages.get(com.privstack.panel.R.string.daemon_status_restarting)
+                    else -> messages.get(com.privstack.panel.R.string.state_connecting)
+                }
             ConnectionState.DISCONNECTED ->
                 messages.get(com.privstack.panel.R.string.daemon_status_stopped)
             ConnectionState.ERROR ->

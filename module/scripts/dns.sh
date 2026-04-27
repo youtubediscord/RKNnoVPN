@@ -31,6 +31,10 @@ set -eu
 
 TAG="privstack:dns"
 SCRIPT_VERSION="v1.8.0"
+SCRIPT_DIR="${0%/*}"
+if [ -f "${SCRIPT_DIR}/lib/privstack_env.sh" ]; then
+    . "${SCRIPT_DIR}/lib/privstack_env.sh"
+fi
 
 # Sane defaults if the caller omitted something.
 DNS_PORT="${DNS_PORT:-10856}"

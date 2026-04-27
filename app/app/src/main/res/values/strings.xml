@@ -11,6 +11,10 @@
     <!-- Connection states -->
     <string name="state_disconnected">Disconnected</string>
     <string name="state_connecting">Connecting…</string>
+    <string name="state_starting">Starting…</string>
+    <string name="state_stopping">Stopping…</string>
+    <string name="state_resetting">Resetting…</string>
+    <string name="state_applying">Applying…</string>
     <string name="state_connected">Connected</string>
     <string name="state_error">Error</string>
     <string name="state_unknown">Unknown</string>
@@ -47,6 +51,8 @@
     <string name="health_issue_readiness_failed">Runtime readiness gates failed.</string>
     <string name="health_issue_operational_degraded">Runtime started, but data-plane checks are degraded.</string>
     <string name="error_runtime_busy">An operation is already running. Wait for the current action to finish.</string>
+    <string name="error_reset_in_progress">Reset is still running. Wait for it to finish.</string>
+    <string name="error_operation_busy_named">%1$s is still running. Wait for it to finish.</string>
     <string name="uptime">Uptime</string>
     <string name="traffic">Traffic</string>
     <string name="upload_short">TX</string>
@@ -240,9 +246,11 @@
     <string name="error_unexpected_with_reason">Unexpected error: %1$s</string>
     <string name="error_operation_failed_with_reason">%1$s failed: %2$s</string>
     <string name="error_no_profile_loaded">No profile loaded</string>
+    <string name="operation_accepted">Operation accepted. Waiting for completion…</string>
     <string name="operation_start">Start</string>
     <string name="operation_stop">Stop</string>
     <string name="operation_reload">Reload</string>
+    <string name="operation_runtime">Runtime operation</string>
     <string name="log_level_debug">Debug</string>
     <string name="log_level_info">Info</string>
     <string name="log_level_warning">Warning</string>

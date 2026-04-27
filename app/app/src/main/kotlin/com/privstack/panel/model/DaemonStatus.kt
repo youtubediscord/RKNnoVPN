@@ -25,7 +25,9 @@ data class DaemonStatus(
     val latencyMs: Int? = null,
     val uptime: Long = 0L,
     val traffic: TrafficStats = TrafficStats(),
-    val health: HealthResult = HealthResult()
+    val health: HealthResult = HealthResult(),
+    val activeOperation: RuntimeOperationStatus? = null,
+    val lastOperation: RuntimeOperationResult? = null,
 )
 
 /**

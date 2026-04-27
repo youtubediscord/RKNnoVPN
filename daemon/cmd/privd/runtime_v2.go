@@ -888,11 +888,11 @@ func (d *daemon) handleBackendRestart(params *json.RawMessage) (interface{}, *ip
 }
 
 func (d *daemon) handleBackendReset(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	report, err := d.runtimeV2.Reset()
+	status, err := d.runtimeV2.Reset()
 	if err != nil {
 		return nil, d.rpcErrorFromRuntimeError(err)
 	}
-	return report, nil
+	return status, nil
 }
 
 func (d *daemon) handleDiagnosticsHealth(params *json.RawMessage) (interface{}, *ipc.RPCError) {
