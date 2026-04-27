@@ -7,7 +7,6 @@ kotlin_src="${repo_root}/app/app/src/main/kotlin"
 profile_config="${repo_root}/app/app/src/main/kotlin/com/privstack/panel/model/ProfileConfig.kt"
 daemon_config="${repo_root}/daemon/internal/config/config.go"
 module_default_config="${repo_root}/module/defaults/config.json"
-module_default_panel="${repo_root}/module/defaults/panel.json"
 
 fail=0
 
@@ -56,6 +55,9 @@ check_present_file "HTTP helper disabled by default" 'val httpPort: Int = 0' "${
 check_present_file "TUN disabled by default" 'val enabled: Boolean = false' "${profile_config}"
 check_present_file "Clash API disabled by default" 'APIPort:[[:space:]]+0' "${daemon_config}"
 check_absent_file "No default local helper ports in module config" '10808|10809|9090|"api_port"[[:space:]]*:[[:space:]]*[1-9]' "${module_default_config}"
-check_absent_file "No default local helper ports in panel defaults" '10808|10809|9090|"socksPort"[[:space:]]*:[[:space:]]*[1-9]|"httpPort"[[:space:]]*:[[:space:]]*[1-9]|"api_port"[[:space:]]*:[[:space:]]*[1-9]' "${module_default_panel}"
+if [ -e "${repo_root}/module/defaults/panel.json" ]; then
+  echo "::error file=${repo_root}/module/defaults/panel.json,title=No panel defaults::panel.json is not a supported v2 storage artifact"
+  fail=1
+fi
 
 exit "${fail}"

@@ -167,7 +167,6 @@ create_directory_structure() {
 
 preserve_existing_config() {
     CONFIG_FILE="${PRIVSTACK_DIR}/config/config.json"
-    PANEL_FILE="${PRIVSTACK_DIR}/config/panel.json"
 
     if [ -f "$CONFIG_FILE" ]; then
         ui_print "  [*] Existing config.json found — preserving"
@@ -176,13 +175,6 @@ preserve_existing_config() {
     else
         PRESERVE_CONFIG=0
         ui_print "  [*] No existing config — will install defaults"
-    fi
-
-    if [ -f "$PANEL_FILE" ]; then
-        ui_print "  [*] Existing legacy panel.json found — preserving for daemon migration"
-        cp -f "$PANEL_FILE" "${PRIVSTACK_DIR}/backup/panel.json.pre-upgrade" 2>/dev/null
-    else
-        ui_print "  [*] No legacy panel.json found — canonical profile.json will be daemon-managed"
     fi
 }
 
@@ -202,9 +194,7 @@ install_default_config() {
         cp -f "${MODPATH}/defaults/config.json" "${PRIVSTACK_DIR}/config/config.defaults.json"
     fi
 
-    # panel.json is a legacy migration sidecar. New installs let privd create
-    # canonical profile.json from config.json instead of installing APK-owned
-    # defaults into runtime state.
+    # New installs let privd create canonical profile.json from config.json.
 }
 
 mark_manual_start_required() {
@@ -344,6 +334,7 @@ write_install_manifest() {
         module/post-fs-data.sh \
         module/uninstall.sh \
         module/customize.sh \
+        module/sepolicy.rule \
         module/scripts/dns.sh \
         module/scripts/iptables.sh \
         module/scripts/rescue_reset.sh \
@@ -353,8 +344,7 @@ write_install_manifest() {
         module/scripts/lib/privstack_installer_flow.sh \
         module/scripts/lib/privstack_netstack.sh \
         module/scripts/lib/privstack_iptables_rules.sh \
-        module/defaults/config.json \
-        module/defaults/panel.json; do
+        module/defaults/config.json; do
         append_manifest_hash "$rel" "${release_dir}/${rel}" "$tmp_manifest" || return 1
     done
 

@@ -506,7 +506,7 @@ class NodeListViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null, statusMessage = null) }
             val imported = profileRepository.applySubscriptionPreview(preview)
-            if (imported.isEmpty()) {
+            if (imported.isEmpty() && preview.removedCount == 0) {
                 val err = profileRepository.error.value
                 _uiState.update {
                     it.copy(

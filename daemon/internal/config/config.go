@@ -103,9 +103,6 @@ type ProfileProjectionConfig struct {
 	Extra         json.RawMessage   `json:"extra,omitempty"`
 }
 
-const legacyPanelSidecarFileName = "panel.json"
-const canonicalProfileFileName = "profile.json"
-
 // RuntimeV2Config stores reliability-first backend selection state for the
 // side-by-side v2 runtime path.
 type RuntimeV2Config struct {
@@ -349,7 +346,7 @@ func (c *Config) SharingInterfacesEnv() string {
 	return strings.Join(values, " ")
 }
 
-// defaultProfileProjectionConfig returns the profile projection defaults for legacy panel sidecar.
+// defaultProfileProjectionConfig returns empty profile projection defaults.
 func defaultProfileProjectionConfig() ProfileProjectionConfig {
 	return ProfileProjectionConfig{
 		ID:   "default",
@@ -387,20 +384,10 @@ func (c *Config) ResolveProfileInbounds() ProfileInboundsConfig {
 // Load reads a Config from the given JSON file path.
 // If the file does not exist, it returns DefaultConfig.
 func Load(path string) (*Config, error) {
-	profileAlreadyMigrated := canonicalProfileExists(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			cfg := DefaultConfig()
-			if !profileAlreadyMigrated {
-				panel, found, panelErr := loadLegacyPanelSidecar(LegacyPanelSidecarPath(path))
-				if panelErr != nil {
-					return nil, panelErr
-				}
-				cfg.Profile = normalizeProfileProjectionConfig(panel)
-				cfg.SyncFromProfileProjection(found)
-			}
-			return cfg, nil
+			return DefaultConfig(), nil
 		}
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
@@ -444,34 +431,6 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.Migrate()
 
-	if !profileAlreadyMigrated {
-		panelPath := LegacyPanelSidecarPath(path)
-		panel, found, err := loadLegacyPanelSidecar(panelPath)
-		if err != nil {
-			return nil, err
-		}
-		panelAuthoritative := found
-		if found {
-			cfg.Profile = normalizeProfileProjectionConfig(panel)
-		} else {
-			legacyPanel, hasLegacy, err := loadLegacyPanel(raw)
-			if err != nil {
-				return nil, err
-			}
-			panelAuthoritative = hasLegacy
-			cfg.Profile = normalizeProfileProjectionConfig(legacyPanel)
-			if hasLegacy {
-				if err := saveLegacyPanelSidecar(panelPath, cfg.Profile); err != nil {
-					return nil, err
-				}
-				if err := cfg.Save(path); err != nil {
-					return nil, err
-				}
-			}
-		}
-		cfg.SyncFromProfileProjection(panelAuthoritative)
-	}
-
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config: validate: %w", err)
 	}
@@ -508,35 +467,6 @@ func (c *Config) Migrate() {
 	if c.SchemaVersion < CurrentSchemaVersion {
 		c.SchemaVersion = CurrentSchemaVersion
 	}
-}
-
-// LegacyPanelSidecarPath returns the sidecar path for legacy panel sidecar.
-func LegacyPanelSidecarPath(configPath string) string {
-	return filepath.Join(filepath.Dir(configPath), legacyPanelSidecarFileName)
-}
-
-func canonicalProfileExists(configPath string) bool {
-	_, err := os.Stat(filepath.Join(filepath.Dir(configPath), canonicalProfileFileName))
-	return err == nil
-}
-
-// saveLegacyPanelSidecar writes the legacy panel sidecar atomically.
-func saveLegacyPanelSidecar(path string, panel ProfileProjectionConfig) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-		return fmt.Errorf("panel: mkdir: %w", err)
-	}
-
-	panel = normalizeProfileProjectionConfig(panel)
-	if err := validateProfileProjectionConfig(panel); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(panel, "", "  ")
-	if err != nil {
-		return fmt.Errorf("panel: marshal: %w", err)
-	}
-	data = append(data, '\n')
-
-	return writeFileAtomic(path, data, 0600, "panel")
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode, label string) error {
@@ -992,35 +922,6 @@ func normalizedProfileNodeSource(stale bool, source *ProfileNodeSourceConfig) Pr
 		normalized.ProviderKey = strings.ToLower(normalized.URL)
 	}
 	return normalized
-}
-
-func loadLegacyPanel(raw map[string]json.RawMessage) (ProfileProjectionConfig, bool, error) {
-	panelRaw, ok := raw["panel"]
-	if !ok {
-		return defaultProfileProjectionConfig(), false, nil
-	}
-
-	panel := defaultProfileProjectionConfig()
-	if err := json.Unmarshal(panelRaw, &panel); err != nil {
-		return ProfileProjectionConfig{}, false, fmt.Errorf("config: parse legacy panel: %w", err)
-	}
-	return panel, true, nil
-}
-
-func loadLegacyPanelSidecar(path string) (ProfileProjectionConfig, bool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return defaultProfileProjectionConfig(), false, nil
-		}
-		return ProfileProjectionConfig{}, false, fmt.Errorf("panel: read %s: %w", path, err)
-	}
-
-	panel := defaultProfileProjectionConfig()
-	if err := json.Unmarshal(data, &panel); err != nil {
-		return ProfileProjectionConfig{}, false, fmt.Errorf("panel: parse %s: %w", path, err)
-	}
-	return panel, true, nil
 }
 
 func (c *Config) SyncFromProfileProjection(authoritative bool) {

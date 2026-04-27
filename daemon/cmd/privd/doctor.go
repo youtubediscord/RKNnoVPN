@@ -193,10 +193,6 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	if profilePath == "" && cfgPath != "" {
 		profilePath = profiledoc.Path(cfgPath)
 	}
-	panelPath := ""
-	if cfgPath != "" {
-		panelPath = config.LegacyPanelSidecarPath(cfgPath)
-	}
 
 	renderedConfigPath := filepath.Join(dataDir, "config", "rendered", "singbox.json")
 	singBoxPath := filepath.Join(dataDir, "bin", "sing-box")
@@ -249,7 +245,6 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 			"releases_dir":      fileStatus(filepath.Join(dataDir, "releases"), false),
 			"config":            fileStatus(cfgPath, false),
 			"profile":           fileStatus(profilePath, false),
-			"panel":             fileStatus(panelPath, false),
 			"rendered_singbox":  fileStatus(renderedConfigPath, false),
 			"sing_box_binary":   fileStatus(singBoxPath, true),
 			"privd_log":         fileStatus(filepath.Join(dataDir, "logs", "privd.log"), false),
@@ -278,7 +273,6 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 		"config": map[string]doctorJSONSection{
 			"daemon":           readRedactedJSONFile(cfgPath),
 			"profile":          readRedactedJSONFile(profilePath),
-			"panel":            readRedactedJSONFile(panelPath),
 			"rendered_singbox": readRedactedJSONFile(renderedConfigPath),
 		},
 		"runtime":           d.runtimeDiagnostics(lines),

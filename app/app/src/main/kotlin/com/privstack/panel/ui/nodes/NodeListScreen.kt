@@ -223,6 +223,8 @@ fun NodeListScreen(
             initialTab = state.importSheetTab,
             initialText = state.importInitialText,
             candidates = state.importCandidates,
+            canApplyEmptySubscriptionPreview = state.pendingSubscriptionPreview != null &&
+                state.importCandidates.isEmpty(),
             isLoading = state.isLoading,
             errorMessage = state.errorMessage,
             statusMessage = state.statusMessage,

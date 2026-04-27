@@ -125,7 +125,7 @@ func (d *daemon) handleSubscriptionPreview(params *json.RawMessage) (interface{}
 	d.mu.Lock()
 	current := profiledoc.FromConfig(d.cfg)
 	d.mu.Unlock()
-	_, stats := profiledoc.MergeNodes(current, nodes, true)
+	_, stats := profiledoc.MergeSubscriptionNodes(current, sub, nodes)
 	return map[string]interface{}{
 		"subscription":  sub,
 		"nodes":         nodes,
@@ -145,7 +145,7 @@ func (d *daemon) handleSubscriptionRefresh(params *json.RawMessage) (interface{}
 	d.mu.Lock()
 	current := profiledoc.FromConfig(d.cfg)
 	d.mu.Unlock()
-	next, stats := profiledoc.MergeNodes(current, nodes, true)
+	next, stats := profiledoc.MergeSubscriptionNodes(current, sub, nodes)
 	replaced := false
 	for i, existing := range next.Subscriptions {
 		if existing.ProviderKey == sub.ProviderKey {
@@ -197,7 +197,7 @@ func (d *daemon) fetchAndParseSubscription(params *json.RawMessage) ([]profiledo
 		}
 	}
 	nodes, sub, failures := profiledoc.ParseSubscription(fetched.Body, fetched.Headers, p.URL, time.Now().UnixMilli())
-	if len(nodes) == 0 {
+	if len(nodes) == 0 && failures > 0 {
 		return nil, sub, failures, &ipc.RPCError{Code: ipc.CodeConfigError, Message: "subscription contains no supported nodes"}
 	}
 	return nodes, sub, failures, nil

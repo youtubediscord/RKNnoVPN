@@ -25,7 +25,7 @@
 - Android APK на Kotlin/Compose;
 - импорт VLESS/VMess/Trojan/Shadowsocks/SOCKS/Hysteria2/TUIC/Amnezia `vpn://`;
 - daemon-owned `profile.json` как canonical user intent storage;
-- миграция старых `config.json + panel.json` без APK fallback;
+- fresh-start v2 без `panel.json` migration fallback;
 - рендер нескольких nodes как `sing-box` outbounds;
 - `urltest` outbound с тегом `proxy`;
 - `diagnostics.testNodes` TCP/URL RPC;

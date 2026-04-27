@@ -124,26 +124,11 @@ func main() {
 
 	// ---- Configuration -----------------------------------------------------
 
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := loadConfigWithProfile(*cfgPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
 	profilePath := profiledoc.Path(*cfgPath)
-	profileDoc, profileFound, err := profiledoc.Load(profilePath)
-	if err != nil {
-		log.Fatalf("load profile: %v", err)
-	}
-	if profileFound {
-		cfg, _, err = profiledoc.ApplyToConfig(cfg, profileDoc)
-		if err != nil {
-			log.Fatalf("apply profile: %v", err)
-		}
-	} else {
-		profileDoc = profiledoc.FromConfig(cfg)
-		if err := profiledoc.Save(profilePath, profileDoc); err != nil {
-			log.Fatalf("migrate profile: %v", err)
-		}
-	}
 	log.Printf("config loaded from %s", *cfgPath)
 
 	// ---- Per-subsystem loggers ---------------------------------------------
@@ -345,6 +330,29 @@ func main() {
 	}
 }
 
+func loadConfigWithProfile(cfgPath string) (*config.Config, error) {
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	profilePath := profiledoc.Path(cfgPath)
+	profileDoc, profileFound, err := profiledoc.Load(profilePath)
+	if err != nil {
+		return nil, fmt.Errorf("load profile: %w", err)
+	}
+	if profileFound {
+		cfg, _, err = profiledoc.ApplyToConfig(cfg, profileDoc)
+		if err != nil {
+			return nil, fmt.Errorf("apply profile: %w", err)
+		}
+		return cfg, nil
+	}
+	if err := profiledoc.Save(profilePath, profiledoc.FromConfig(cfg)); err != nil {
+		return nil, fmt.Errorf("migrate profile: %w", err)
+	}
+	return cfg, nil
+}
+
 // --------------------------------------------------------------------------
 // Subsystem lifecycle helpers
 // --------------------------------------------------------------------------
@@ -395,7 +403,7 @@ func (d *daemon) shutdown() {
 // --------------------------------------------------------------------------
 
 func (d *daemon) reloadConfig() error {
-	newCfg, err := config.Load(d.cfgPath)
+	newCfg, err := loadConfigWithProfile(d.cfgPath)
 	if err != nil {
 		return fmt.Errorf("reload config: %w", err)
 	}

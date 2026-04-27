@@ -397,6 +397,52 @@ func MergeNodes(current Document, incoming []Node, markRemovedStale bool) (Docum
 	return next, stats
 }
 
+func MergeSubscriptionNodes(current Document, subscription Subscription, incoming []Node) (Document, map[string]int) {
+	subscription.ProviderKey = firstNonEmpty(strings.TrimSpace(subscription.ProviderKey), ProviderKeyFor(subscription.URL))
+	subscription.URL = strings.TrimSpace(subscription.URL)
+	for i := range incoming {
+		incoming[i].Source.Type = "SUBSCRIPTION"
+		if incoming[i].Source.ProviderKey == "" {
+			incoming[i].Source.ProviderKey = subscription.ProviderKey
+		}
+		if incoming[i].Source.URL == "" {
+			incoming[i].Source.URL = subscription.URL
+		}
+	}
+	next, stats := MergeNodes(current, incoming, false)
+	if subscription.ProviderKey == "" {
+		return next, stats
+	}
+	seenIncoming := map[string]bool{}
+	for _, node := range incoming {
+		if key := nodeMatchKey(node); key != "" {
+			seenIncoming[key] = true
+		}
+	}
+	for i, node := range next.Nodes {
+		if !strings.EqualFold(node.Source.Type, "SUBSCRIPTION") || node.Source.ProviderKey != subscription.ProviderKey {
+			continue
+		}
+		if seenIncoming[nodeMatchKey(node)] {
+			continue
+		}
+		if !node.Stale {
+			stats["stale"]++
+		}
+		next.Nodes[i].Stale = true
+	}
+	if next.ActiveNodeID == "" || nodeByID(next.Nodes, next.ActiveNodeID) == nil || nodeByID(next.Nodes, next.ActiveNodeID).Stale {
+		next.ActiveNodeID = ""
+		for _, node := range next.Nodes {
+			if !node.Stale {
+				next.ActiveNodeID = node.ID
+				break
+			}
+		}
+	}
+	return next, stats
+}
+
 func ProviderKeyFor(rawURL string) string {
 	return strings.ToLower(strings.TrimSpace(rawURL))
 }

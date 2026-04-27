@@ -71,6 +71,7 @@ fun ImportSheet(
     initialTab: ImportSheetTab,
     initialText: String,
     candidates: List<ImportCandidate>,
+    canApplyEmptySubscriptionPreview: Boolean,
     isLoading: Boolean,
     errorMessage: String?,
     statusMessage: String?,
@@ -243,6 +244,15 @@ fun ImportSheet(
                             stringResource(R.string.import_selected, selectedCount)
                         }
                     )
+                }
+            } else if (canApplyEmptySubscriptionPreview) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = onImportSelected,
+                    enabled = !isLoading,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.apply_subscription_preview))
                 }
             }
         }

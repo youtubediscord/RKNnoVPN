@@ -38,7 +38,7 @@ data class SubscriptionImportPreview(
 /**
  * Cache-backed profile CRUD via [DaemonClient].
  *
- * **Single source of truth**: the daemon's `config.json`.
+ * **Single source of truth**: the daemon-owned `profile.json`.
  * This repository keeps an in-memory cache that is refreshed:
  * - On first access after construction
  * - On explicit [refresh] (typically called from Activity.onResume)
@@ -463,7 +463,7 @@ class ProfileRepository @Inject constructor(
                 return null
             }
         }
-        if (preview.nodes.isEmpty()) {
+        if (preview.nodes.isEmpty() && preview.stale == 0) {
             _error.value = if (preview.parseFailures > 0) {
                 messages.get(com.privstack.panel.R.string.subscription_no_supported_links)
             } else {
