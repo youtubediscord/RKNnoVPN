@@ -12,6 +12,7 @@ import (
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
@@ -191,7 +192,9 @@ func TestDiagnosticKeepsNodeProbeEndpointMetadata(t *testing.T) {
 }
 
 func TestDiagnosticSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
-	summary := buildDiagnosticSummary(
+	summary := diagnostics.BuildSummary(
+		Version,
+		controlProtocolVersion,
 		runtimev2.HealthSnapshot{
 			CoreReady:    true,
 			RoutingReady: true,
@@ -231,7 +234,9 @@ func TestDiagnosticSummaryFlagsTCPOnlyAndLeftovers(t *testing.T) {
 }
 
 func TestDiagnosticSummaryFlagsPrivacyFailures(t *testing.T) {
-	summary := buildDiagnosticSummary(
+	summary := diagnostics.BuildSummary(
+		Version,
+		controlProtocolVersion,
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{},
@@ -311,7 +316,9 @@ func TestDiagnosticLocalhostProxyPortsUseConfiguredPorts(t *testing.T) {
 }
 
 func TestDiagnosticSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
-	summary := buildDiagnosticSummary(
+	summary := diagnostics.BuildSummary(
+		Version,
+		controlProtocolVersion,
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{},
@@ -341,7 +348,9 @@ func TestDiagnosticSummaryFlagsReleaseIntegrityMismatch(t *testing.T) {
 }
 
 func TestDiagnosticSummaryFlagsRuntimeNetstackFailure(t *testing.T) {
-	summary := buildDiagnosticSummary(
+	summary := diagnostics.BuildSummary(
+		Version,
+		controlProtocolVersion,
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{
@@ -376,7 +385,7 @@ func TestDiagnosticRoutingSummaryDetectsAutoSelector(t *testing.T) {
 	}
 	cfg.Apps.AppGroups = map[string]string{"org.telegram.messenger": "EU"}
 
-	summary := diagnosticRoutingSummaryFromConfig(cfg)
+	summary := diagnostics.RoutingSummaryFromConfig(cfg)
 
 	if summary.ActiveNodeMode != "auto_selector" {
 		t.Fatalf("expected auto selector mode, got %#v", summary)
@@ -443,7 +452,9 @@ func TestDiagnosticPortConflictsDetectDuplicateConfiguredPorts(t *testing.T) {
 }
 
 func TestDiagnosticSummaryFlagsPackageResolutionAndPortWarnings(t *testing.T) {
-	summary := buildDiagnosticSummary(
+	summary := diagnostics.BuildSummary(
+		Version,
+		controlProtocolVersion,
 		runtimev2.HealthSnapshot{CoreReady: true, RoutingReady: true, DNSReady: true, EgressReady: true},
 		nil,
 		netstack.Report{},

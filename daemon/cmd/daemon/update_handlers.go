@@ -55,66 +55,27 @@ func (d *daemon) handleUpdateDownload(params *json.RawMessage) (interface{}, *ip
 }
 
 func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	var p struct {
-		ModulePath string `json:"module_path"`
-		ApkPath    string `json:"apk_path"`
-	}
-	if params != nil {
-		_ = json.Unmarshal(*params, &p)
-	}
-
-	updateDir := filepath.Join(d.dataDir, "update")
-	expectedModulePath := filepath.Join(updateDir, "module.zip")
-	expectedApkPath := filepath.Join(updateDir, "panel.apk")
-	if p.ModulePath == "" {
-		p.ModulePath = expectedModulePath
-	}
-	if p.ApkPath == "" {
-		p.ApkPath = expectedApkPath
-	}
-	p.ModulePath = filepath.Clean(p.ModulePath)
-	p.ApkPath = filepath.Clean(p.ApkPath)
-	if p.ModulePath != filepath.Clean(expectedModulePath) || p.ApkPath != filepath.Clean(expectedApkPath) {
+	artifacts, err := updater.ResolveInstallArtifacts(d.dataDir, params)
+	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
-			Message: "update-install only accepts verified artifacts from the canonical update directory",
+			Message: err.Error(),
 		}
 	}
-
-	moduleExists := false
-	if _, err := os.Stat(p.ModulePath); err == nil {
-		moduleExists = true
-	}
-	apkExists := false
-	if _, err := os.Stat(p.ApkPath); err == nil {
-		apkExists = true
-	}
-	if !moduleExists && !apkExists {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "no downloaded update files found",
-		}
-	}
-	if moduleExists != apkExists {
-		return nil, &ipc.RPCError{
-			Code:    ipc.CodeInvalidParams,
-			Message: "this update requires both module and APK artifacts",
-		}
-	}
-	if err := updater.VerifyDownloadedUpdate(p.ModulePath, p.ApkPath); err != nil {
+	if err := updater.VerifyDownloadedUpdate(artifacts.ModulePath, artifacts.ApkPath); err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
 			Message: "update artifacts are not checksum-verified: " + err.Error(),
 		}
 	}
-	verifiedManifest, err := updater.ReadVerifiedUpdateManifest(updateDir)
+	verifiedManifest, err := updater.ReadVerifiedUpdateManifest(artifacts.UpdateDir)
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
 			Message: "update artifacts are not manifest-verified: " + err.Error(),
 		}
 	}
-	modulePreflight, err := updater.PreflightModuleUpdate(p.ModulePath, d.dataDir)
+	modulePreflight, err := updater.PreflightModuleUpdate(artifacts.ModulePath, d.dataDir)
 	if err != nil {
 		return nil, &ipc.RPCError{
 			Code:    ipc.CodeInvalidParams,
@@ -136,7 +97,7 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		d.coreMgr.GetState() == core.StateDegraded
 
 	status, err := d.runtimeV2.RunOperation(runtimev2.OperationUpdateInstall, runtimev2.PhaseStopping, func(generation int64) error {
-		installTracker := updater.NewInstallTracker(d.dataDir, generation, p.ModulePath, p.ApkPath)
+		installTracker := updater.NewInstallTracker(d.dataDir, generation, artifacts.ModulePath, artifacts.ApkPath)
 		if err := installTracker.Begin(); err != nil {
 			return fmt.Errorf("record update install state: %w", err)
 		}
@@ -153,9 +114,9 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 				go updater.ScheduleSelfExit(updater.SelfExitDelay)
 			}
 		}()
-		if apkExists {
-			markStep("update-install-apk", "running", "APK_INSTALLING", filepath.Base(p.ApkPath))
-			if err := updater.InstallApkUpdate(p.ApkPath); err != nil {
+		if artifacts.ApkExists {
+			markStep("update-install-apk", "running", "APK_INSTALLING", filepath.Base(artifacts.ApkPath))
+			if err := updater.InstallApkUpdate(artifacts.ApkPath); err != nil {
 				log.Printf("[updater] APK install failed: %v", err)
 				markStep("update-install-apk", "failed", "APK_INSTALL_FAILED", err.Error())
 				return fmt.Errorf("apk install failed: %w", err)
@@ -166,7 +127,7 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 			markStep("update-install-apk", "ok", "", "")
 		}
 
-		if moduleExists {
+		if artifacts.ModuleExists {
 			markStep("update-stop-runtime", "running", "UPDATE_STOP_RUNTIME", "stopping runtime before module install")
 			if err := d.failIfResetInProgress(); err != nil {
 				markStep("update-stop-runtime", "failed", runtimeErrorCode(err, "RESET_IN_PROGRESS"), err.Error())
@@ -179,10 +140,10 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 			markStep("update-stop-runtime", "ok", "", "")
 		}
 
-		if moduleExists {
-			markStep("update-install-module", "running", "MODULE_INSTALLING", filepath.Base(p.ModulePath))
+		if artifacts.ModuleExists {
+			markStep("update-install-module", "running", "MODULE_INSTALLING", filepath.Base(artifacts.ModulePath))
 			moduleDir := "/data/adb/modules/rknnovpn"
-			if err := updater.InstallModuleUpdate(p.ModulePath, d.dataDir, moduleDir); err != nil {
+			if err := updater.InstallModuleUpdate(artifacts.ModulePath, d.dataDir, moduleDir); err != nil {
 				if wasRunning {
 					d.restoreCurrentRuntimeAfterFailedUpdate()
 				}
@@ -196,8 +157,8 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 			markStep("update-install-module", "ok", "", "")
 		}
 
-		markStep("update-cleanup-downloads", "running", "UPDATE_CLEANUP", updateDir)
-		if err := os.RemoveAll(updateDir); err != nil {
+		markStep("update-cleanup-downloads", "running", "UPDATE_CLEANUP", artifacts.UpdateDir)
+		if err := os.RemoveAll(artifacts.UpdateDir); err != nil {
 			markStep("update-cleanup-downloads", "failed", "UPDATE_CLEANUP_FAILED", err.Error())
 			return fmt.Errorf("update cleanup failed: %w", err)
 		}

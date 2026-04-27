@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
@@ -87,27 +86,12 @@ func diagnosticLocalPortRoles(cfg *config.Config) map[int][]string {
 }
 
 func (d *daemon) diagnosticLogs(maxLines int) []diagnosticLogSection {
-	specs := []logFileSpec{
-		{Name: "daemon", Path: filepath.Join(d.dataDir, "logs", "daemon.log")},
-		{Name: "sing-box", Path: filepath.Join(d.dataDir, "logs", "sing-box.log")},
-	}
-	sections := make([]diagnosticLogSection, 0, len(specs))
-	for _, spec := range specs {
-		section := diagnosticLogSection{Name: spec.Name, Path: spec.Path}
-		lines, err := readLogTail(spec.Path, maxLines, 512*1024)
-		switch {
-		case err == nil:
-			for _, line := range lines {
-				section.Lines = append(section.Lines, redactDiagnosticText(line))
-			}
-		case os.IsNotExist(err):
-			section.Missing = true
-		default:
-			section.Error = err.Error()
-		}
-		sections = append(sections, section)
-	}
-	return sections
+	return diagnostics.ReadLogSections(
+		diagnostics.DefaultLogFileSpecs(d.dataDir),
+		maxLines,
+		512*1024,
+		redactDiagnosticText,
+	)
 }
 
 func fileStatus(path string, executable bool) diagnosticFileStatus {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
@@ -15,18 +16,14 @@ import (
 )
 
 func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	lines := 80
-	if params != nil {
-		var p struct {
-			Lines int `json:"lines"`
-		}
-		if err := json.Unmarshal(*params, &p); err == nil && p.Lines > 0 {
-			lines = p.Lines
+	request, err := control.DecodeDiagnosticsReportParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{
+			Code:    ipc.CodeInvalidParams,
+			Message: err.Error(),
 		}
 	}
-	if lines > 300 {
-		lines = 300
-	}
+	lines := request.Lines
 
 	d.mu.Lock()
 	cfg := d.cfg
@@ -62,9 +59,9 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 	privacy := d.privacyDiagnostics(cfg, lines)
 	singBoxCheck := d.singBoxCheck(singBoxPath, renderedConfigPath, lines)
 	releaseIntegrity := diagnosticReleaseIntegrityReport(dataDir)
-	routingSummary := diagnosticRoutingSummaryFromConfig(cfg)
-	profileSummary := diagnosticProfileSummaryFromConfig(cfg, runtimeStatus)
-	packageResolution := diagnosticPackageResolutionFromConfig(cfg)
+	routingSummary := diagnostics.RoutingSummaryFromConfig(cfg)
+	profileSummary := diagnostics.ProfileSummaryFromConfig(cfg, runtimeStatus)
+	packageResolution := diagnostics.PackageResolutionFromConfig(cfg)
 	versions := map[string]interface{}{
 		"daemon":                   Version,
 		"core":                     Version,
@@ -80,7 +77,7 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 
 	report := map[string]interface{}{
 		"generated_at": time.Now().Format(time.RFC3339),
-		"summary":      buildDiagnosticSummary(healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, profileSummary, routingSummary, packageResolution),
+		"summary":      diagnostics.BuildSummary(Version, controlProtocolVersion, healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, profileSummary, routingSummary, packageResolution),
 		"versions":     versions,
 		"device":       d.diagnosticDevice(lines),
 		"paths": map[string]diagnosticFileStatus{
@@ -161,7 +158,9 @@ func (d *daemon) buildSelfCheckSummary(lines int) (diagnosticSummary, error) {
 	if d.runtimeV2 != nil {
 		runtimeStatus = d.runtimeV2.Status()
 	}
-	return buildDiagnosticSummary(
+	return diagnostics.BuildSummary(
+		Version,
+		controlProtocolVersion,
 		healthSnapshot,
 		netstackReport.Leftovers,
 		netstackRuntimeReport,
@@ -171,9 +170,9 @@ func (d *daemon) buildSelfCheckSummary(lines int) (diagnosticSummary, error) {
 		readModuleVersion(),
 		d.singBoxCheck(singBoxPath, renderedConfigPath, lines),
 		diagnosticReleaseIntegrityReport(dataDir),
-		diagnosticProfileSummaryFromConfig(cfg, runtimeStatus),
-		diagnosticRoutingSummaryFromConfig(cfg),
-		diagnosticPackageResolutionFromConfig(cfg),
+		diagnostics.ProfileSummaryFromConfig(cfg, runtimeStatus),
+		diagnostics.RoutingSummaryFromConfig(cfg),
+		diagnostics.PackageResolutionFromConfig(cfg),
 	), nil
 }
 

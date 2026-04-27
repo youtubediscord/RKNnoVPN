@@ -56,11 +56,11 @@ func TestPrettyPackageLabelAndClassification(t *testing.T) {
 		t.Fatalf("unexpected label: %q", got)
 	}
 	cases := map[string]string{
-		"com.spotify.music":      "AUDIO",
-		"org.mozilla.firefox":    "BROWSER",
-		"com.example.game":       "GAME",
-		"ru.sberbankmobile":      "PRODUCTIVITY",
-		"com.instagram.android":  "SOCIAL",
+		"com.spotify.music":        "AUDIO",
+		"org.mozilla.firefox":      "BROWSER",
+		"com.example.game":         "GAME",
+		"ru.sberbankmobile":        "PRODUCTIVITY",
+		"com.instagram.android":    "SOCIAL",
 		"com.example.unclassified": "OTHER",
 	}
 	for packageName, want := range cases {
