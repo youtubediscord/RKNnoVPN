@@ -59,7 +59,7 @@ func TestSupportedRPCMethodsAdvertiseCompatibilityAliases(t *testing.T) {
 
 func TestSupportedCapabilitiesAdvertiseSchemaAndDiagnostics(t *testing.T) {
 	caps := supportedCapabilities()
-	for _, capability := range []string{"backend.reset.warnings.v1", "config.schema.v4", "diagnostics.bundle.v2", "netstack.runtime.verify.v1", "netstack.verify.v1", "node-test.tcp-direct", "privacy.localhost-listeners.v1", "privacy.loopback-dns.v1", "privacy.self-check.v1", "privacy.self-test-protected-apps.v1", "privacy.vpn-interface-patterns.v1", "runtime.logs"} {
+	for _, capability := range []string{"backend.reset.warnings.v1", "config.mutation.envelope.v1", "config.schema.v4", "diagnostics.bundle.v2", "netstack.runtime.verify.v1", "netstack.verify.v1", "node-test.tcp-direct", "privacy.localhost-listeners.v1", "privacy.loopback-dns.v1", "privacy.self-check.v1", "privacy.self-test-protected-apps.v1", "privacy.vpn-interface-patterns.v1", "runtime.logs"} {
 		if !slices.Contains(caps, capability) {
 			t.Fatalf("supported capabilities missing %s: %#v", capability, caps)
 		}
