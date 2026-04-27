@@ -811,8 +811,8 @@ func (m *CoreManager) runtimeListenerWaits() []listenerWaitSpec {
 			Timeout: 10 * time.Second,
 		})
 	}
-	panelInbounds := m.config.ResolvePanelInbounds()
-	if socksPort := panelInbounds.SocksPort; socksPort > 0 {
+	profileInbounds := m.config.ResolveProfileInbounds()
+	if socksPort := profileInbounds.SocksPort; socksPort > 0 {
 		specs = append(specs, listenerWaitSpec{
 			Stage:   "wait-socks-helper",
 			Layer:   "wait SOCKS helper port",
@@ -822,7 +822,7 @@ func (m *CoreManager) runtimeListenerWaits() []listenerWaitSpec {
 			Timeout: 10 * time.Second,
 		})
 	}
-	if httpPort := panelInbounds.HTTPPort; httpPort > 0 {
+	if httpPort := profileInbounds.HTTPPort; httpPort > 0 {
 		specs = append(specs, listenerWaitSpec{
 			Stage:   "wait-http-helper",
 			Layer:   "wait HTTP helper port",
@@ -1035,7 +1035,7 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		mark = 0x2023
 	}
 
-	panelInbounds := m.config.ResolvePanelInbounds()
+	profileInbounds := m.config.ResolveProfileInbounds()
 	appRouting := BuildRuntimeAppRoutingEnv(
 		m.config.Apps.Mode,
 		m.config.Apps.Packages,
@@ -1050,8 +1050,8 @@ func (m *CoreManager) scriptEnv() map[string]string {
 		"TPROXY_PORT":       strconv.Itoa(tproxyPort),
 		"DNS_PORT":          strconv.Itoa(dnsPort),
 		"API_PORT":          strconv.Itoa(apiPort),
-		"SOCKS_PORT":        strconv.Itoa(panelInbounds.SocksPort),
-		"HTTP_PORT":         strconv.Itoa(panelInbounds.HTTPPort),
+		"SOCKS_PORT":        strconv.Itoa(profileInbounds.SocksPort),
+		"HTTP_PORT":         strconv.Itoa(profileInbounds.HTTPPort),
 		"CHAIN_PROXY_PORTS": chainProxyPorts,
 		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
 		"FWMARK":            fmt.Sprintf("0x%x", mark),

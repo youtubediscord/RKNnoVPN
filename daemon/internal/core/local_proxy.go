@@ -51,7 +51,7 @@ func localOutboundProxyPorts(cfg *config.Config) []int {
 	if cfg == nil {
 		return nil
 	}
-	profiles := config.ProfilesFromPanelNodes(cfg)
+	profiles := config.ProfilesFromConfigNodes(cfg)
 	if len(profiles) == 0 {
 		if profile := cfg.ResolveProfile(); profile != nil {
 			profiles = []*config.NodeProfile{profile}
@@ -93,8 +93,8 @@ func reservedCorePorts(cfg *config.Config) map[int]bool {
 			ports[port] = true
 		}
 	}
-	panelInbounds := cfg.ResolvePanelInbounds()
-	for _, port := range []int{panelInbounds.SocksPort, panelInbounds.HTTPPort} {
+	profileInbounds := cfg.ResolveProfileInbounds()
+	for _, port := range []int{profileInbounds.SocksPort, profileInbounds.HTTPPort} {
 		if port > 0 {
 			ports[port] = true
 		}

@@ -51,6 +51,7 @@ func TestNewErrorResponseWrapsErrorEnvelope(t *testing.T) {
 	details := map[string]interface{}{
 		"code":         "CONFIG_APPLY_FAILED",
 		"config_saved": true,
+		"operation":    map[string]interface{}{"type": "config-mutation", "action": "config-import"},
 	}
 	resp := NewErrorResponse(9, CodeInternalError, "apply failed", details)
 
@@ -73,6 +74,9 @@ func TestNewErrorResponseWrapsErrorEnvelope(t *testing.T) {
 	}
 	if errPayload.Details == nil {
 		t.Fatalf("error envelope must preserve details: %#v", errPayload)
+	}
+	if envelope.Operation == nil {
+		t.Fatalf("error envelope must expose operation from details: %#v", envelope)
 	}
 	if envelope.Warnings == nil || len(envelope.Warnings) != 0 {
 		t.Fatalf("error envelope must carry an empty warnings list: %#v", envelope)

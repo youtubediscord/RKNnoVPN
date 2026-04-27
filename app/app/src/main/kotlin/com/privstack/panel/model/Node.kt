@@ -1,5 +1,6 @@
 package com.privstack.panel.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 
@@ -18,7 +19,7 @@ data class Node(
     val server: String,
     val port: Int,
     /** Original share-link URI (vless://..., trojan://..., etc.) */
-    val link: String,
+    val link: String = "",
     /** Protocol-specific outbound config in daemon's canonical schema. */
     val outbound: JsonObject,
     val group: String = "Default",
@@ -56,13 +57,21 @@ enum class NodeSourceType {
 
 @Serializable
 enum class Protocol {
+    @SerialName("vless")
     VLESS,
+    @SerialName("vmess")
     VMESS,
+    @SerialName("trojan")
     TROJAN,
+    @SerialName("shadowsocks")
     SHADOWSOCKS,
+    @SerialName("socks")
     SOCKS,
+    @SerialName("hysteria2")
     HYSTERIA2,
+    @SerialName("tuic")
     TUIC,
+    @SerialName("wireguard")
     WIREGUARD;
 
     companion object {

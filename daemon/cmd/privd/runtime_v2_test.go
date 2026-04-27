@@ -121,7 +121,7 @@ func TestConfigApplyRPCErrorEnvelopeKeepsSavedFailureVisible(t *testing.T) {
 	if !ok {
 		t.Fatalf("saved apply failure must expose transaction operation: %#v", data)
 	}
-	if operation["status"] != "failed" || operation["configSaved"] != true {
+	if operation["status"] != "saved_not_applied" || operation["configSaved"] != true {
 		t.Fatalf("unexpected failure operation: %#v", operation)
 	}
 }
@@ -482,7 +482,7 @@ func TestBackendStartUsesRuntimeActorWhenAlreadyRunning(t *testing.T) {
 func TestBackendStartRecordsMissingNodeFailure(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfg.Node.Address = ""
-	d.cfg.Panel.Nodes = nil
+	d.cfg.Profile.Nodes = nil
 	d.initRuntimeV2()
 
 	if _, rpcErr := d.handleBackendStart(nil); rpcErr != nil {
@@ -501,7 +501,6 @@ func TestBackendRestartReturnsRuntimeStatus(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
 	d.profilePath = profiledoc.Path(d.cfgPath)
-	d.panelPath = config.PanelPath(d.cfgPath)
 	if err := d.cfg.Save(d.cfgPath); err != nil {
 		t.Fatal(err)
 	}
@@ -526,11 +525,12 @@ func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
 	d.profilePath = profiledoc.Path(d.cfgPath)
-	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 	d.coreMgr.SetState(core.StateRunning)
 
-	raw, err := json.Marshal(d.cfg)
+	importCfg := *d.cfg
+	importCfg.Health.IntervalSec = 77
+	raw, err := json.Marshal(&importCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,6 +553,16 @@ func TestConfigImportReturnsRuntimeStatus(t *testing.T) {
 	if !statusHasOperation(status, runtimev2.OperationReload) {
 		t.Fatalf("config import should expose reload operation, got %#v", status)
 	}
+	savedProfile, found, err := profiledoc.Load(d.profilePath)
+	if err != nil {
+		t.Fatalf("load imported profile: %v", err)
+	}
+	if !found {
+		t.Fatal("config import did not persist profile.json")
+	}
+	if savedProfile.Health.IntervalSec != importCfg.Health.IntervalSec {
+		t.Fatalf("saved imported profile health interval = %d, want %d", savedProfile.Health.IntervalSec, importCfg.Health.IntervalSec)
+	}
 	waitForDaemonRuntimeOperationDone(t, d.runtimeV2, runtimev2.OperationReload)
 }
 
@@ -560,7 +570,6 @@ func TestConfigImportRejectsLinkPayload(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
 	d.profilePath = profiledoc.Path(d.cfgPath)
-	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 
 	params := json.RawMessage(`{"links":"vless://example"}`)
@@ -576,11 +585,29 @@ func TestConfigImportRejectsLinkPayload(t *testing.T) {
 	}
 }
 
+func TestConfigImportRejectsPanelPayload(t *testing.T) {
+	d := newTestResetDaemon(t, nil, true)
+	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
+	d.profilePath = profiledoc.Path(d.cfgPath)
+	d.initRuntimeV2()
+
+	params := json.RawMessage(`{"schema_version":5,"panel":{"id":"old-panel"}}`)
+	_, rpcErr := d.handleConfigImport(&params)
+	if rpcErr == nil {
+		t.Fatal("panel payload must not be accepted by config-import")
+	}
+	if rpcErr.Code != ipc.CodeInvalidParams {
+		t.Fatalf("unexpected error code: %#v", rpcErr)
+	}
+	if !strings.Contains(rpcErr.Message, "unknown config import field \"panel\"") {
+		t.Fatalf("unexpected error message: %q", rpcErr.Message)
+	}
+}
+
 func TestReloadConfigApplyBusyDoesNotPersistConfig(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
 	d.profilePath = profiledoc.Path(d.cfgPath)
-	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 	if err := d.cfg.Save(d.cfgPath); err != nil {
 		t.Fatal(err)
@@ -616,7 +643,6 @@ func TestConfigApplyWithoutReloadBusyDoesNotPersistConfig(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
 	d.profilePath = profiledoc.Path(d.cfgPath)
-	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 	if err := d.cfg.Save(d.cfgPath); err != nil {
 		t.Fatal(err)
@@ -652,7 +678,6 @@ func TestProfileApplyReturnsRuntimeStatus(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
 	d.cfgPath = filepath.Join(d.dataDir, "config", "config.json")
 	d.profilePath = profiledoc.Path(d.cfgPath)
-	d.panelPath = config.PanelPath(d.cfgPath)
 	d.initRuntimeV2()
 	if err := d.cfg.Save(d.cfgPath); err != nil {
 		t.Fatal(err)
@@ -848,7 +873,6 @@ func newTestResetDaemon(t *testing.T, leftovers []string, withRescueScript bool)
 		cfg:                      cfg,
 		cfgPath:                  cfgPath,
 		profilePath:              profiledoc.Path(cfgPath),
-		panelPath:                config.PanelPath(cfgPath),
 		dataDir:                  dataDir,
 		coreMgr:                  coreMgr,
 		healthMon:                healthMon,
@@ -939,7 +963,7 @@ func TestBuildScriptEnvUsesExplicitDNSScopeForWhitelist(t *testing.T) {
 
 func TestBuildScriptEnvIncludesLocalHelperPorts(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Panel.Inbounds = []byte(`{"socksPort":10808,"httpPort":10809}`)
+	cfg.Profile.Inbounds = []byte(`{"socksPort":10808,"httpPort":10809}`)
 
 	env := buildScriptEnv(cfg, t.TempDir())
 	if env["SOCKS_PORT"] != "10808" {

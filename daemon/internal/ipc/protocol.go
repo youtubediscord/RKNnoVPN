@@ -90,7 +90,7 @@ func NewErrorResponse(id int, code int, message string, data interface{}) *Respo
 					Message: message,
 					Details: data,
 				},
-				Operation: nil,
+				Operation: operationFromResult(data),
 				Warnings:  []string{},
 			},
 		},

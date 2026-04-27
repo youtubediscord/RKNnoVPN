@@ -309,7 +309,7 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		mark = 0x2023
 	}
 
-	panelInbounds := r.cfg.ResolvePanelInbounds()
+	profileInbounds := r.cfg.ResolveProfileInbounds()
 	appRouting := core.BuildRuntimeAppRoutingEnv(
 		r.cfg.Apps.Mode,
 		r.cfg.Apps.Packages,
@@ -324,8 +324,8 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		"TPROXY_PORT":       fmt.Sprintf("%d", tproxyPort),
 		"DNS_PORT":          fmt.Sprintf("%d", dnsPort),
 		"API_PORT":          fmt.Sprintf("%d", apiPort),
-		"SOCKS_PORT":        fmt.Sprintf("%d", panelInbounds.SocksPort),
-		"HTTP_PORT":         fmt.Sprintf("%d", panelInbounds.HTTPPort),
+		"SOCKS_PORT":        fmt.Sprintf("%d", profileInbounds.SocksPort),
+		"HTTP_PORT":         fmt.Sprintf("%d", profileInbounds.HTTPPort),
 		"CHAIN_PROXY_PORTS": chainProxyPorts,
 		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
 		"FWMARK":            fmt.Sprintf("0x%x", mark),

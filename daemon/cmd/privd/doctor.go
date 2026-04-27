@@ -188,11 +188,14 @@ func (d *daemon) handleDoctor(params *json.RawMessage) (interface{}, *ipc.RPCErr
 	cfg := d.cfg
 	cfgPath := d.cfgPath
 	profilePath := d.profilePath
-	panelPath := d.panelPath
 	dataDir := d.dataDir
 	d.mu.Unlock()
 	if profilePath == "" && cfgPath != "" {
 		profilePath = profiledoc.Path(cfgPath)
+	}
+	panelPath := ""
+	if cfgPath != "" {
+		panelPath = config.PanelPath(cfgPath)
 	}
 
 	renderedConfigPath := filepath.Join(dataDir, "config", "rendered", "singbox.json")
@@ -573,9 +576,9 @@ func doctorRoutingSummaryFromConfig(cfg *config.Config) doctorRoutingSummary {
 		Protocol string `json:"protocol"`
 		Group    string `json:"group"`
 	}
-	nodes := make([]nodeMeta, 0, len(cfg.Panel.Nodes))
+	nodes := make([]nodeMeta, 0, len(cfg.Profile.Nodes))
 	groupSet := map[string]bool{}
-	for _, raw := range cfg.Panel.Nodes {
+	for _, raw := range cfg.Profile.Nodes {
 		var node nodeMeta
 		if err := json.Unmarshal(raw, &node); err != nil {
 			continue
@@ -599,7 +602,7 @@ func doctorRoutingSummaryFromConfig(cfg *config.Config) doctorRoutingSummary {
 		AppGroupRouteCount: len(cfg.Apps.AppGroups),
 		SharingEnabled:     cfg.Sharing.Enabled,
 	}
-	activeID := strings.TrimSpace(cfg.Panel.ActiveNodeID)
+	activeID := strings.TrimSpace(cfg.Profile.ActiveNodeID)
 	if activeID != "" {
 		summary.ActiveNodeMode = "manual"
 		summary.ActiveNodeID = activeID
@@ -964,10 +967,10 @@ func (d *daemon) privacyDiagnostics(cfg *config.Config, maxLines int) map[string
 		"localhost_proxy_ports_clear": doctorLocalhostProxyPortsClear(cfg),
 	}
 	if cfg != nil {
-		panelInbounds := cfg.ResolvePanelInbounds()
+		profileInbounds := cfg.ResolveProfileInbounds()
 		checks["clash_api_disabled"] = cfg.Proxy.APIPort == 0
-		checks["helper_inbounds_disabled"] = panelInbounds.HTTPPort == 0 && panelInbounds.SocksPort == 0
-		checks["helper_inbounds_local_only"] = !panelInbounds.AllowLAN
+		checks["helper_inbounds_disabled"] = profileInbounds.HTTPPort == 0 && profileInbounds.SocksPort == 0
+		checks["helper_inbounds_local_only"] = !profileInbounds.AllowLAN
 		checks["per_app_whitelist_default"] = cfg.Apps.Mode == "whitelist" || cfg.Apps.Mode == "off"
 		checks["dns_hijack_per_uid"] = cfg.DNS.HijackPerUID
 		checks["self_test_apps_direct"] = selfTestProtectedAppsDirect()
@@ -998,8 +1001,8 @@ func selfTestProtectedAppsDirect() bool {
 func doctorLocalhostProxyPortsClear(cfg *config.Config) bool {
 	ports := []int{10808, 10809, 9090}
 	if cfg != nil {
-		panelInbounds := cfg.ResolvePanelInbounds()
-		ports = append(ports, cfg.Proxy.APIPort, panelInbounds.SocksPort, panelInbounds.HTTPPort)
+		profileInbounds := cfg.ResolveProfileInbounds()
+		ports = append(ports, cfg.Proxy.APIPort, profileInbounds.SocksPort, profileInbounds.HTTPPort)
 	}
 	seen := map[int]bool{}
 	for _, port := range ports {
@@ -1067,7 +1070,7 @@ func doctorLocalPortRoles(cfg *config.Config) map[int][]string {
 	if cfg == nil {
 		return nil
 	}
-	panelInbounds := cfg.ResolvePanelInbounds()
+	profileInbounds := cfg.ResolveProfileInbounds()
 	candidates := []struct {
 		role string
 		port int
@@ -1075,8 +1078,8 @@ func doctorLocalPortRoles(cfg *config.Config) map[int][]string {
 		{"tproxy", valueOrDefaultInt(cfg.Proxy.TProxyPort, 10853)},
 		{"dns", valueOrDefaultInt(cfg.Proxy.DNSPort, 10856)},
 		{"clash_api", cfg.Proxy.APIPort},
-		{"socks_helper", panelInbounds.SocksPort},
-		{"http_helper", panelInbounds.HTTPPort},
+		{"socks_helper", profileInbounds.SocksPort},
+		{"http_helper", profileInbounds.HTTPPort},
 	}
 	roles := map[int][]string{}
 	for _, candidate := range candidates {

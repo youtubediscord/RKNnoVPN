@@ -1,7 +1,6 @@
 package com.privstack.panel.ipc
 
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 
 /**
  * Sealed result type for every `privctl` invocation.
@@ -13,8 +12,7 @@ sealed class PrivctlResult {
 
     /**
      * The daemon returned a successful JSON-RPC response.
-     * [data] contains the `result` field from the response; may be [JsonNull]
-     * for void methods like `stop`.
+     * [data] contains the typed daemon envelope result.
      */
     data class Success(
         val data: JsonElement,

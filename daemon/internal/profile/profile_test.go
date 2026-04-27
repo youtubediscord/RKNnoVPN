@@ -9,17 +9,17 @@ import (
 
 func TestProfileDocumentMigratesConfigAndPanelWithoutDroppingState(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Panel.ID = "main"
-	cfg.Panel.Name = "Primary"
-	cfg.Panel.ActiveNodeID = "node-a"
-	cfg.Panel.Nodes = []json.RawMessage{
+	cfg.Profile.ID = "main"
+	cfg.Profile.Name = "Primary"
+	cfg.Profile.ActiveNodeID = "node-a"
+	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-a","name":"A","protocol":"VLESS","server":"example.com","port":443,"outbound":{"protocol":"vless","settings":{"vnext":[{"address":"example.com","port":443,"users":[{"id":"uuid-a"}]}]}},"source":{"type":"MANUAL"}}`),
 		json.RawMessage(`{"id":"node-old","name":"Old","protocol":"TROJAN","server":"old.example","port":443,"stale":true,"outbound":{"protocol":"trojan","settings":{"servers":[{"address":"old.example","port":443,"password":"p"}]}},"source":{"type":"SUBSCRIPTION","url":"https://sub.example/list","providerKey":"https://sub.example/list","lastSeenAt":1}}`),
 	}
-	cfg.Panel.Subscriptions = []json.RawMessage{
+	cfg.Profile.Subscriptions = []json.RawMessage{
 		json.RawMessage(`{"providerKey":"https://sub.example/list","url":"https://sub.example/list","lastFetchedAt":1,"lastSeenNodeCount":1,"staleNodeCount":1}`),
 	}
-	cfg.Panel.Inbounds = json.RawMessage(`{"socksPort":10808,"httpPort":10809,"allowLan":false}`)
+	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":10808,"httpPort":10809,"allowLan":false}`)
 
 	doc := FromConfig(cfg)
 	if doc.SchemaVersion != CurrentSchemaVersion {
@@ -71,15 +71,18 @@ func TestSubscriptionMergePreservesManualAndMarksRemovedStale(t *testing.T) {
 		ID:   "main",
 		Name: "Primary",
 		Nodes: []Node{
-			{ID: "manual", Name: "Manual", Protocol: "vless", Server: "manual.example", Port: 443, Outbound: json.RawMessage(`{"id":"manual"}`), Source: NodeSource{Type: "MANUAL"}},
+			{ID: "manual", Name: "Manual", Protocol: "vless", Server: "shared.example", Port: 443, Outbound: json.RawMessage(`{"id":"manual"}`), Source: NodeSource{Type: "MANUAL"}},
 			{ID: "old", Name: "Old", Protocol: "vless", Server: "old.example", Port: 443, Outbound: json.RawMessage(`{"id":"old"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
+			{ID: "same", Name: "Same", Protocol: "vless", Server: "same.example", Port: 443, Outbound: json.RawMessage(`{"id":"old-outbound"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
 		},
 	}
 	incoming := []Node{
 		{ID: "new", Name: "New", Protocol: "vless", Server: "new.example", Port: 443, Outbound: json.RawMessage(`{"id":"new"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
+		{ID: "same", Name: "Same updated", Protocol: "vless", Server: "same.example", Port: 443, Outbound: json.RawMessage(`{"id":"new-outbound"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
+		{ID: "manual-lookalike", Name: "Subscription twin", Protocol: "vless", Server: "shared.example", Port: 443, Outbound: json.RawMessage(`{"id":"manual"}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub"}},
 	}
 	next, stats := MergeNodes(current, incoming, true)
-	if len(next.Nodes) != 3 {
+	if len(next.Nodes) != 5 {
 		t.Fatalf("unexpected node count after merge: %#v", next.Nodes)
 	}
 	if next.Nodes[0].ID != "manual" || next.Nodes[0].Stale {
@@ -88,7 +91,34 @@ func TestSubscriptionMergePreservesManualAndMarksRemovedStale(t *testing.T) {
 	if !next.Nodes[1].Stale {
 		t.Fatalf("removed subscription node was not marked stale: %#v", next.Nodes[1])
 	}
-	if stats["added"] != 1 || stats["stale"] != 1 {
+	if next.Nodes[2].ID != "same" || string(next.Nodes[2].Outbound) != `{"id":"new-outbound"}` {
+		t.Fatalf("subscription node was not updated in place: %#v", next.Nodes[2])
+	}
+	if stats["added"] != 2 || stats["updated"] != 1 || stats["stale"] != 1 {
 		t.Fatalf("unexpected merge stats: %#v", stats)
+	}
+}
+
+func TestNormalizeSubscriptionsRecomputesProviderCounts(t *testing.T) {
+	doc := Document{
+		ID: "main",
+		Subscriptions: []Subscription{
+			{ProviderKey: "sub", URL: "https://sub.example/list", LastSeenNodeCount: 99, StaleNodeCount: 99},
+		},
+		Nodes: []Node{
+			{ID: "live", Name: "Live", Protocol: "vless", Server: "live.example", Port: 443, Outbound: json.RawMessage(`{}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub", URL: "https://sub.example/list"}},
+			{ID: "stale", Name: "Stale", Protocol: "vless", Server: "old.example", Port: 443, Stale: true, Outbound: json.RawMessage(`{}`), Source: NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub", URL: "https://sub.example/list"}},
+		},
+	}
+
+	normalized, _, err := Normalize(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(normalized.Subscriptions) != 1 {
+		t.Fatalf("expected one subscription, got %#v", normalized.Subscriptions)
+	}
+	if normalized.Subscriptions[0].LastSeenNodeCount != 1 || normalized.Subscriptions[0].StaleNodeCount != 1 {
+		t.Fatalf("subscription counts were not recomputed: %#v", normalized.Subscriptions[0])
 	}
 }

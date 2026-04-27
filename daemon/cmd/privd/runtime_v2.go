@@ -96,10 +96,10 @@ func (b *rootBackendV2) Start(desired runtimev2.DesiredState, generation int64) 
 
 	b.d.mu.Lock()
 	profile := b.d.cfg.ResolveProfile()
-	hasPanelNodes := len(b.d.cfg.Panel.Nodes) > 0
+	hasProfileNodes := len(config.ProfilesFromConfigNodes(b.d.cfg)) > 0
 	b.d.mu.Unlock()
 
-	if profile.Address == "" && !hasPanelNodes {
+	if profile.Address == "" && !hasProfileNodes {
 		b.d.markRuntimeStartFailed(epoch)
 		return recoveryReport, fmt.Errorf("no node configured (address is empty)")
 	}
@@ -355,7 +355,7 @@ func (d *daemon) desiredStateV2() runtimev2.DesiredState {
 
 	return runtimev2.DesiredState{
 		BackendKind:     backendKind,
-		ActiveProfileID: cfg.Panel.ActiveNodeID,
+		ActiveProfileID: cfg.Profile.ActiveNodeID,
 		RoutingMode:     mapRoutingModeV2(cfg),
 		AppSelection:    appSelection,
 		DNSPolicy: runtimev2.DNSPolicy{
@@ -409,10 +409,10 @@ func (d *daemon) restartRootBackendV2(generation int64) error {
 
 	d.mu.Lock()
 	profile := d.cfg.ResolveProfile()
-	hasPanelNodes := len(d.cfg.Panel.Nodes) > 0
+	hasProfileNodes := len(config.ProfilesFromConfigNodes(d.cfg)) > 0
 	d.mu.Unlock()
 
-	if profile.Address == "" && !hasPanelNodes {
+	if profile.Address == "" && !hasProfileNodes {
 		return fmt.Errorf("no node configured (address is empty)")
 	}
 	if err := d.coreMgr.Start(profile); err != nil {
@@ -885,13 +885,13 @@ func effectiveLocalPorts(cfg *config.Config) []int {
 	if cfg == nil {
 		return nil
 	}
-	panelInbounds := cfg.ResolvePanelInbounds()
+	profileInbounds := cfg.ResolveProfileInbounds()
 	ports := []int{
 		valueOrDefaultInt(cfg.Proxy.TProxyPort, 10853),
 		valueOrDefaultInt(cfg.Proxy.DNSPort, 10856),
 		cfg.Proxy.APIPort,
-		panelInbounds.SocksPort,
-		panelInbounds.HTTPPort,
+		profileInbounds.SocksPort,
+		profileInbounds.HTTPPort,
 	}
 	seen := make(map[int]bool, len(ports))
 	result := make([]int, 0, len(ports))
@@ -1146,7 +1146,7 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 
 	d.mu.Lock()
 	cfg := d.cfg
-	profiles := config.ProfilesFromPanelNodes(cfg)
+	profiles := config.ProfilesFromConfigNodes(cfg)
 	if len(profiles) == 0 {
 		profile := cfg.ResolveProfile()
 		if profile.Address != "" {

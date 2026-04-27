@@ -170,7 +170,7 @@ func TestBuildChainedProxyProtectionEnvAllowsMutualLocalProxyUIDs(t *testing.T) 
    1: 0100007F:2A39 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10124 0 112 1 00000000
 `, "")
 	cfg := config.DefaultConfig()
-	cfg.Panel.Nodes = jsonRawMessage(t, `{
+	cfg.Profile.Nodes = jsonRawMessage(t, `{
 		"id":"nekobox",
 		"name":"NekoBox local",
 		"protocol":"SOCKS",
@@ -202,7 +202,7 @@ func TestBuildChainedProxyProtectionEnvSkipsUnownedAndReservedPorts(t *testing.T
 `, "")
 	cfg := config.DefaultConfig()
 	cfg.Proxy.APIPort = 10808
-	cfg.Panel.Nodes = jsonRawMessage(t, `{
+	cfg.Profile.Nodes = jsonRawMessage(t, `{
 		"id":"api-duplicate",
 		"protocol":"SOCKS",
 		"server":"127.0.0.1",

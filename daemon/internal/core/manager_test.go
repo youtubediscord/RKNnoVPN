@@ -212,7 +212,7 @@ func TestSingBoxConfigCheckTimeout(t *testing.T) {
 
 func TestScriptEnvIncludesLocalHelperPorts(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Panel.Inbounds = []byte(`{"socksPort":10808,"httpPort":10809}`)
+	cfg.Profile.Inbounds = []byte(`{"socksPort":10808,"httpPort":10809}`)
 	manager := NewCoreManager(cfg, t.TempDir(), nil)
 
 	env := manager.scriptEnv()

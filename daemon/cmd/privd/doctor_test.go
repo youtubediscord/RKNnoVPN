@@ -201,7 +201,7 @@ func TestDoctorVPNLikeInterfaceDetection(t *testing.T) {
 func TestDoctorLocalhostProxyPortsUseConfiguredPorts(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Proxy.APIPort = 19090
-	cfg.Panel.Inbounds = json.RawMessage(`{"socksPort":19080,"httpPort":19081}`)
+	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":19080,"httpPort":19081}`)
 
 	if !doctorLocalhostProxyPortsClear(cfg) {
 		t.Fatalf("unused configured ports should be clear")
@@ -268,7 +268,7 @@ func TestDoctorSummaryFlagsRuntimeNetstackFailure(t *testing.T) {
 
 func TestDoctorRoutingSummaryDetectsAutoSelector(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Panel.Nodes = []json.RawMessage{
+	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-a","name":"A","protocol":"vless","group":"EU"}`),
 		json.RawMessage(`{"id":"node-b","name":"B","protocol":"trojan","group":"US"}`),
 	}
@@ -293,7 +293,7 @@ func TestDoctorRoutingSummaryDetectsAutoSelector(t *testing.T) {
 func TestDoctorPortStatusesIncludeRoles(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Proxy.APIPort = 9090
-	cfg.Panel.Inbounds = json.RawMessage(`{"socksPort":10808,"httpPort":10809}`)
+	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":10808,"httpPort":10809}`)
 
 	roles := doctorLocalPortRoles(cfg)
 
@@ -315,7 +315,7 @@ func TestDoctorPortConflictsDetectDuplicateConfiguredPorts(t *testing.T) {
 	cfg.Proxy.TProxyPort = 10853
 	cfg.Proxy.DNSPort = 10853
 	cfg.Proxy.APIPort = 19090
-	cfg.Panel.Inbounds = json.RawMessage(`{"socksPort":19091,"httpPort":19090}`)
+	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":19091,"httpPort":19090}`)
 
 	conflicts := doctorLocalPortConflicts(cfg)
 	if len(conflicts) != 2 {

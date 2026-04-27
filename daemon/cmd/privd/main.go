@@ -39,7 +39,6 @@ type daemon struct {
 	cfg         *config.Config
 	cfgPath     string
 	profilePath string
-	panelPath   string
 	dataDir     string
 
 	coreMgr    *core.CoreManager
@@ -213,7 +212,6 @@ func main() {
 		cfg:         cfg,
 		cfgPath:     *cfgPath,
 		profilePath: profilePath,
-		panelPath:   config.PanelPath(*cfgPath),
 		dataDir:     *dataDir,
 		coreMgr:     coreMgr,
 		healthMon:   healthMon,
@@ -617,8 +615,8 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 		)
 	}
 
-	panelInbounds := cfg.ResolvePanelInbounds()
-	if panelInbounds.HTTPPort > 0 || panelInbounds.SocksPort > 0 {
+	profileInbounds := cfg.ResolveProfileInbounds()
+	if profileInbounds.HTTPPort > 0 || profileInbounds.SocksPort > 0 {
 		appendFinding(
 			"LOCAL_HELPER_INBOUND_ENABLED",
 			"Локальный HTTP/SOCKS helper включён",
@@ -629,7 +627,7 @@ func (d *daemon) handleAudit(params *json.RawMessage) (interface{}, *ipc.RPCErro
 			"panel.inbounds",
 		)
 	}
-	if panelInbounds.AllowLAN && (panelInbounds.HTTPPort > 0 || panelInbounds.SocksPort > 0) {
+	if profileInbounds.AllowLAN && (profileInbounds.HTTPPort > 0 || profileInbounds.SocksPort > 0) {
 		appendFinding(
 			"LOCAL_HELPER_EXPOSED_ON_LAN",
 			"Локальный helper inbound открыт за пределы localhost",
@@ -940,25 +938,8 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 	}
 	newCfg.Migrate()
 	d.mu.Lock()
-	newCfg.Panel = d.cfg.Panel
+	newCfg.Profile = d.cfg.Profile
 	d.mu.Unlock()
-	panelProvided := false
-	if panelRaw, ok := raw["panel"]; ok {
-		panelProvided = true
-		if err := json.Unmarshal(panelRaw, &newCfg.Panel); err != nil {
-			return nil, &ipc.RPCError{
-				Code:    ipc.CodeConfigError,
-				Message: "invalid panel config: " + err.Error(),
-			}
-		}
-		if err := config.ValidatePanelConfig(newCfg.Panel); err != nil {
-			return nil, &ipc.RPCError{
-				Code:    ipc.CodeConfigError,
-				Message: "validation failed: " + err.Error(),
-			}
-		}
-		newCfg.SyncFromPanel(true)
-	}
 
 	if err := newCfg.Validate(); err != nil {
 		return nil, &ipc.RPCError{
@@ -978,14 +959,13 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 	if err := d.failIfRuntimeOperationActive(); err != nil {
 		return nil, d.configApplyRPCError("config-import", err)
 	}
-	if panelProvided {
-		if err := profiledoc.Save(d.profilePath, profiledoc.FromConfig(newCfg)); err != nil {
-			return nil, d.configApplyRPCError("config-import", fmt.Errorf("persist profile: %w", err))
-		}
+	if err := profiledoc.Save(d.profilePath, profiledoc.FromConfig(newCfg)); err != nil {
+		return nil, d.configApplyRPCError("config-import", fmt.Errorf("persist profile: %w", err))
 	}
+	profileSaved := true
 	runtimeWasRunning := d.runtimeIsRunning()
 	if err := d.applyConfig(newCfg, true); err != nil {
-		return nil, d.configApplyRPCError("config-import", err)
+		return nil, d.configApplyRPCErrorSaved("config-import", err, profileSaved)
 	}
 
 	return d.configMutationSuccess("config-import", "imported", true, runtimeWasRunning, -1), nil
@@ -997,7 +977,6 @@ func isFullConfigImportKey(key string) bool {
 		"proxy",
 		"transport",
 		"node",
-		"panel",
 		"runtime_v2",
 		"routing",
 		"apps",
@@ -1014,10 +993,13 @@ func isFullConfigImportKey(key string) bool {
 }
 
 func (d *daemon) configApplyRPCError(action string, err error) *ipc.RPCError {
+	return d.configApplyRPCErrorSaved(action, err, configMutationWasSaved(err))
+}
+
+func (d *daemon) configApplyRPCErrorSaved(action string, err error, saved bool) *ipc.RPCError {
 	var busy *runtimev2.OperationBusyError
 	if errors.As(err, &busy) {
 		rpcErr := d.rpcErrorFromRuntimeError(err)
-		saved := configMutationWasSaved(err)
 		rpcErr.Data = d.configMutationErrorData(action, err, saved)
 		rpcErr.Data.(map[string]interface{})["busy"] = busy.Data()
 		return rpcErr
@@ -1026,7 +1008,7 @@ func (d *daemon) configApplyRPCError(action string, err error) *ipc.RPCError {
 		Code:    ipc.CodeInternalError,
 		Message: err.Error(),
 	}
-	rpcErr.Data = d.configMutationErrorData(action, err, configMutationWasSaved(err))
+	rpcErr.Data = d.configMutationErrorData(action, err, saved)
 	return rpcErr
 }
 
@@ -1058,7 +1040,9 @@ func (d *daemon) configMutationSuccess(action string, status string, reload bool
 		result["updated"] = updated
 	}
 	if d.runtimeV2 != nil {
-		result["runtimeStatus"] = d.runtimeV2.Status()
+		status := d.runtimeV2.Status()
+		attachMutationGenerations(result, operation, status)
+		result["runtimeStatus"] = status
 	}
 	return result
 }
@@ -1077,26 +1061,46 @@ func configRuntimeApplyStatus(reload bool, runtimeWasRunning bool) string {
 func (d *daemon) configMutationErrorData(action string, err error, saved bool) map[string]interface{} {
 	code := runtimeErrorCode(err, "CONFIG_APPLY_FAILED")
 	runtimeApply := "not_started"
+	status := "failed"
 	if saved {
 		runtimeApply = "failed"
+		status = "saved_not_applied"
 	}
 	resetReport := resetReportFromRuntimeError(err)
+	operation := configMutationOperation(action, status, saved, saved, false, runtimeApply, -1, code, err.Error(), resetReport)
 	data := map[string]interface{}{
 		"ok":              false,
+		"status":          status,
 		"config_saved":    saved,
 		"runtime_applied": false,
 		"message":         err.Error(),
 		"code":            code,
 		"runtime_apply":   runtimeApply,
-		"operation":       configMutationOperation(action, "failed", saved, saved, false, runtimeApply, -1, code, err.Error(), resetReport),
+		"operation":       operation,
 	}
 	if d.runtimeV2 != nil {
-		data["runtimeStatus"] = d.runtimeV2.Status()
+		status := d.runtimeV2.Status()
+		attachMutationGenerations(data, operation, status)
+		data["runtimeStatus"] = status
 	}
 	if resetReport != nil {
 		data["resetReport"] = resetReport
 	}
 	return data
+}
+
+func attachMutationGenerations(result map[string]interface{}, operation map[string]interface{}, status runtimev2.Status) {
+	appliedGeneration := status.AppliedState.Generation
+	desiredGeneration := appliedGeneration
+	if status.ActiveOperation != nil {
+		desiredGeneration = status.ActiveOperation.Generation
+	} else if result["config_saved"] == true || result["configSaved"] == true {
+		desiredGeneration = appliedGeneration + 1
+	}
+	result["desiredGeneration"] = desiredGeneration
+	result["appliedGeneration"] = appliedGeneration
+	operation["desiredGeneration"] = desiredGeneration
+	operation["appliedGeneration"] = appliedGeneration
 }
 
 func configMutationOperation(action string, status string, saved bool, reload bool, runtimeApplied bool, runtimeApply string, updated int, code string, message string, resetReport *runtimev2.ResetReport) map[string]interface{} {
@@ -1427,7 +1431,7 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		dnsPort = 10856
 	}
 	apiPort := cfg.Proxy.APIPort
-	panelInbounds := cfg.ResolvePanelInbounds()
+	profileInbounds := cfg.ResolveProfileInbounds()
 	appRouting := core.BuildRuntimeAppRoutingEnv(
 		cfg.Apps.Mode,
 		cfg.Apps.Packages,
@@ -1442,8 +1446,8 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 		"TPROXY_PORT":       strconv.Itoa(tproxyPort),
 		"DNS_PORT":          strconv.Itoa(dnsPort),
 		"API_PORT":          strconv.Itoa(apiPort),
-		"SOCKS_PORT":        strconv.Itoa(panelInbounds.SocksPort),
-		"HTTP_PORT":         strconv.Itoa(panelInbounds.HTTPPort),
+		"SOCKS_PORT":        strconv.Itoa(profileInbounds.SocksPort),
+		"HTTP_PORT":         strconv.Itoa(profileInbounds.HTTPPort),
 		"CHAIN_PROXY_PORTS": chainProxyPorts,
 		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
 		"FWMARK":            fmt.Sprintf("0x%x", mark),
@@ -1499,8 +1503,8 @@ func runtimeReloadNeedsFullRestart(oldCfg *config.Config, newCfg *config.Config,
 func firstVisibleLocalProxyPort(cfg *config.Config) int {
 	ports := []int{10808, 10809, 9090}
 	if cfg != nil {
-		panelInbounds := cfg.ResolvePanelInbounds()
-		ports = append(ports, cfg.Proxy.APIPort, panelInbounds.SocksPort, panelInbounds.HTTPPort)
+		profileInbounds := cfg.ResolveProfileInbounds()
+		ports = append(ports, cfg.Proxy.APIPort, profileInbounds.SocksPort, profileInbounds.HTTPPort)
 	}
 	seen := map[int]bool{}
 	for _, port := range ports {
@@ -1524,7 +1528,7 @@ func pathHasGroupOrWorldBits(path string) bool {
 }
 
 func localPortProtectionPresent(cfg *config.Config) bool {
-	panelInbounds := cfg.ResolvePanelInbounds()
+	profileInbounds := cfg.ResolveProfileInbounds()
 	tproxyPort := cfg.Proxy.TProxyPort
 	if tproxyPort == 0 {
 		tproxyPort = 10853
@@ -1542,8 +1546,8 @@ func localPortProtectionPresent(cfg *config.Config) bool {
 		{port: dnsPort, protocol: "tcp"},
 		{port: dnsPort, protocol: "udp"},
 		{port: cfg.Proxy.APIPort, protocol: "tcp"},
-		{port: panelInbounds.SocksPort, protocol: "tcp"},
-		{port: panelInbounds.HTTPPort, protocol: "tcp"},
+		{port: profileInbounds.SocksPort, protocol: "tcp"},
+		{port: profileInbounds.HTTPPort, protocol: "tcp"},
 	}
 
 	v4, err4 := core.ExecCommand("iptables", "-w", "100", "-t", "mangle", "-S", "PRIVSTACK_OUT")

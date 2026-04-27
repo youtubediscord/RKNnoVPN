@@ -298,12 +298,12 @@ func TestRenderWireGuardOutboundWithoutKernelInterface(t *testing.T) {
 	}
 }
 
-func TestRenderPanelNodesAsURLTestOutbounds(t *testing.T) {
+func TestRenderProfileNodesAsURLTestOutbounds(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = ""
 	cfg.Node.UUID = ""
-	cfg.Panel.ActiveNodeID = "second-node"
-	cfg.Panel.Nodes = []json.RawMessage{
+	cfg.Profile.ActiveNodeID = "second-node"
+	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{
 			"id":"first-node",
 			"name":"First",
@@ -399,7 +399,7 @@ func TestRenderPanelShadowsocksFallsBackToShareLinkSecret(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = ""
 	cfg.Node.UUID = ""
-	cfg.Panel.Nodes = []json.RawMessage{
+	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{
 			"id":"ss-node",
 			"name":"SS",
@@ -441,7 +441,7 @@ func TestRenderAutoSkipsInvalidPanelNode(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = ""
 	cfg.Node.UUID = ""
-	cfg.Panel.Nodes = []json.RawMessage{
+	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{
 			"id":"bad-ss",
 			"name":"Bad SS",
@@ -497,8 +497,8 @@ func TestRenderActiveInvalidPanelNodeFails(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = ""
 	cfg.Node.UUID = ""
-	cfg.Panel.ActiveNodeID = "bad-ss"
-	cfg.Panel.Nodes = []json.RawMessage{
+	cfg.Profile.ActiveNodeID = "bad-ss"
+	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{
 			"id":"bad-ss",
 			"name":"Bad SS",
@@ -541,7 +541,7 @@ func TestRenderPanelNodeGroupsAsSelectorOutbounds(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = ""
 	cfg.Node.UUID = ""
-	cfg.Panel.Nodes = []json.RawMessage{
+	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{
 			"id":"first-node",
 			"name":"First",
@@ -621,7 +621,7 @@ func TestRenderAppGroupRouteRules(t *testing.T) {
 		"com.video.app": "Europe",
 		"com.unknown":   "Missing",
 	}
-	cfg.Panel.Nodes = []json.RawMessage{
+	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{
 			"id":"first-node",
 			"name":"First",
@@ -714,7 +714,7 @@ func TestRenderAddsInternalStatusHTTPInboundWhenExplicitlyEnabled(t *testing.T) 
 	cfg.Node.Port = 443
 	cfg.Node.Protocol = "vless"
 	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
-	cfg.Panel.Inbounds = json.RawMessage(`{"httpPort":10809}`)
+	cfg.Profile.Inbounds = json.RawMessage(`{"httpPort":10809}`)
 
 	var rendered map[string]any
 	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
@@ -753,7 +753,7 @@ func TestRenderAddsInternalStatusSOCKSInboundWhenExplicitlyEnabled(t *testing.T)
 	cfg.Node.Port = 443
 	cfg.Node.Protocol = "vless"
 	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
-	cfg.Panel.Inbounds = json.RawMessage(`{"socksPort":10808}`)
+	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":10808}`)
 
 	var rendered map[string]any
 	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
@@ -792,7 +792,7 @@ func TestRenderHelperInboundsIgnoreAllowLAN(t *testing.T) {
 	cfg.Node.Port = 443
 	cfg.Node.Protocol = "vless"
 	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
-	cfg.Panel.Inbounds = json.RawMessage(`{"httpPort":10809,"socksPort":10808,"allowLan":true}`)
+	cfg.Profile.Inbounds = json.RawMessage(`{"httpPort":10809,"socksPort":10808,"allowLan":true}`)
 
 	var rendered map[string]any
 	data, err := RenderSingboxConfig(cfg, cfg.ResolveProfile())
@@ -822,14 +822,14 @@ func TestRenderHelperInboundsIgnoreAllowLAN(t *testing.T) {
 	}
 }
 
-func TestRenderSkipsStalePanelNodes(t *testing.T) {
+func TestRenderSkipsStaleProfileNodes(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Node.Address = "fallback.example"
 	cfg.Node.Port = 443
 	cfg.Node.Protocol = "vless"
 	cfg.Node.UUID = "00000000-0000-0000-0000-000000000000"
-	cfg.Panel.ActiveNodeID = "stale-node"
-	cfg.Panel.Nodes = []json.RawMessage{json.RawMessage(`{
+	cfg.Profile.ActiveNodeID = "stale-node"
+	cfg.Profile.Nodes = []json.RawMessage{json.RawMessage(`{
 		"id":"stale-node",
 		"name":"Removed by subscription",
 		"protocol":"VLESS",
@@ -842,8 +842,8 @@ func TestRenderSkipsStalePanelNodes(t *testing.T) {
 		}
 	}`)}
 
-	profiles := ProfilesFromPanelNodes(cfg)
+	profiles := ProfilesFromConfigNodes(cfg)
 	if len(profiles) != 0 {
-		t.Fatalf("stale panel nodes must not become runtime profiles: %#v", profiles)
+		t.Fatalf("stale profile nodes must not become runtime profiles: %#v", profiles)
 	}
 }

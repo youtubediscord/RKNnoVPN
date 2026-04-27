@@ -124,8 +124,8 @@ func TestLoadMigratesEmbeddedPanelToSidecar(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	if cfg.Panel.ActiveNodeID != "node-1" {
-		t.Fatalf("expected migrated active node, got %q", cfg.Panel.ActiveNodeID)
+	if cfg.Profile.ActiveNodeID != "node-1" {
+		t.Fatalf("expected migrated active node, got %q", cfg.Profile.ActiveNodeID)
 	}
 	if cfg.Node.Address != "example.com" {
 		t.Fatalf("expected synced node address from panel, got %q", cfg.Node.Address)
@@ -165,7 +165,7 @@ func TestValidateRejectsNewerSchemaVersion(t *testing.T) {
 
 func TestValidateChecksPanelSchema(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Panel.Nodes = []json.RawMessage{
+	cfg.Profile.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"stale":true,"source":{"type":"MANUAL"}}`),
 	}
 
@@ -175,13 +175,13 @@ func TestValidateChecksPanelSchema(t *testing.T) {
 }
 
 func TestNormalizePanelNodesAddsManualSource(t *testing.T) {
-	panel := DefaultPanelConfig()
+	panel := DefaultProfileProjectionConfig()
 	panel.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443}`),
 	}
 
-	normalized := normalizePanelConfig(panel)
-	if err := ValidatePanelConfig(normalized); err != nil {
+	normalized := normalizeProfileProjectionConfig(panel)
+	if err := ValidateProfileProjectionConfig(normalized); err != nil {
 		t.Fatalf("normalized panel should validate: %v", err)
 	}
 
@@ -189,7 +189,7 @@ func TestNormalizePanelNodesAddsManualSource(t *testing.T) {
 	if err := json.Unmarshal(normalized.Nodes[0], &node); err != nil {
 		t.Fatalf("parse normalized node: %v", err)
 	}
-	var source PanelNodeSourceConfig
+	var source ProfileNodeSourceConfig
 	if err := json.Unmarshal(node["source"], &source); err != nil {
 		t.Fatalf("parse normalized source: %v", err)
 	}
@@ -199,13 +199,13 @@ func TestNormalizePanelNodesAddsManualSource(t *testing.T) {
 }
 
 func TestNormalizePanelNodesBackfillsLegacyStaleSource(t *testing.T) {
-	panel := DefaultPanelConfig()
+	panel := DefaultProfileProjectionConfig()
 	panel.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"stale":true}`),
 	}
 
-	normalized := normalizePanelConfig(panel)
-	if err := ValidatePanelConfig(normalized); err != nil {
+	normalized := normalizeProfileProjectionConfig(panel)
+	if err := ValidateProfileProjectionConfig(normalized); err != nil {
 		t.Fatalf("legacy stale node should be normalized to subscription source: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestNormalizePanelNodesBackfillsLegacyStaleSource(t *testing.T) {
 	if err := json.Unmarshal(normalized.Nodes[0], &node); err != nil {
 		t.Fatalf("parse normalized node: %v", err)
 	}
-	var source PanelNodeSourceConfig
+	var source ProfileNodeSourceConfig
 	if err := json.Unmarshal(node["source"], &source); err != nil {
 		t.Fatalf("parse normalized source: %v", err)
 	}
@@ -222,29 +222,29 @@ func TestNormalizePanelNodesBackfillsLegacyStaleSource(t *testing.T) {
 	}
 }
 
-func TestValidatePanelConfigRejectsManualStaleNode(t *testing.T) {
-	panel := DefaultPanelConfig()
+func TestValidateProfileProjectionConfigRejectsManualStaleNode(t *testing.T) {
+	panel := DefaultProfileProjectionConfig()
 	panel.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"stale":true,"source":{"type":"MANUAL"}}`),
 	}
 
-	if err := ValidatePanelConfig(panel); err == nil {
+	if err := ValidateProfileProjectionConfig(panel); err == nil {
 		t.Fatalf("manual stale node should be rejected")
 	}
 }
 
 func TestNormalizePanelSubscriptionsBackfillsProviderKey(t *testing.T) {
-	panel := DefaultPanelConfig()
+	panel := DefaultProfileProjectionConfig()
 	panel.Subscriptions = []json.RawMessage{
 		json.RawMessage(`{"url":"HTTPS://Example.com/Sub","lastFetchedAt":1000,"lastSeenNodeCount":2}`),
 	}
 
-	normalized := normalizePanelConfig(panel)
-	if err := ValidatePanelConfig(normalized); err != nil {
+	normalized := normalizeProfileProjectionConfig(panel)
+	if err := ValidateProfileProjectionConfig(normalized); err != nil {
 		t.Fatalf("normalized subscriptions should validate: %v", err)
 	}
 
-	var subscription PanelSubscriptionConfig
+	var subscription ProfileSubscriptionConfig
 	if err := json.Unmarshal(normalized.Subscriptions[0], &subscription); err != nil {
 		t.Fatalf("parse normalized subscription: %v", err)
 	}
@@ -254,21 +254,21 @@ func TestNormalizePanelSubscriptionsBackfillsProviderKey(t *testing.T) {
 }
 
 func TestNormalizePanelBackfillsSubscriptionsFromNodes(t *testing.T) {
-	panel := DefaultPanelConfig()
+	panel := DefaultProfileProjectionConfig()
 	panel.Nodes = []json.RawMessage{
 		json.RawMessage(`{"id":"node-1","protocol":"vless","server":"example.com","port":443,"source":{"type":"SUBSCRIPTION","url":"https://example.com/sub","providerKey":"https://example.com/sub","lastSeenAt":1000}}`),
 		json.RawMessage(`{"id":"node-2","protocol":"vless","server":"old.example","port":443,"stale":true,"source":{"type":"SUBSCRIPTION","url":"https://example.com/sub","providerKey":"https://example.com/sub","lastSeenAt":900}}`),
 	}
 
-	normalized := normalizePanelConfig(panel)
-	if err := ValidatePanelConfig(normalized); err != nil {
+	normalized := normalizeProfileProjectionConfig(panel)
+	if err := ValidateProfileProjectionConfig(normalized); err != nil {
 		t.Fatalf("backfilled subscription should validate: %v", err)
 	}
 	if len(normalized.Subscriptions) != 1 {
 		t.Fatalf("expected one backfilled subscription, got %d", len(normalized.Subscriptions))
 	}
 
-	var subscription PanelSubscriptionConfig
+	var subscription ProfileSubscriptionConfig
 	if err := json.Unmarshal(normalized.Subscriptions[0], &subscription); err != nil {
 		t.Fatalf("parse backfilled subscription: %v", err)
 	}
@@ -280,13 +280,13 @@ func TestNormalizePanelBackfillsSubscriptionsFromNodes(t *testing.T) {
 	}
 }
 
-func TestValidatePanelConfigRejectsSubscriptionWithoutProviderKey(t *testing.T) {
-	panel := DefaultPanelConfig()
+func TestValidateProfileProjectionConfigRejectsSubscriptionWithoutProviderKey(t *testing.T) {
+	panel := DefaultProfileProjectionConfig()
 	panel.Subscriptions = []json.RawMessage{
 		json.RawMessage(`{"url":"","lastFetchedAt":1000}`),
 	}
 
-	if err := ValidatePanelConfig(panel); err == nil {
+	if err := ValidateProfileProjectionConfig(panel); err == nil {
 		t.Fatalf("subscription without provider key should be rejected")
 	}
 }
@@ -301,7 +301,7 @@ func TestLoadUsesAuthoritativeEmptySidecarToClearNode(t *testing.T) {
 	if err := cfg.Save(configPath); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-	if err := SavePanel(PanelPath(configPath), DefaultPanelConfig()); err != nil {
+	if err := SavePanel(PanelPath(configPath), DefaultProfileProjectionConfig()); err != nil {
 		t.Fatalf("save panel: %v", err)
 	}
 

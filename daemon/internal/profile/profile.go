@@ -142,7 +142,7 @@ func FromConfig(cfg *config.Config) Document {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	panel := cfg.Panel
+	panel := cfg.Profile
 	doc := Document{
 		SchemaVersion: CurrentSchemaVersion,
 		ID:            firstNonEmpty(panel.ID, "default"),
@@ -181,7 +181,7 @@ func ApplyToConfig(base *config.Config, doc Document) (*config.Config, []Warning
 	}
 	next := *base
 	next.SchemaVersion = config.CurrentSchemaVersion
-	next.Panel = panelFromDocument(normalized)
+	next.Profile = panelFromDocument(normalized)
 	next.RuntimeV2 = config.RuntimeV2Config{
 		BackendKind:    firstNonEmpty(normalized.Runtime.BackendKind, "ROOT_TPROXY"),
 		FallbackPolicy: firstNonEmpty(normalized.Runtime.FallbackPolicy, "OFFER_RESET"),
@@ -202,7 +202,7 @@ func ApplyToConfig(base *config.Config, doc Document) (*config.Config, []Warning
 		Enabled:    normalized.Sharing.Enabled,
 		Interfaces: append([]string(nil), normalized.Sharing.Interfaces...),
 	}
-	next.SyncFromPanel(true)
+	next.SyncFromProfileProjection(true)
 	if err := next.Validate(); err != nil {
 		return nil, warnings, err
 	}
@@ -342,7 +342,9 @@ func MergeNodes(current Document, incoming []Node, markRemovedStale bool) (Docum
 	next := current
 	byKey := map[string]int{}
 	for i, node := range next.Nodes {
-		byKey[nodeMatchKey(node)] = i
+		if key := nodeMatchKey(node); key != "" {
+			byKey[key] = i
+		}
 	}
 	stats := map[string]int{"added": 0, "updated": 0, "unchanged": 0, "stale": 0}
 	seenIncoming := map[string]bool{}
@@ -353,7 +355,7 @@ func MergeNodes(current Document, incoming []Node, markRemovedStale bool) (Docum
 			continue
 		}
 		seenIncoming[key] = true
-		if node.Source.Type == "SUBSCRIPTION" {
+		if strings.EqualFold(node.Source.Type, "SUBSCRIPTION") {
 			providerKeys[node.Source.ProviderKey] = true
 		}
 		if index, ok := byKey[key]; ok {
@@ -375,7 +377,7 @@ func MergeNodes(current Document, incoming []Node, markRemovedStale bool) (Docum
 	}
 	if markRemovedStale {
 		for i, node := range next.Nodes {
-			if node.Source.Type == "SUBSCRIPTION" && providerKeys[node.Source.ProviderKey] && !seenIncoming[nodeMatchKey(node)] {
+			if strings.EqualFold(node.Source.Type, "SUBSCRIPTION") && providerKeys[node.Source.ProviderKey] && !seenIncoming[nodeMatchKey(node)] {
 				if !node.Stale {
 					stats["stale"]++
 				}
@@ -585,6 +587,8 @@ func normalizeSubscriptions(subscriptions []Subscription, nodes []Node) []Subscr
 		if sub.ProviderKey == "" || sub.URL == "" {
 			continue
 		}
+		sub.LastSeenNodeCount = 0
+		sub.StaleNodeCount = 0
 		byKey[sub.ProviderKey] = sub
 	}
 	for _, node := range nodes {
@@ -596,9 +600,10 @@ func normalizeSubscriptions(subscriptions []Subscription, nodes []Node) []Subscr
 			sub.ProviderKey = node.Source.ProviderKey
 			sub.URL = firstNonEmpty(node.Source.URL, node.Source.ProviderKey)
 		}
-		sub.LastSeenNodeCount++
 		if node.Stale {
 			sub.StaleNodeCount++
+		} else {
+			sub.LastSeenNodeCount++
 		}
 		byKey[sub.ProviderKey] = sub
 	}
@@ -614,7 +619,7 @@ func normalizeSubscriptions(subscriptions []Subscription, nodes []Node) []Subscr
 	return result
 }
 
-func panelFromDocument(doc Document) config.PanelConfig {
+func panelFromDocument(doc Document) config.ProfileProjectionConfig {
 	nodes := make([]json.RawMessage, 0, len(doc.Nodes))
 	for _, node := range doc.Nodes {
 		raw, _ := json.Marshal(node)
@@ -627,7 +632,7 @@ func panelFromDocument(doc Document) config.PanelConfig {
 	}
 	tun, _ := json.Marshal(doc.Tun)
 	inbounds, _ := json.Marshal(doc.Inbounds)
-	return config.PanelConfig{
+	return config.ProfileProjectionConfig{
 		ID:            doc.ID,
 		Name:          doc.Name,
 		ActiveNodeID:  doc.ActiveNodeID,
@@ -855,7 +860,23 @@ func nodeFromLegacyConfig(cfg *config.Config) *Node {
 }
 
 func nodeMatchKey(node Node) string {
-	return strings.Join([]string{normalizeProtocol(node.Protocol), strings.ToLower(node.Server), strconv.Itoa(node.Port), string(node.Outbound)}, "|")
+	sourceType := strings.ToUpper(strings.TrimSpace(node.Source.Type))
+	if sourceType == "" {
+		sourceType = "MANUAL"
+	}
+	sourceScope := sourceType
+	if sourceType == "SUBSCRIPTION" {
+		sourceScope += ":" + strings.TrimSpace(node.Source.ProviderKey)
+	}
+	id := strings.TrimSpace(node.ID)
+	if id != "" {
+		return sourceScope + "|id:" + id
+	}
+	server := strings.ToLower(strings.TrimSpace(node.Server))
+	if server == "" || node.Port == 0 {
+		return ""
+	}
+	return strings.Join([]string{sourceScope, normalizeProtocol(node.Protocol), server, strconv.Itoa(node.Port)}, "|")
 }
 
 func nodeByID(nodes []Node, id string) *Node {

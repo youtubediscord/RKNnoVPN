@@ -226,6 +226,7 @@ class DaemonClient @Inject constructor(
         }
 
     suspend fun subscriptionPreview(url: String): DaemonClientResult<SubscriptionPreviewInfo> {
+        requireCompatible("subscription.preview")?.let { return it.asFailure() }
         val params = buildJsonObject { put("url", url) }
         return call("subscription.preview", params, timeoutMs = 60_000L) { element ->
             json.decodeFromJsonElement(SubscriptionPreviewInfo.serializer(), element)
@@ -233,6 +234,7 @@ class DaemonClient @Inject constructor(
     }
 
     suspend fun subscriptionRefresh(url: String): DaemonClientResult<ConfigMutationInfo> {
+        requireCompatible("subscription.refresh")?.let { return it.asFailure() }
         val params = buildJsonObject { put("url", url) }
         return callConfigMutation("subscription.refresh", params)
     }

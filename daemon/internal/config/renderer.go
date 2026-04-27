@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-type panelNode struct {
+type storedProfileNode struct {
 	ID       string          `json:"id"`
 	Name     string          `json:"name"`
 	Group    string          `json:"group"`
@@ -226,9 +226,9 @@ func buildDNSServer(tag, address, detour string) map[string]interface{} {
 }
 
 func buildInbounds(cfg *Config) []map[string]interface{} {
-	panelInbounds := cfg.ResolvePanelInbounds()
+	profileInbounds := cfg.ResolveProfileInbounds()
 	helperListen := "127.0.0.1"
-	if panelInbounds.AllowLAN {
+	if profileInbounds.AllowLAN {
 		helperListen = "0.0.0.0"
 	}
 	inbounds := []map[string]interface{}{
@@ -247,30 +247,30 @@ func buildInbounds(cfg *Config) []map[string]interface{} {
 			"override_port":    53,
 		},
 	}
-	if panelInbounds.HTTPPort > 0 {
+	if profileInbounds.HTTPPort > 0 {
 		inbounds = append(inbounds, map[string]interface{}{
 			"type":        "http",
 			"tag":         "status-http-in",
 			"listen":      helperListen,
-			"listen_port": panelInbounds.HTTPPort,
+			"listen_port": profileInbounds.HTTPPort,
 		})
 	}
-	if panelInbounds.SocksPort > 0 {
+	if profileInbounds.SocksPort > 0 {
 		inbounds = append(inbounds, map[string]interface{}{
 			"type":        "socks",
 			"tag":         "status-socks-in",
 			"listen":      helperListen,
-			"listen_port": panelInbounds.SocksPort,
+			"listen_port": profileInbounds.SocksPort,
 		})
 	}
 	return inbounds
 }
 
 func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}, error) {
-	nodeProfiles := ProfilesFromPanelNodes(cfg)
+	nodeProfiles := ProfilesFromConfigNodes(cfg)
 	if len(nodeProfiles) > 0 {
 		var err error
-		nodeProfiles, err = renderablePanelProfiles(cfg, nodeProfiles)
+		nodeProfiles, err = renderableProfileNodes(cfg, nodeProfiles)
 		if err != nil {
 			return nil, err
 		}
@@ -322,7 +322,7 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 			selectorOutbounds = append(selectorOutbounds, groupPlan.selectorTag())
 		}
 		selectorDefault := "auto"
-		if activeTag := activePanelNodeTag(cfg, nodeProfiles); activeTag != "" {
+		if activeTag := activeProfileNodeTag(cfg, nodeProfiles); activeTag != "" {
 			selectorDefault = activeTag
 		}
 		outbounds = append(outbounds, map[string]interface{}{
@@ -428,8 +428,8 @@ func buildGroupOutbounds(cfg *Config, plans []groupOutboundPlan) []map[string]in
 	return outbounds
 }
 
-func activePanelNodeTag(cfg *Config, profiles []*NodeProfile) string {
-	activeID := strings.TrimSpace(cfg.Panel.ActiveNodeID)
+func activeProfileNodeTag(cfg *Config, profiles []*NodeProfile) string {
+	activeID := strings.TrimSpace(cfg.Profile.ActiveNodeID)
 	if activeID == "" {
 		return ""
 	}
@@ -630,10 +630,10 @@ func buildProxyOutbound(profile *NodeProfile) (map[string]interface{}, error) {
 	return out, nil
 }
 
-func ProfilesFromPanelNodes(cfg *Config) []*NodeProfile {
-	profiles := make([]*NodeProfile, 0, len(cfg.Panel.Nodes))
-	for index, raw := range cfg.Panel.Nodes {
-		profile, err := profileFromPanelNode(raw, index)
+func ProfilesFromConfigNodes(cfg *Config) []*NodeProfile {
+	profiles := make([]*NodeProfile, 0, len(cfg.Profile.Nodes))
+	for index, raw := range cfg.Profile.Nodes {
+		profile, err := profileFromStoredNode(raw, index)
 		if err != nil {
 			continue
 		}
@@ -645,16 +645,16 @@ func ProfilesFromPanelNodes(cfg *Config) []*NodeProfile {
 	return profiles
 }
 
-// ResolveActivePanelProfile returns the selected panel node profile, or the
-// first valid panel node when the selected one is absent. It returns nil when
-// panel storage is empty or malformed.
-func ResolveActivePanelProfile(cfg *Config) *NodeProfile {
-	profiles := ProfilesFromPanelNodes(cfg)
+// ResolveActiveProfile returns the selected profile node profile, or the
+// first valid profile node when the selected one is absent. It returns nil when
+// profile storage projection is empty or malformed.
+func ResolveActiveProfile(cfg *Config) *NodeProfile {
+	profiles := ProfilesFromConfigNodes(cfg)
 	if len(profiles) == 0 {
 		return nil
 	}
 
-	activeID := cfg.Panel.ActiveNodeID
+	activeID := cfg.Profile.ActiveNodeID
 	for _, profile := range profiles {
 		if profile.ID == activeID {
 			return profile
@@ -668,8 +668,8 @@ func isDomainAddress(address string) bool {
 	return host != "" && net.ParseIP(host) == nil
 }
 
-func profileFromPanelNode(raw json.RawMessage, index int) (*NodeProfile, error) {
-	var node panelNode
+func profileFromStoredNode(raw json.RawMessage, index int) (*NodeProfile, error) {
+	var node storedProfileNode
 	if err := json.Unmarshal(raw, &node); err != nil {
 		return nil, err
 	}
@@ -687,7 +687,7 @@ func profileFromPanelNode(raw json.RawMessage, index int) (*NodeProfile, error) 
 		ID:          node.ID,
 		Name:        node.Name,
 		Group:       strings.TrimSpace(node.Group),
-		Tag:         panelOutboundTag(node, index),
+		Tag:         profileOutboundTag(node, index),
 		Protocol:    protocol,
 		Address:     node.Server,
 		Port:        node.Port,
@@ -784,12 +784,12 @@ func profileFromPanelNode(raw json.RawMessage, index int) (*NodeProfile, error) 
 	}
 
 	applyStreamSettings(profile, mapFromMap(outbound, "streamSettings"))
-	applyPanelLinkFallback(profile, node.Link)
+	applyProfileLinkFallback(profile, node.Link)
 	return profile, nil
 }
 
-func renderablePanelProfiles(cfg *Config, profiles []*NodeProfile) ([]*NodeProfile, error) {
-	activeID := strings.TrimSpace(cfg.Panel.ActiveNodeID)
+func renderableProfileNodes(cfg *Config, profiles []*NodeProfile) ([]*NodeProfile, error) {
+	activeID := strings.TrimSpace(cfg.Profile.ActiveNodeID)
 	renderable := make([]*NodeProfile, 0, len(profiles))
 	skipped := 0
 	for _, profile := range profiles {
@@ -803,7 +803,7 @@ func renderablePanelProfiles(cfg *Config, profiles []*NodeProfile) ([]*NodeProfi
 		renderable = append(renderable, profile)
 	}
 	if len(renderable) == 0 && len(profiles) > 0 {
-		return nil, fmt.Errorf("renderer: no usable panel nodes; skipped %d invalid node(s)", skipped)
+		return nil, fmt.Errorf("renderer: no usable profile nodes; skipped %d invalid node(s)", skipped)
 	}
 	return renderable, nil
 }
@@ -812,7 +812,7 @@ func nodeDisplayName(profile *NodeProfile) string {
 	return firstNonEmpty(profile.Name, profile.ID, profile.Address, profile.Tag)
 }
 
-func applyPanelLinkFallback(profile *NodeProfile, link string) {
+func applyProfileLinkFallback(profile *NodeProfile, link string) {
 	link = strings.TrimSpace(link)
 	if link == "" {
 		return
@@ -1035,7 +1035,7 @@ func applyTLSSettings(profile *NodeProfile, tls map[string]interface{}) {
 	}
 }
 
-func panelOutboundTag(node panelNode, index int) string {
+func profileOutboundTag(node storedProfileNode, index int) string {
 	base := node.ID
 	if base == "" {
 		base = node.Name
@@ -1488,7 +1488,7 @@ func buildAppGroupRouteRules(cfg *Config) []map[string]interface{} {
 		return nil
 	}
 
-	profiles := ProfilesFromPanelNodes(cfg)
+	profiles := ProfilesFromConfigNodes(cfg)
 	if len(profiles) == 0 {
 		return nil
 	}
