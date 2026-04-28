@@ -2,6 +2,7 @@ package profile
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
@@ -221,5 +222,57 @@ func TestMergeSubscriptionNodesCanMarkProviderEmptyRefreshStale(t *testing.T) {
 	}
 	if next.ActiveNodeID != "manual" {
 		t.Fatalf("active stale node was not repaired to live manual node: %q", next.ActiveNodeID)
+	}
+}
+
+func TestParseSubscriptionRejectsLocalPrivateAndReservedEndpoints(t *testing.T) {
+	body := strings.Join([]string{
+		"vless://00000000-0000-0000-0000-000000000000@example.com:443#public",
+		"vless://00000000-0000-0000-0000-000000000000@127.0.0.1:10808#loopback",
+		"trojan://secret@192.168.1.10:443#private",
+		"ss://secret@100.64.0.1:8388#cgnat",
+	}, "\n")
+
+	nodes, sub, failures, rejected := ParseSubscription(body, nil, "https://sub.example/list", 123)
+	if failures != 0 {
+		t.Fatalf("unexpected parse failures: %d", failures)
+	}
+	if len(nodes) != 1 || nodes[0].Server != "example.com" {
+		t.Fatalf("expected only public node to survive, got %#v", nodes)
+	}
+	if sub.LastSeenNodeCount != 1 {
+		t.Fatalf("subscription node count should only include accepted nodes: %#v", sub)
+	}
+	if len(rejected) != 3 {
+		t.Fatalf("expected three rejected local/private nodes, got %#v", rejected)
+	}
+	for _, item := range rejected {
+		if item.Code != "subscription_local_endpoint" || item.Server == "" || item.Port == 0 {
+			t.Fatalf("rejection should carry stable code and endpoint metadata: %#v", item)
+		}
+	}
+}
+
+func TestNormalizeRejectsSubscriptionNodeWithLocalEndpoint(t *testing.T) {
+	doc := Document{
+		ID: "main",
+		Subscriptions: []Subscription{
+			{ProviderKey: "sub", URL: "https://sub.example/list"},
+		},
+		Nodes: []Node{
+			{
+				ID:       "local-sub",
+				Name:     "Local subscription node",
+				Protocol: "socks",
+				Server:   "127.0.0.1",
+				Port:     10808,
+				Outbound: json.RawMessage(`{"protocol":"socks","settings":{"address":"127.0.0.1","port":10808}}`),
+				Source:   NodeSource{Type: "SUBSCRIPTION", ProviderKey: "sub", URL: "https://sub.example/list"},
+			},
+		},
+	}
+
+	if _, _, err := Normalize(doc); err == nil || !strings.Contains(err.Error(), "must not be local") {
+		t.Fatalf("expected local subscription endpoint rejection, got %v", err)
 	}
 }

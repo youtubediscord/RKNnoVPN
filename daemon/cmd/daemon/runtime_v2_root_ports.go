@@ -24,18 +24,6 @@ func newRootRuntimeBackend(d *daemon) *rootruntime.Backend {
 	})
 }
 
-func runtimeErrorWithResetReport(err error, report runtimev2.ResetReport) error {
-	return rootruntime.RuntimeErrorWithResetReport(err, report)
-}
-
-func resetReportFromRuntimeError(err error) *runtimev2.ResetReport {
-	return rootruntime.ResetReportFromError(err)
-}
-
-func (d *daemon) restartRootBackendV2(generation int64) error {
-	return newRootRuntimeBackend(d).RestartAfterConfigChange(generation)
-}
-
 func (p rootRuntimePorts) GetState() core.State {
 	return p.d.coreMgr.GetState()
 }
@@ -90,7 +78,7 @@ func (p rootRuntimePorts) ReapplyRuntimeRules() error {
 	p.d.mu.Lock()
 	cfg := p.d.cfg
 	p.d.mu.Unlock()
-	_, err := p.d.reapplyRuntimeRulesReport(cfg)
+	_, err := rootruntime.ReapplyRuntimeRules(cfg, p.d.dataDir, buildScriptEnv(cfg, p.d.dataDir), core.ExecScript)
 	return err
 }
 

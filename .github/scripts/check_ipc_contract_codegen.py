@@ -13,11 +13,27 @@ OUTPUT = REPO_ROOT / "app/app/src/main/kotlin/com/rknnovpn/panel/ipc/GeneratedDa
 def render_contract(source: dict) -> str:
     version = int(source.get("version", 0))
     required = sorted(source.get("apkRequiredMethods", []))
-    methods = {item.get("method") for item in source.get("methods", [])}
+    contracts = sorted(source.get("methods", []), key=lambda item: item.get("method", ""))
+    methods = {item.get("method") for item in contracts}
     missing = [method for method in required if method not in methods]
     if missing:
         raise SystemExit(f"apkRequiredMethods contains undeclared method(s): {', '.join(missing)}")
-    body = "\n".join(f'        "{method}",' for method in required)
+    required_body = "\n".join(f'        "{method}",' for method in required)
+    capabilities_body = "\n".join(
+        f'        "{item.get("method", "")}" to "{item.get("capability", "")}",'
+        for item in contracts
+        if item.get("method")
+    )
+    mutating_body = "\n".join(
+        f'        "{item.get("method", "")}",'
+        for item in contracts
+        if item.get("method") and item.get("mutating")
+    )
+    async_body = "\n".join(
+        f'        "{item.get("method", "")}",'
+        for item in contracts
+        if item.get("method") and item.get("async")
+    )
     return (
         "package com.rknnovpn.panel.ipc\n"
         "\n"
@@ -26,7 +42,16 @@ def render_contract(source: dict) -> str:
         "internal object GeneratedDaemonContract {\n"
         f"    const val CONTRACT_VERSION: Int = {version}\n"
         "    val APK_REQUIRED_METHODS: Set<String> = setOf(\n"
-        f"{body}\n"
+        f"{required_body}\n"
+        "    )\n"
+        "    val METHOD_CAPABILITIES: Map<String, String> = mapOf(\n"
+        f"{capabilities_body}\n"
+        "    )\n"
+        "    val MUTATING_METHODS: Set<String> = setOf(\n"
+        f"{mutating_body}\n"
+        "    )\n"
+        "    val ASYNC_METHODS: Set<String> = setOf(\n"
+        f"{async_body}\n"
         "    )\n"
         "}\n"
     )

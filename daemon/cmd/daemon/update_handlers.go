@@ -9,6 +9,7 @@ import (
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
 )
@@ -142,7 +143,7 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 
 		if artifacts.ModuleExists {
 			markStep("update-install-module", "running", "MODULE_INSTALLING", filepath.Base(artifacts.ModulePath))
-			moduleDir := "/data/adb/modules/rknnovpn"
+			moduleDir := modulecontract.NewPaths(d.dataDir).Dir()
 			if err := updater.InstallModuleUpdate(artifacts.ModulePath, d.dataDir, moduleDir); err != nil {
 				if wasRunning {
 					d.restoreCurrentRuntimeAfterFailedUpdate()

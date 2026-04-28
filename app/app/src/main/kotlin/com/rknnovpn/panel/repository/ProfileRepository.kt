@@ -7,6 +7,7 @@ import com.rknnovpn.panel.ipc.DaemonClient
 import com.rknnovpn.panel.ipc.DaemonClientResult
 import com.rknnovpn.panel.ipc.ConfigMutationInfo
 import com.rknnovpn.panel.ipc.PollingStatusSource
+import com.rknnovpn.panel.ipc.RejectedSubscriptionNode
 import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.model.SubscriptionSource
@@ -28,6 +29,7 @@ data class SubscriptionImportPreview(
     val source: SubscriptionSource,
     val nodes: List<Node>,
     val parseFailures: Int,
+    val rejectedNodes: List<RejectedSubscriptionNode>,
     val added: Int,
     val updated: Int,
     val stale: Int,
@@ -35,6 +37,7 @@ data class SubscriptionImportPreview(
     val addedCount: Int get() = added
     val updatedCount: Int get() = updated
     val removedCount: Int get() = stale
+    val rejectedCount: Int get() = rejectedNodes.size
 }
 
 /**
@@ -466,7 +469,9 @@ class ProfileRepository @Inject constructor(
             }
         }
         if (preview.nodes.isEmpty() && preview.stale == 0) {
-            _error.value = if (preview.parseFailures > 0) {
+            _error.value = if (preview.rejected > 0 || preview.rejectedNodes.isNotEmpty()) {
+                messages.formatRejectedSubscriptionOnly(preview.rejectedNodes, preview.rejected)
+            } else if (preview.parseFailures > 0) {
                 messages.get(com.rknnovpn.panel.R.string.subscription_no_supported_links)
             } else {
                 messages.get(com.rknnovpn.panel.R.string.subscription_empty)
@@ -479,6 +484,7 @@ class ProfileRepository @Inject constructor(
             source = preview.source,
             nodes = preview.nodes,
             parseFailures = preview.parseFailures,
+            rejectedNodes = preview.rejectedNodes,
             added = preview.added,
             updated = preview.updated,
             stale = preview.stale,
@@ -495,6 +501,7 @@ class ProfileRepository @Inject constructor(
                 _notice.value = messages.formatSubscriptionRefresh(
                     importedNodes = result.data.imported ?: preview.nodes.size,
                     parseFailures = result.data.parseFailures ?: preview.parseFailures,
+                    rejectedNodes = result.data.rejectedNodes.ifEmpty { preview.rejectedNodes },
                 )
                 preview.nodes
             }

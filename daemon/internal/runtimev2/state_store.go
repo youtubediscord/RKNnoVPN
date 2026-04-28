@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
 const runtimeStateFileName = "runtime_state.json"
@@ -19,6 +21,7 @@ type RuntimeStateFile struct {
 	LastHealthMessage string              `json:"lastHealthMessage,omitempty"`
 	DesiredState      DesiredState        `json:"desiredState"`
 	AppliedState      AppliedState        `json:"appliedState"`
+	Canonical         CanonicalStatus     `json:"canonical"`
 	Health            HealthSnapshot      `json:"health"`
 	Compatibility     CompatibilityStatus `json:"compatibility"`
 	ActiveOperation   *OperationStatus    `json:"activeOperation,omitempty"`
@@ -27,7 +30,7 @@ type RuntimeStateFile struct {
 }
 
 func RuntimeStatePath(dataDir string) string {
-	return filepath.Join(dataDir, "run", runtimeStateFileName)
+	return filepath.Join(modulecontract.NewPaths(dataDir).RunDir(), runtimeStateFileName)
 }
 
 func RuntimeStateFromStatus(status Status, now time.Time) RuntimeStateFile {
@@ -41,14 +44,19 @@ func RuntimeStateFromStatus(status Status, now time.Time) RuntimeStateFile {
 	if !status.Health.CheckedAt.IsZero() {
 		lastVerifiedAt = status.Health.CheckedAt.Format(time.RFC3339)
 	}
+	canonical := status.Canonical
+	if canonical.Phase == "" {
+		canonical = CanonicalStatusFromStatus(status)
+	}
 	return RuntimeStateFile{
 		DesiredGeneration: desiredGeneration,
 		AppliedGeneration: status.AppliedState.Generation,
 		LastVerifiedAt:    lastVerifiedAt,
-		LastHealthCode:    status.Health.LastCode,
-		LastHealthMessage: firstNonEmpty(status.Health.LastUserMessage, status.Health.LastError),
+		LastHealthCode:    canonical.LastCode,
+		LastHealthMessage: firstNonEmpty(canonical.LastUserMessage, canonical.LastError),
 		DesiredState:      status.DesiredState,
 		AppliedState:      status.AppliedState,
+		Canonical:         canonical,
 		Health:            status.Health,
 		Compatibility:     status.Compatibility,
 		ActiveOperation:   status.ActiveOperation,

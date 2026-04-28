@@ -855,7 +855,7 @@ func (o *Orchestrator) statusLockedWithStuckLog(logStuck bool) Status {
 	if o.last != nil {
 		last = cloneOperationResult(*o.last)
 	}
-	return Status{
+	status := Status{
 		DesiredState:    o.desired,
 		AppliedState:    o.applied,
 		Health:          o.health,
@@ -864,6 +864,8 @@ func (o *Orchestrator) statusLockedWithStuckLog(logStuck bool) Status {
 		ActiveOperation: active,
 		LastOperation:   last,
 	}
+	status.Canonical = CanonicalStatusFromStatus(status)
+	return status
 }
 
 func cloneCompatibilityStatus(compatibility CompatibilityStatus) CompatibilityStatus {

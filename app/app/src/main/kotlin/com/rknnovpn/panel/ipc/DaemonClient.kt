@@ -11,6 +11,7 @@ import com.rknnovpn.panel.model.Node
 import com.rknnovpn.panel.model.NodeProbeResultV2
 import com.rknnovpn.panel.model.ProfileConfig
 import com.rknnovpn.panel.model.RuntimeCompatibilityStatus
+import com.rknnovpn.panel.model.RuntimeMethodCapability
 import com.rknnovpn.panel.model.Subscription
 import com.rknnovpn.panel.model.SubscriptionSource
 import kotlinx.serialization.Serializable
@@ -584,6 +585,10 @@ class DaemonClient @Inject constructor(
             },
             imported = obj["imported"]?.jsonPrimitive?.intOrNull,
             parseFailures = obj["parseFailures"]?.jsonPrimitive?.intOrNull,
+            rejected = obj["rejected"]?.jsonPrimitive?.intOrNull,
+            rejectedNodes = obj["rejectedNodes"]?.jsonArray?.let {
+                json.decodeFromJsonElement(ListSerializer(RejectedSubscriptionNode.serializer()), it)
+            }.orEmpty(),
         )
     }
 
@@ -619,13 +624,11 @@ class DaemonClient @Inject constructor(
                 }
                 val missingCapabilities = contract.missingCapabilities(requiredMethods.toList())
                 val missingMethods = contract.missingRequiredMethods(requiredMethods.toList() + "version")
-                val invalidContractMethods = contract.methods.filter {
-                    it.method.isBlank() || (it.method in requiredMethods && it.capability.isBlank())
-                }
-                if (invalidContractMethods.isNotEmpty()) {
+                val contractMismatches = contract.contractSurfaceMismatches(requiredMethods.toList() + "version")
+                if (contractMismatches.isNotEmpty()) {
                     return DaemonClientResult.DaemonError(
                         COMPATIBILITY_ERROR_CODE,
-                        "APK и модуль несовместимы: IPC contract неполный для ${invalidContractMethods.joinToString(", ") { it.method.ifBlank { "unknown" } }}",
+                        "APK и модуль несовместимы: IPC contract не совпадает (${contractMismatches.joinToString("; ")})",
                     )
                 }
                 when {
@@ -741,11 +744,21 @@ data class IpcContractInfo(
 
     fun missingCapabilities(requiredMethods: Collection<String>): List<String> {
         if (capabilities.isEmpty()) return listOf("capabilities")
-        val byMethod = methods.associateBy { it.method }
         return requiredMethods
-            .mapNotNull { method -> byMethod[method]?.capability?.takeIf { it.isNotBlank() } }
+            .mapNotNull { method -> GeneratedDaemonContract.METHOD_CAPABILITIES[method]?.takeIf { it.isNotBlank() } }
             .distinct()
             .filterNot { it in capabilities }
+    }
+
+    fun contractSurfaceMismatches(requiredMethods: Collection<String>): List<String> {
+        val byMethod = methods.associateBy { it.method }
+        return requiredMethods
+            .distinct()
+            .sorted()
+            .mapNotNull { method ->
+                val contract = byMethod[method] ?: return@mapNotNull "$method: method contract missing"
+                contract.surfaceMismatch(method)
+            }
     }
 }
 
@@ -874,6 +887,19 @@ data class ConfigMutationInfo(
     val subscription: Subscription? = null,
     val imported: Int? = null,
     val parseFailures: Int? = null,
+    val rejected: Int? = null,
+    val rejectedNodes: List<RejectedSubscriptionNode> = emptyList(),
+)
+
+@Serializable
+data class RejectedSubscriptionNode(
+    val link: String = "",
+    val name: String = "",
+    val protocol: String = "",
+    val server: String = "",
+    val port: Int = 0,
+    val code: String = "",
+    val reason: String = "",
 )
 
 @Serializable
@@ -881,6 +907,8 @@ data class SubscriptionPreviewInfo(
     val source: SubscriptionSource = SubscriptionSource(),
     val subscription: Subscription = Subscription(providerKey = "", url = ""),
     val nodes: List<Node> = emptyList(),
+    val rejectedNodes: List<RejectedSubscriptionNode> = emptyList(),
+    val rejected: Int = 0,
     val added: Int = 0,
     val updated: Int = 0,
     val unchanged: Int = 0,
@@ -1002,11 +1030,13 @@ private fun BackendStatusV2.toDaemonStatus(
     healthOverride: BackendHealthSnapshot? = null,
 ): DaemonStatus {
     val effectiveHealth = healthOverride ?: health
+    val effectiveCanonical = canonical
+    val canonicalReady = effectiveCanonical?.readiness?.ready ?: effectiveHealth.healthy
     val compatibilityIssue = compatibility?.blockingCompatibilityIssue(
         apkVersion = BuildConfig.VERSION_NAME,
         requiredMethods = DaemonClient.REQUIRED_METHODS,
     )
-    val displayPhase = activeOperation?.phase ?: appliedState.phase
+    val displayPhase = effectiveCanonical?.phase ?: activeOperation?.phase ?: appliedState.phase
     val lastFailure = lastOperation?.takeIf { !it.succeeded && activeOperation == null }
     val connectionState = if (compatibilityIssue != null) {
         com.rknnovpn.panel.model.ConnectionState.ERROR
@@ -1016,7 +1046,7 @@ private fun BackendStatusV2.toDaemonStatus(
         com.rknnovpn.panel.model.BackendPhase.DNS_APPLIED,
         com.rknnovpn.panel.model.BackendPhase.OUTBOUND_CHECKED,
         com.rknnovpn.panel.model.BackendPhase.DEGRADED ->
-            if (effectiveHealth.healthy) {
+            if (canonicalReady) {
                 com.rknnovpn.panel.model.ConnectionState.CONNECTED
             } else {
                 com.rknnovpn.panel.model.ConnectionState.ERROR
@@ -1034,33 +1064,36 @@ private fun BackendStatusV2.toDaemonStatus(
 
     return DaemonStatus(
         state = connectionState,
-        activeNodeId = desiredState.activeProfileId,
+        activeNodeId = effectiveCanonical?.activeProfileId ?: desiredState.activeProfileId,
         uptime = 0L,
         health = com.rknnovpn.panel.model.HealthResult(
-            healthy = effectiveHealth.healthy,
-            coreRunning = effectiveHealth.coreReady,
+            healthy = effectiveCanonical?.readiness?.ready ?: effectiveHealth.healthy,
+            coreRunning = effectiveCanonical?.readiness?.coreReady ?: effectiveHealth.coreReady,
             tunActive = false,
-            dnsOperational = effectiveHealth.dnsReady,
-            routingReady = effectiveHealth.routingReady,
-            egressReady = effectiveHealth.egressReady,
-            operationalHealthy = effectiveHealth.operationalHealthy,
-            backendKind = appliedState.backendKind,
+            dnsOperational = effectiveCanonical?.readiness?.dnsReady ?: effectiveHealth.dnsReady,
+            routingReady = effectiveCanonical?.readiness?.routingReady ?: effectiveHealth.routingReady,
+            egressReady = effectiveCanonical?.readiness?.egressReady ?: effectiveHealth.egressReady,
+            operationalHealthy = effectiveCanonical?.readiness?.operationalHealthy ?: effectiveHealth.operationalHealthy,
+            backendKind = effectiveCanonical?.backendKind ?: appliedState.backendKind,
             phase = displayPhase,
-            lastDebug = effectiveHealth.lastDebug.ifBlank { null },
-            rollbackApplied = effectiveHealth.rollbackApplied,
+            lastDebug = effectiveCanonical?.lastDebug?.ifBlank { null } ?: effectiveHealth.lastDebug.ifBlank { null },
+            rollbackApplied = effectiveCanonical?.rollbackApplied ?: effectiveHealth.rollbackApplied,
             stageReport = effectiveHealth.stageReport,
-            checkedAt = effectiveHealth.checkedAt?.let(::epochSeconds) ?: 0L,
+            checkedAt = (effectiveCanonical?.checkedAt ?: effectiveHealth.checkedAt)?.let(::epochSeconds) ?: 0L,
             lastCode = if (compatibilityIssue != null) {
                 "DAEMON_INCOMPATIBLE"
             } else {
-                effectiveHealth.lastCode.ifBlank { lastFailure?.errorCode?.ifBlank { null } }
+                effectiveCanonical?.lastCode?.ifBlank { null }
+                    ?: effectiveHealth.lastCode.ifBlank { lastFailure?.errorCode?.ifBlank { null } }
             },
             lastError = if (compatibilityIssue != null) {
                 compatibilityIssue
             } else {
-                effectiveHealth.lastError.ifBlank { lastFailure?.errorMessage?.ifBlank { null } }
+                effectiveCanonical?.lastError?.ifBlank { null }
+                    ?: effectiveHealth.lastError.ifBlank { lastFailure?.errorMessage?.ifBlank { null } }
             },
             lastUserMessage = compatibilityIssue
+                ?: effectiveCanonical?.lastUserMessage?.ifBlank { null }
                 ?: effectiveHealth.lastUserMessage.ifBlank { null },
         ),
         compatibility = compatibility,
@@ -1085,6 +1118,10 @@ private fun RuntimeCompatibilityStatus.blockingCompatibilityIssue(
     if (missingMethods.isNotEmpty()) {
         return "APK и модуль несовместимы: APK $apkVersion, daemon $daemonVersion, module $moduleVersion; нет методов ${missingMethods.joinToString(", ")}"
     }
+    val contractMismatches = contractSurfaceMismatches(requiredMethods)
+    if (contractMismatches.isNotEmpty()) {
+        return "APK и модуль несовместимы: IPC contract не совпадает (${contractMismatches.joinToString("; ")})"
+    }
     val missingCapabilities = missingCapabilities(requiredMethods)
     if (missingCapabilities.isNotEmpty()) {
         return "APK и модуль несовместимы: daemon $daemonVersion, module $moduleVersion; нет capabilities ${missingCapabilities.joinToString(", ")}"
@@ -1099,11 +1136,57 @@ private fun RuntimeCompatibilityStatus.missingRequiredMethods(required: Collecti
 
 private fun RuntimeCompatibilityStatus.missingCapabilities(requiredMethods: Collection<String>): List<String> {
     if (capabilities.isEmpty()) return listOf("capabilities")
-    val byMethod = methods.associateBy { it.method }
     return requiredMethods
-        .mapNotNull { method -> byMethod[method]?.capability?.takeIf { it.isNotBlank() } }
+        .mapNotNull { method -> GeneratedDaemonContract.METHOD_CAPABILITIES[method]?.takeIf { it.isNotBlank() } }
         .distinct()
         .filterNot { it in capabilities }
+}
+
+private fun RuntimeCompatibilityStatus.contractSurfaceMismatches(requiredMethods: Collection<String>): List<String> {
+    val byMethod = methods.associateBy { it.method }
+    return requiredMethods
+        .distinct()
+        .sorted()
+        .mapNotNull { method ->
+            val contract = byMethod[method] ?: return@mapNotNull "$method: method contract missing"
+            contract.surfaceMismatch(method)
+        }
+}
+
+private fun IpcMethodContractInfo.surfaceMismatch(method: String): String? {
+    val expectedCapability = GeneratedDaemonContract.METHOD_CAPABILITIES[method].orEmpty()
+    val expectedMutating = method in GeneratedDaemonContract.MUTATING_METHODS
+    val expectedAsync = method in GeneratedDaemonContract.ASYNC_METHODS
+    return surfaceMismatchMessage(method, capability, mutating, async, expectedCapability, expectedMutating, expectedAsync)
+}
+
+private fun RuntimeMethodCapability.surfaceMismatch(method: String): String? {
+    val expectedCapability = GeneratedDaemonContract.METHOD_CAPABILITIES[method].orEmpty()
+    val expectedMutating = method in GeneratedDaemonContract.MUTATING_METHODS
+    val expectedAsync = method in GeneratedDaemonContract.ASYNC_METHODS
+    return surfaceMismatchMessage(method, capability, mutating, async, expectedCapability, expectedMutating, expectedAsync)
+}
+
+private fun surfaceMismatchMessage(
+    method: String,
+    actualCapability: String,
+    actualMutating: Boolean,
+    actualAsync: Boolean,
+    expectedCapability: String,
+    expectedMutating: Boolean,
+    expectedAsync: Boolean,
+): String? {
+    return when {
+        method !in GeneratedDaemonContract.METHOD_CAPABILITIES ->
+            "$method: APK has no generated method contract"
+        actualCapability != expectedCapability ->
+            "$method: capability ${actualCapability.ifBlank { "missing" }} != $expectedCapability"
+        actualMutating != expectedMutating ->
+            "$method: mutating=$actualMutating, expected $expectedMutating"
+        actualAsync != expectedAsync ->
+            "$method: async=$actualAsync, expected $expectedAsync"
+        else -> null
+    }
 }
 
 private fun RuntimeCompatibilityStatus.releaseMismatch(apkVersion: String): String? {

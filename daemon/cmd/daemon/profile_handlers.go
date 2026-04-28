@@ -33,7 +33,7 @@ func (d *daemon) handleProfileImportNodes(params *json.RawMessage) (interface{},
 	d.mu.Lock()
 	current := profiledoc.FromConfig(d.cfg)
 	d.mu.Unlock()
-	next, stats := profiledoc.MergeNodes(current, request.Nodes, false)
+	next, stats := profiledoc.ImportNodes(current, request.Nodes)
 	result, rpcErr := d.applyProfileDocument(next, request.Reload, "profile.importNodes", len(request.Nodes))
 	if rpcErr != nil {
 		return nil, rpcErr
@@ -53,18 +53,11 @@ func (d *daemon) handleProfileSetActiveNode(params *json.RawMessage) (interface{
 	d.mu.Lock()
 	current := profiledoc.FromConfig(d.cfg)
 	d.mu.Unlock()
-	found := false
-	for _, node := range current.Nodes {
-		if node.ID == request.NodeID && !node.Stale {
-			found = true
-			break
-		}
+	next, err := profiledoc.SetActiveNode(current, request.NodeID)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
 	}
-	if !found {
-		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: "active node is missing or stale"}
-	}
-	current.ActiveNodeID = request.NodeID
-	return d.applyProfileDocument(current, request.Reload, "profile.setActiveNode", 1)
+	return d.applyProfileDocument(next, request.Reload, "profile.setActiveNode", 1)
 }
 
 func (d *daemon) handleSubscriptionPreview(params *json.RawMessage) (interface{}, *ipc.RPCError) {
@@ -77,7 +70,7 @@ func (d *daemon) handleSubscriptionPreview(params *json.RawMessage) (interface{}
 	d.mu.Unlock()
 	preview, err := subscription.NewClient(nil).Preview(request.URL, current)
 	if err != nil {
-		return nil, subscriptionRPCError(request.URL, preview.FetchStatus, preview.FetchHeaders, err)
+		return nil, subscriptionRPCError(request.URL, preview.FetchStatus, preview.FetchHeaders, nil, err)
 	}
 	return preview, nil
 }
@@ -92,7 +85,7 @@ func (d *daemon) handleSubscriptionRefresh(params *json.RawMessage) (interface{}
 	d.mu.Unlock()
 	refresh, err := subscription.NewClient(nil).ApplyRefresh(request.URL, current)
 	if err != nil {
-		return nil, subscriptionRPCError(request.URL, refresh.FetchStatus, refresh.FetchHeaders, err)
+		return nil, subscriptionRPCError(request.URL, refresh.FetchStatus, refresh.FetchHeaders, &refresh, err)
 	}
 	result, applyErr := d.applyProfileDocument(refresh.Profile, true, "subscription.refresh", len(refresh.Nodes))
 	if applyErr != nil {
@@ -104,12 +97,14 @@ func (d *daemon) handleSubscriptionRefresh(params *json.RawMessage) (interface{}
 		obj["subscription"] = response.Subscription
 		obj["imported"] = response.Imported
 		obj["parseFailures"] = response.ParseFailures
+		obj["rejected"] = response.Rejected
+		obj["rejectedNodes"] = response.RejectedNodes
 		obj["merge"] = response.Merge
 	}
 	return result, nil
 }
 
-func subscriptionRPCError(rawURL string, status int, headers map[string]string, err error) *ipc.RPCError {
+func subscriptionRPCError(rawURL string, status int, headers map[string]string, refresh *subscription.RefreshResult, err error) *ipc.RPCError {
 	code := ipc.CodeInternalError
 	switch subscription.ClassifyError(rawURL, err) {
 	case subscription.ErrorInvalidParams:
@@ -117,12 +112,20 @@ func subscriptionRPCError(rawURL string, status int, headers map[string]string, 
 	case subscription.ErrorConfig:
 		code = ipc.CodeConfigError
 	}
+	data := map[string]interface{}{
+		"status":  status,
+		"headers": headers,
+	}
+	if refresh != nil {
+		data["parseFailures"] = refresh.ParseFailures
+		data["rejected"] = len(refresh.RejectedNodes)
+		data["rejectedNodes"] = refresh.RejectedNodes
+		data["subscription"] = refresh.Subscription
+		data["source"] = refresh.Source
+	}
 	return &ipc.RPCError{
 		Code:    code,
 		Message: err.Error(),
-		Data: map[string]interface{}{
-			"status":  status,
-			"headers": headers,
-		},
+		Data:    data,
 	}
 }

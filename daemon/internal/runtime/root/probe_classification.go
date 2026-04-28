@@ -1,4 +1,4 @@
-package main
+package root
 
 import (
 	"strings"
@@ -6,7 +6,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
-func classifyRuntimeURLTestFailure(err error, snapshot runtimev2.HealthSnapshot) string {
+func ClassifyURLTestFailure(err error, snapshot runtimev2.HealthSnapshot) string {
 	if direct := classifyURLTestControlPlaneError(err); direct != "" {
 		return direct
 	}

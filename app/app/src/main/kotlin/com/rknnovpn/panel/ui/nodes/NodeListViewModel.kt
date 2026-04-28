@@ -491,12 +491,12 @@ class NodeListViewModel @Inject constructor(
                         pendingSubscriptionPreview = preview,
                         isLoading = false,
                         errorMessage = null,
-                        statusMessage = messages.get(
-                            com.rknnovpn.panel.R.string.subscription_preview_summary,
+                        statusMessage = messages.formatSubscriptionPreview(
                             preview.addedCount,
                             preview.updatedCount,
                             preview.removedCount,
                             preview.parseFailures,
+                            preview.rejectedNodes,
                         ),
                     )
                 }

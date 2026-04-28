@@ -20,8 +20,10 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/rescue"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/watcher"
 )
@@ -56,15 +58,12 @@ type daemon struct {
 	collectLeftoversOverride func(*config.Config) []string
 }
 
-type latencySnapshot struct {
-	Ms        int64
-	Valid     bool
-	CheckedAt time.Time
-}
+type latencySnapshot = rootruntime.EgressProbeState
 
 func main() {
-	cfgPath := flag.String("config", "/data/adb/modules/rknnovpn/config/config.json", "path to config.json")
-	dataDir := flag.String("data-dir", "/data/adb/modules/rknnovpn", "path to data directory")
+	defaultPaths := modulecontract.NewPaths("")
+	cfgPath := flag.String("config", filepath.Join(defaultPaths.ConfigDir(), "config.json"), "path to config.json")
+	dataDir := flag.String("data-dir", defaultPaths.Dir(), "path to data directory")
 	logFile := flag.String("log-file", "", "path to log file (default: stderr)")
 	pidFile := flag.String("pid-file", "", "path to PID file")
 	flag.Parse()
@@ -171,7 +170,8 @@ func main() {
 		return err
 	}, watchLogger)
 
-	socketPath := filepath.Join(*dataDir, "run", "daemon.sock")
+	modulePaths := modulecontract.NewPaths(*dataDir)
+	socketPath := modulePaths.DaemonSocket()
 
 	d = &daemon{
 		cfg:         cfg,
@@ -273,7 +273,7 @@ func main() {
 
 	// ---- Autostart ---------------------------------------------------------
 
-	if cfg.Autostart && fileMissing(filepath.Join(*dataDir, "config", "manual")) {
+	if cfg.Autostart && fileMissing(modulePaths.ManualFlag()) {
 		log.Printf("autostart enabled, starting proxy")
 		if err := d.syncRuntimeV2DesiredState(); err != nil {
 			log.Printf("autostart desired state sync failed: %v", err)

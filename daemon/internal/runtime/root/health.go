@@ -1,4 +1,4 @@
-package main
+package root
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
-type runtimeV2HealthInput struct {
+type HealthInput struct {
 	State        core.State
 	Result       *health.HealthResult
 	StageReport  core.RuntimeStageReport
@@ -17,7 +17,7 @@ type runtimeV2HealthInput struct {
 	CheckedAt    time.Time
 }
 
-func classifyRuntimeV2Health(input runtimeV2HealthInput) runtimev2.HealthSnapshot {
+func ClassifyHealth(input HealthInput) runtimev2.HealthSnapshot {
 	snapshot := runtimev2.HealthSnapshot{
 		CoreReady: input.State == core.StateRunning,
 		CheckedAt: input.CheckedAt,
@@ -57,7 +57,7 @@ func classifyRuntimeV2Health(input runtimeV2HealthInput) runtimev2.HealthSnapsho
 	}
 	snapshot.Checks = runtimeHealthChecks(input.Result)
 
-	diagnostic := firstFailedGateDiagnostic(input.Result, snapshot)
+	diagnostic := FirstFailedGateDiagnostic(input.Result, snapshot)
 	if snapshot.LastCode == "" {
 		snapshot.LastCode = diagnostic.Code
 	}
@@ -82,16 +82,16 @@ func runtimeHealthChecks(result *health.HealthResult) map[string]runtimev2.Healt
 	return checks
 }
 
-type healthGateDiagnostic struct {
+type HealthGateDiagnostic struct {
 	Code   string
 	Detail string
 }
 
-func firstFailedGateDiagnostic(result *health.HealthResult, snapshot runtimev2.HealthSnapshot) healthGateDiagnostic {
+func FirstFailedGateDiagnostic(result *health.HealthResult, snapshot runtimev2.HealthSnapshot) HealthGateDiagnostic {
 	if result != nil {
 		for _, name := range []string{"singbox_alive", "tproxy_port", "iptables", "routing"} {
 			if check, ok := result.Checks[name]; ok && !check.Pass {
-				return healthGateDiagnostic{
+				return HealthGateDiagnostic{
 					Code:   firstNonEmpty(check.Code, "READINESS_GATE_FAILED"),
 					Detail: formatHealthCheckError(name, check),
 				}
@@ -100,7 +100,7 @@ func firstFailedGateDiagnostic(result *health.HealthResult, snapshot runtimev2.H
 		if snapshot.Healthy() {
 			for _, name := range []string{"dns_listener", "dns"} {
 				if check, ok := result.Checks[name]; ok && !check.Pass {
-					return healthGateDiagnostic{
+					return HealthGateDiagnostic{
 						Code:   firstNonEmpty(check.Code, "PROXY_DNS_UNAVAILABLE"),
 						Detail: fmt.Sprintf("operational degraded: proxy DNS unavailable: %s", formatHealthCheckError(name, check)),
 					}
@@ -109,23 +109,23 @@ func firstFailedGateDiagnostic(result *health.HealthResult, snapshot runtimev2.H
 		}
 	}
 	if !snapshot.Healthy() {
-		return healthGateDiagnostic{Code: "READINESS_GATE_FAILED", Detail: "one or more readiness gates are red"}
+		return HealthGateDiagnostic{Code: "READINESS_GATE_FAILED", Detail: "one or more readiness gates are red"}
 	}
 	if !snapshot.EgressReady {
 		if result != nil {
 			if check, ok := result.Checks["outbound_url"]; ok && !check.Pass {
-				return healthGateDiagnostic{
+				return HealthGateDiagnostic{
 					Code:   firstNonEmpty(check.Code, "OUTBOUND_URL_FAILED"),
 					Detail: fmt.Sprintf("operational degraded: outbound URL probe failed: %s", formatHealthCheckError("outbound_url", check)),
 				}
 			}
 		}
-		return healthGateDiagnostic{Code: "OUTBOUND_URL_FAILED", Detail: "operational degraded: no recent successful egress probe"}
+		return HealthGateDiagnostic{Code: "OUTBOUND_URL_FAILED", Detail: "operational degraded: no recent successful egress probe"}
 	}
 	if !snapshot.OperationalHealthy() {
-		return healthGateDiagnostic{Code: "OPERATIONAL_DEGRADED", Detail: "operational degraded: one or more operational health signals are red"}
+		return HealthGateDiagnostic{Code: "OPERATIONAL_DEGRADED", Detail: "operational degraded: one or more operational health signals are red"}
 	}
-	return healthGateDiagnostic{}
+	return HealthGateDiagnostic{}
 }
 
 func formatHealthCheckError(name string, check health.CheckResult) string {

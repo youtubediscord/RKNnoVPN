@@ -164,9 +164,35 @@ data class BackendHealthCheck(
 )
 
 @Serializable
+data class RuntimeReadinessStatus(
+    val ready: Boolean = false,
+    val operationalHealthy: Boolean = false,
+    val coreReady: Boolean = false,
+    val routingReady: Boolean = false,
+    val dnsReady: Boolean = false,
+    val egressReady: Boolean = false,
+)
+
+@Serializable
+data class CanonicalRuntimeStatus(
+    val backendKind: BackendKind = BackendKind.ROOT_TPROXY,
+    val phase: BackendPhase = BackendPhase.STOPPED,
+    val activeProfileId: String? = null,
+    val generation: Long = 0L,
+    val readiness: RuntimeReadinessStatus = RuntimeReadinessStatus(),
+    val lastCode: String = "",
+    val lastError: String = "",
+    val lastUserMessage: String = "",
+    val lastDebug: String = "",
+    val rollbackApplied: Boolean = false,
+    val checkedAt: String? = null,
+)
+
+@Serializable
 data class BackendStatusV2(
     val desiredState: DesiredStateV2 = DesiredStateV2(),
     val appliedState: AppliedStateV2 = AppliedStateV2(),
+    val canonical: CanonicalRuntimeStatus? = null,
     val health: BackendHealthSnapshot = BackendHealthSnapshot(),
     val capabilities: List<BackendCapability> = emptyList(),
     val compatibility: RuntimeCompatibilityStatus? = null,
@@ -194,6 +220,8 @@ data class RuntimeCompatibilityStatus(
 data class RuntimeMethodCapability(
     val method: String = "",
     val capability: String = "",
+    val mutating: Boolean = false,
+    val async: Boolean = false,
 )
 
 @Serializable

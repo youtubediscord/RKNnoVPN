@@ -43,6 +43,7 @@ type Summary struct {
 	Routing             RoutingSummary    `json:"routing"`
 	NodeTests           NodeTestSummary   `json:"nodeTests"`
 	PackageResolution   PackageResolution `json:"packageResolution"`
+	Graph               Graph             `json:"graph,omitempty"`
 }
 
 type CompatSummary struct {
@@ -57,6 +58,11 @@ type CompatSummary struct {
 }
 
 type RuntimeSummary struct {
+	BackendKind      string `json:"backendKind,omitempty"`
+	Phase            string `json:"phase,omitempty"`
+	Generation       int64  `json:"generation,omitempty"`
+	Ready            bool   `json:"ready"`
+	OperationalReady bool   `json:"operationalReady"`
 	StageOperation   string `json:"stageOperation,omitempty"`
 	StageStatus      string `json:"stageStatus,omitempty"`
 	FailedStage      string `json:"failedStage,omitempty"`
@@ -115,11 +121,50 @@ func BuildSummary(
 	routingSummary RoutingSummary,
 	packageResolution PackageResolution,
 ) Summary {
+	return BuildSummaryWithCanonical(
+		daemonVersion,
+		controlProtocolVersion,
+		runtimev2.CanonicalStatusFromStatus(runtimev2.Status{Health: healthSnapshot}),
+		healthSnapshot,
+		leftovers,
+		netstackRuntimeReport,
+		nodeResults,
+		ports,
+		privacy,
+		moduleVersion,
+		singBoxCheck,
+		releaseIntegrity,
+		profileSummary,
+		routingSummary,
+		packageResolution,
+	)
+}
+
+func BuildSummaryWithCanonical(
+	daemonVersion string,
+	controlProtocolVersion int,
+	canonical runtimev2.CanonicalStatus,
+	healthSnapshot runtimev2.HealthSnapshot,
+	leftovers []string,
+	netstackRuntimeReport netstack.Report,
+	nodeResults []runtimev2.NodeProbeResult,
+	ports []PortStatus,
+	privacy map[string]interface{},
+	moduleVersion map[string]string,
+	singBoxCheck CommandResult,
+	releaseIntegrity ReleaseIntegrity,
+	profileSummary ProfileSummary,
+	routingSummary RoutingSummary,
+	packageResolution PackageResolution,
+) Summary {
+	if canonical.Phase == "" {
+		canonical = runtimev2.CanonicalStatusFromStatus(runtimev2.Status{Health: healthSnapshot})
+	}
 	summary := Summary{
 		Status:             "ok",
-		HealthCode:         healthSnapshot.LastCode,
-		HealthDetail:       healthSnapshot.LastError,
-		OperationalHealthy: healthSnapshot.OperationalHealthy(),
+		HealthCode:         canonical.LastCode,
+		HealthDetail:       canonical.LastError,
+		OperationalHealthy: canonical.Readiness.OperationalHealthy,
 		Compatibility: CompatSummary{
 			DaemonVersion:          daemonVersion,
 			ModuleVersion:          firstNonEmptyString(moduleVersion["version"], "unknown"),
@@ -130,7 +175,7 @@ func BuildSummary(
 			CurrentReleaseOK:       releaseIntegrity.OK,
 			SingBoxCheckOK:         singBoxCheck.Error == "",
 		},
-		Runtime:           runtimeSummaryFromHealth(healthSnapshot),
+		Runtime:           runtimeSummaryFromCanonical(canonical, healthSnapshot),
 		Profile:           profileSummary,
 		Routing:           routingSummary,
 		NodeTests:         nodeTestSummaryFromResults(nodeResults),
@@ -157,11 +202,11 @@ func BuildSummary(
 		addIssue("privacy: " + issue)
 	}
 
-	if !healthSnapshot.Healthy() {
-		addIssue(firstNonEmptyString(healthSnapshot.LastError, "readiness checks are failing"))
+	if !canonical.Readiness.Ready {
+		addIssue(firstNonEmptyString(canonical.LastError, "readiness checks are failing"))
 		summary.Status = "failed"
-	} else if !healthSnapshot.OperationalHealthy() {
-		addIssue(firstNonEmptyString(healthSnapshot.LastError, "operational checks are degraded"))
+	} else if !canonical.Readiness.OperationalHealthy {
+		addIssue(firstNonEmptyString(canonical.LastError, "operational checks are degraded"))
 		summary.Status = "degraded"
 	}
 	if len(leftovers) > 0 {
@@ -209,20 +254,39 @@ func BuildSummary(
 	if summary.Status == "ok" && summary.IssueCount > 0 {
 		summary.Status = "degraded"
 	}
+	summary.Graph = BuildGraphFromSummary(summary)
+	return summary
+}
+
+func runtimeSummaryFromCanonical(canonical runtimev2.CanonicalStatus, healthSnapshot runtimev2.HealthSnapshot) RuntimeSummary {
+	summary := runtimeSummaryFromHealth(healthSnapshot)
+	summary.BackendKind = string(canonical.BackendKind)
+	summary.Phase = string(canonical.Phase)
+	summary.Generation = canonical.Generation
+	summary.Ready = canonical.Readiness.Ready
+	summary.OperationalReady = canonical.Readiness.OperationalHealthy
+	summary.LastCode = firstNonEmptyString(canonical.LastCode, summary.LastCode)
+	summary.RollbackApplied = canonical.RollbackApplied || summary.RollbackApplied
 	return summary
 }
 
 func runtimeSummaryFromHealth(healthSnapshot runtimev2.HealthSnapshot) RuntimeSummary {
 	report, ok := healthSnapshot.StageReport.(core.RuntimeStageReport)
 	if !ok || report.Empty() {
-		return RuntimeSummary{LastCode: healthSnapshot.LastCode}
+		return RuntimeSummary{
+			LastCode:         healthSnapshot.LastCode,
+			Ready:            healthSnapshot.Healthy(),
+			OperationalReady: healthSnapshot.OperationalHealthy(),
+		}
 	}
 	summary := RuntimeSummary{
-		StageOperation:  report.Operation,
-		StageStatus:     report.Status,
-		FailedStage:     report.FailedStage,
-		LastCode:        firstNonEmptyString(report.LastCode, healthSnapshot.LastCode),
-		RollbackApplied: report.RollbackApplied,
+		StageOperation:   report.Operation,
+		StageStatus:      report.Status,
+		FailedStage:      report.FailedStage,
+		LastCode:         firstNonEmptyString(report.LastCode, healthSnapshot.LastCode),
+		RollbackApplied:  report.RollbackApplied,
+		Ready:            healthSnapshot.Healthy(),
+		OperationalReady: healthSnapshot.OperationalHealthy(),
 	}
 	reportAt := report.FinishedAt
 	if reportAt.IsZero() {

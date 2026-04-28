@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -97,7 +98,7 @@ func TestClassifyRuntimeURLTestFailureTable(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := classifyRuntimeURLTestFailure(tt.err, tt.snapshot); got != tt.want {
+			if got := rootruntime.ClassifyURLTestFailure(tt.err, tt.snapshot); got != tt.want {
 				t.Fatalf("classifyRuntimeURLTestFailure() = %q, want %q", got, tt.want)
 			}
 		})
@@ -108,20 +109,20 @@ func TestResolveNodeProbeURLUsesRequestHealthThenFallback(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Health.URL = " https://health.example/generate_204 "
 
-	if got := resolveNodeProbeURL(" https://request.example/test ", cfg); got != "https://request.example/test" {
+	if got := rootruntime.ResolveNodeProbeURL(" https://request.example/test ", cfg); got != "https://request.example/test" {
 		t.Fatalf("explicit URL = %q", got)
 	}
-	if got := resolveNodeProbeURL(" ", cfg); got != "https://health.example/generate_204" {
+	if got := rootruntime.ResolveNodeProbeURL(" ", cfg); got != "https://health.example/generate_204" {
 		t.Fatalf("health URL = %q", got)
 	}
 	cfg.Health.URL = " "
-	if got := resolveNodeProbeURL("", cfg); got != "https://www.gstatic.com/generate_204" {
+	if got := rootruntime.ResolveNodeProbeURL("", cfg); got != "https://www.gstatic.com/generate_204" {
 		t.Fatalf("fallback URL = %q", got)
 	}
 }
 
 func TestNodeProbeRunnerFiltersSelectedNodes(t *testing.T) {
-	requested := requestedNodeIDs([]string{" node-a ", "", "node-c"})
+	requested := rootruntime.RequestedNodeIDs([]string{" node-a ", "", "node-c"})
 
 	profiles := []*config.NodeProfile{
 		{ID: "node-a"},

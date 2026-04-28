@@ -63,35 +63,40 @@ type SubscriptionNode struct {
 }
 
 type PreviewResult struct {
-	Source        SubscriptionSource      `json:"source"`
-	Subscription  profiledoc.Subscription `json:"subscription"`
-	Nodes         []profiledoc.Node       `json:"nodes"`
-	Added         int                     `json:"added"`
-	Updated       int                     `json:"updated"`
-	Unchanged     int                     `json:"unchanged"`
-	Stale         int                     `json:"stale"`
-	ParseFailures int                     `json:"parseFailures"`
-	FetchStatus   int                     `json:"-"`
-	FetchHeaders  map[string]string       `json:"-"`
+	Source        SubscriptionSource                    `json:"source"`
+	Subscription  profiledoc.Subscription               `json:"subscription"`
+	Nodes         []profiledoc.Node                     `json:"nodes"`
+	RejectedNodes []profiledoc.RejectedSubscriptionNode `json:"rejectedNodes"`
+	Rejected      int                                   `json:"rejected"`
+	Added         int                                   `json:"added"`
+	Updated       int                                   `json:"updated"`
+	Unchanged     int                                   `json:"unchanged"`
+	Stale         int                                   `json:"stale"`
+	ParseFailures int                                   `json:"parseFailures"`
+	FetchStatus   int                                   `json:"-"`
+	FetchHeaders  map[string]string                     `json:"-"`
 }
 
 type RefreshResult struct {
-	Source        SubscriptionSource      `json:"source"`
-	Profile       profiledoc.Document     `json:"profile"`
-	Subscription  profiledoc.Subscription `json:"subscription"`
-	Nodes         []profiledoc.Node       `json:"nodes"`
-	Merge         map[string]int          `json:"merge"`
-	ParseFailures int                     `json:"parseFailures"`
-	FetchStatus   int                     `json:"-"`
-	FetchHeaders  map[string]string       `json:"-"`
+	Source        SubscriptionSource                    `json:"source"`
+	Profile       profiledoc.Document                   `json:"profile"`
+	Subscription  profiledoc.Subscription               `json:"subscription"`
+	Nodes         []profiledoc.Node                     `json:"nodes"`
+	RejectedNodes []profiledoc.RejectedSubscriptionNode `json:"rejectedNodes"`
+	Merge         map[string]int                        `json:"merge"`
+	ParseFailures int                                   `json:"parseFailures"`
+	FetchStatus   int                                   `json:"-"`
+	FetchHeaders  map[string]string                     `json:"-"`
 }
 
 type RefreshResponse struct {
-	Source        SubscriptionSource      `json:"source"`
-	Subscription  profiledoc.Subscription `json:"subscription"`
-	Imported      int                     `json:"imported"`
-	ParseFailures int                     `json:"parseFailures"`
-	Merge         map[string]int          `json:"merge"`
+	Source        SubscriptionSource                    `json:"source"`
+	Subscription  profiledoc.Subscription               `json:"subscription"`
+	Imported      int                                   `json:"imported"`
+	ParseFailures int                                   `json:"parseFailures"`
+	Rejected      int                                   `json:"rejected"`
+	RejectedNodes []profiledoc.RejectedSubscriptionNode `json:"rejectedNodes"`
+	Merge         map[string]int                        `json:"merge"`
 }
 
 func NewClient(fetcher Fetcher) Client {
@@ -102,7 +107,7 @@ func NewClient(fetcher Fetcher) Client {
 }
 
 func (c Client) Preview(rawURL string, current profiledoc.Document) (PreviewResult, error) {
-	source, nodes, sub, failures, fetched, err := c.fetchAndParse(rawURL)
+	source, nodes, sub, failures, rejected, fetched, err := c.fetchAndParse(rawURL)
 	if err != nil {
 		return PreviewResult{Source: source, FetchStatus: fetched.Status, FetchHeaders: fetched.Headers}, err
 	}
@@ -111,6 +116,8 @@ func (c Client) Preview(rawURL string, current profiledoc.Document) (PreviewResu
 		Source:        source,
 		Subscription:  sub,
 		Nodes:         nodes,
+		RejectedNodes: rejected,
+		Rejected:      len(rejected),
 		Added:         stats["added"],
 		Updated:       stats["updated"],
 		Unchanged:     stats["unchanged"],
@@ -122,9 +129,19 @@ func (c Client) Preview(rawURL string, current profiledoc.Document) (PreviewResu
 }
 
 func (c Client) ApplyRefresh(rawURL string, current profiledoc.Document) (RefreshResult, error) {
-	source, nodes, sub, failures, fetched, err := c.fetchAndParse(rawURL)
+	source, nodes, sub, failures, rejected, fetched, err := c.fetchAndParse(rawURL)
 	if err != nil {
 		return RefreshResult{Source: source, FetchStatus: fetched.Status, FetchHeaders: fetched.Headers}, err
+	}
+	if len(nodes) == 0 && (failures > 0 || len(rejected) > 0) {
+		return RefreshResult{
+			Source:        source,
+			Subscription:  sub,
+			RejectedNodes: rejected,
+			ParseFailures: failures,
+			FetchStatus:   fetched.Status,
+			FetchHeaders:  fetched.Headers,
+		}, ErrNoSupportedNodes
 	}
 	next, stats := profiledoc.MergeSubscriptionNodes(current, sub, nodes)
 	replaced := false
@@ -144,6 +161,7 @@ func (c Client) ApplyRefresh(rawURL string, current profiledoc.Document) (Refres
 		Profile:       next,
 		Subscription:  sub,
 		Nodes:         nodes,
+		RejectedNodes: rejected,
 		Merge:         stats,
 		ParseFailures: failures,
 		FetchStatus:   fetched.Status,
@@ -157,14 +175,16 @@ func (r RefreshResult) Response() RefreshResponse {
 		Subscription:  r.Subscription,
 		Imported:      len(r.Nodes),
 		ParseFailures: r.ParseFailures,
+		Rejected:      len(r.RejectedNodes),
+		RejectedNodes: r.RejectedNodes,
 		Merge:         r.Merge,
 	}
 }
 
-func (c Client) fetchAndParse(rawURL string) (SubscriptionSource, []profiledoc.Node, profiledoc.Subscription, int, FetchResult, error) {
+func (c Client) fetchAndParse(rawURL string) (SubscriptionSource, []profiledoc.Node, profiledoc.Subscription, int, []profiledoc.RejectedSubscriptionNode, FetchResult, error) {
 	source, err := NewSubscriptionSource(rawURL)
 	if err != nil {
-		return source, nil, profiledoc.Subscription{}, 0, FetchResult{}, err
+		return source, nil, profiledoc.Subscription{}, 0, nil, FetchResult{}, err
 	}
 	if c.Fetcher == nil {
 		c.Fetcher = FetcherFunc(FetchURL)
@@ -175,19 +195,16 @@ func (c Client) fetchAndParse(rawURL string) (SubscriptionSource, []profiledoc.N
 	}
 	fetched, err := c.Fetcher.FetchURL(source.URL)
 	if err != nil {
-		return source, nil, profiledoc.Subscription{}, 0, fetched, err
+		return source, nil, profiledoc.Subscription{}, 0, nil, fetched, err
 	}
-	nodes, sub, failures := profiledoc.ParseSubscription(fetched.Body, fetched.Headers, source.URL, now.UnixMilli())
+	nodes, sub, failures, rejected := profiledoc.ParseSubscription(fetched.Body, fetched.Headers, source.URL, now.UnixMilli())
 	sub.ProviderKey = source.ProviderKey
 	sub.URL = source.URL
 	for i := range nodes {
 		nodes[i].Source.ProviderKey = source.ProviderKey
 		nodes[i].Source.URL = source.URL
 	}
-	if len(nodes) == 0 && failures > 0 {
-		return source, nil, sub, failures, fetched, ErrNoSupportedNodes
-	}
-	return source, nodes, sub, failures, fetched, nil
+	return source, nodes, sub, failures, rejected, fetched, nil
 }
 
 func FetchURL(rawURL string) (FetchResult, error) {

@@ -10,6 +10,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/subscription"
 )
 
@@ -106,7 +107,7 @@ func TestHealthEgressURLsPrefersConfiguredProbeSet(t *testing.T) {
 	cfg.Health.EgressURLs = []string{" https://cp.cloudflare.com/generate_204 ", "", "https://example.com/204"}
 	cfg.Health.URL = "https://cp.cloudflare.com/generate_204"
 
-	got := healthEgressURLs(cfg)
+	got := rootruntime.EgressURLs(cfg)
 	want := []string{
 		"https://cp.cloudflare.com/generate_204",
 		"https://example.com/204",

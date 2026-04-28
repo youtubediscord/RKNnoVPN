@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -32,6 +33,32 @@ func DesiredStateFromConfig(cfg *config.Config) runtimev2.DesiredState {
 		},
 		FallbackPolicy: fallbackPolicy,
 	}
+}
+
+func CompleteDesiredState(desired runtimev2.DesiredState, defaults runtimev2.DesiredState) runtimev2.DesiredState {
+	if desired.BackendKind == "" {
+		desired.BackendKind = defaults.BackendKind
+	}
+	if desired.FallbackPolicy == "" {
+		desired.FallbackPolicy = defaults.FallbackPolicy
+	}
+	if desired.ActiveProfileID == "" {
+		desired.ActiveProfileID = defaults.ActiveProfileID
+	}
+	return desired
+}
+
+func ApplyDesiredStateToConfig(currentCfg *config.Config, desired runtimev2.DesiredState) (*config.Config, error) {
+	doc := profiledoc.ApplyRuntimeIntent(profiledoc.FromConfig(currentCfg), profiledoc.RuntimeIntent{
+		BackendKind:     string(desired.BackendKind),
+		FallbackPolicy:  string(desired.FallbackPolicy),
+		ActiveProfileID: desired.ActiveProfileID,
+	})
+	nextCfg, _, err := profiledoc.ApplyToConfig(currentCfg, doc)
+	if err != nil {
+		return nil, err
+	}
+	return nextCfg, nil
 }
 
 func mapAppSelection(cfg *config.Config) runtimev2.AppSelection {

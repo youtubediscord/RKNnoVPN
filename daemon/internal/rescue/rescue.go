@@ -14,12 +14,12 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
 // Strategy identifies which recovery approach is being attempted.
@@ -165,12 +165,13 @@ func (r *RescueManager) Rollback() error {
 	}
 
 	// 2. Run the same root-level cleanup script used by the UI reset path.
-	if err := core.ExecScript(filepath.Join(r.dataDir, "scripts", "rescue_reset.sh"), "daemon-reset", r.scriptEnv()); err != nil {
+	paths := modulecontract.NewPaths(r.dataDir)
+	if err := core.ExecScript(paths.RescueResetScript(), "daemon-reset", r.scriptEnv()); err != nil {
 		r.logger.Printf("rollback: rescue cleanup script failed: %v", err)
 	}
 
 	// 3. End the daemon-owned reset window after the canonical cleanup script.
-	_ = os.Remove(filepath.Join(r.dataDir, "run", "reset.lock"))
+	_ = os.Remove(paths.ResetLock())
 
 	r.core.SetState(core.StateStopped)
 	r.logger.Println("rollback complete — proxy is fully down")
@@ -241,7 +242,8 @@ func (r *RescueManager) reapplyRules(canProceed RecoveryGate) error {
 	env := r.scriptEnv()
 
 	// Re-apply iptables.
-	iptablesScript := filepath.Join(r.dataDir, "scripts", "iptables.sh")
+	paths := modulecontract.NewPaths(r.dataDir)
+	iptablesScript := paths.IPTablesScript()
 	if err := core.ExecScript(iptablesScript, "stop", env); err != nil {
 		r.logger.Printf("reapply: iptables stop failed (continuing): %v", err)
 	}
@@ -253,7 +255,7 @@ func (r *RescueManager) reapplyRules(canProceed RecoveryGate) error {
 	}
 
 	// Re-apply DNS.
-	dnsScript := filepath.Join(r.dataDir, "scripts", "dns.sh")
+	dnsScript := paths.DNSScript()
 	if err := core.ExecScript(dnsScript, "stop", env); err != nil {
 		r.logger.Printf("reapply: dns stop failed (continuing): %v", err)
 	}

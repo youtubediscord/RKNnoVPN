@@ -59,3 +59,46 @@ func TestDesiredStateFromConfigMapsRuntimeIntent(t *testing.T) {
 		t.Fatalf("DNS policy = %#v", desired.DNSPolicy)
 	}
 }
+
+func TestCompleteDesiredStateFillsRuntimeIntentDefaults(t *testing.T) {
+	defaults := runtimev2.DesiredState{
+		BackendKind:     runtimev2.BackendRootTProxy,
+		ActiveProfileID: "node-default",
+		FallbackPolicy:  runtimev2.FallbackOfferReset,
+		RoutingMode:     "PROXY_ALL",
+	}
+	desired := CompleteDesiredState(runtimev2.DesiredState{
+		RoutingMode: "DIRECT",
+	}, defaults)
+
+	if desired.BackendKind != runtimev2.BackendRootTProxy {
+		t.Fatalf("backend = %q", desired.BackendKind)
+	}
+	if desired.ActiveProfileID != "node-default" {
+		t.Fatalf("active profile = %q", desired.ActiveProfileID)
+	}
+	if desired.FallbackPolicy != runtimev2.FallbackOfferReset {
+		t.Fatalf("fallback = %q", desired.FallbackPolicy)
+	}
+	if desired.RoutingMode != "DIRECT" {
+		t.Fatalf("explicit routing mode was overwritten: %q", desired.RoutingMode)
+	}
+}
+
+func TestApplyDesiredStateToConfigPersistsRuntimeIntent(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	next, err := ApplyDesiredStateToConfig(cfg, runtimev2.DesiredState{
+		BackendKind:    runtimev2.BackendRootTProxy,
+		FallbackPolicy: runtimev2.FallbackAutoReset,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.RuntimeV2.BackendKind != string(runtimev2.BackendRootTProxy) {
+		t.Fatalf("backend = %q", next.RuntimeV2.BackendKind)
+	}
+	if next.RuntimeV2.FallbackPolicy != string(runtimev2.FallbackAutoReset) {
+		t.Fatalf("fallback = %q", next.RuntimeV2.FallbackPolicy)
+	}
+}

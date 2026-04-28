@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
 type ExecScriptFunc func(scriptPath string, command string, env map[string]string) error
@@ -243,14 +244,7 @@ func (m Manager) CollectLeftovers() []string {
 		}
 	}
 
-	for _, path := range []string{
-		filepath.Join(m.dataDir, "run", "singbox.pid"),
-		filepath.Join(m.dataDir, "run", "active"),
-		filepath.Join(m.dataDir, "run", "net_change.lock"),
-		filepath.Join(m.dataDir, "run", "iptables.rules"),
-		filepath.Join(m.dataDir, "run", "ip6tables.rules"),
-		filepath.Join(m.dataDir, "run", "env.sh"),
-	} {
+	for _, path := range modulecontract.NewPaths(m.dataDir).RuntimeSnapshotFiles() {
 		if _, err := os.Stat(path); err == nil {
 			add("stale runtime file remains: %s", path)
 		}
@@ -320,7 +314,15 @@ func (m Manager) run(name string, command string) error {
 	if m.execScript == nil {
 		return fmt.Errorf("exec script function is nil")
 	}
-	return m.execScript(filepath.Join(m.dataDir, "scripts", name+".sh"), command, m.env)
+	paths := modulecontract.NewPaths(m.dataDir)
+	switch name {
+	case "dns":
+		return m.execScript(paths.DNSScript(), command, m.env)
+	case "iptables":
+		return m.execScript(paths.IPTablesScript(), command, m.env)
+	default:
+		return fmt.Errorf("unknown netstack script %q", name)
+	}
 }
 
 func isMissingScriptError(err error) bool {

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 )
 
@@ -323,8 +324,9 @@ func (m *CoreManager) ResetState() {
 	m.activeProfile = ""
 	m.startedAt = time.Time{}
 	m.state = StateStopped
-	_ = os.Remove(filepath.Join(m.dataDir, "run", "singbox.pid"))
-	_ = os.Remove(filepath.Join(m.dataDir, "run", "active"))
+	paths := modulecontract.NewPaths(m.dataDir)
+	_ = os.Remove(paths.SingBoxPIDFile())
+	_ = os.Remove(paths.ActiveFile())
 }
 
 // --------------------------------------------------------------------------
@@ -357,7 +359,8 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	m.logger.Printf("starting sing-box for profile %q", profile.Protocol)
 
 	// 1. Render the sing-box JSON config.
-	configPath := filepath.Join(m.dataDir, "config", "rendered", "singbox.json")
+	paths := modulecontract.NewPaths(m.dataDir)
+	configPath := filepath.Join(paths.RenderedConfigDir(), "singbox.json")
 	m.logger.Printf("rendering sing-box config to %s", configPath)
 	if err := renderConfig(m.config, profile, configPath); err != nil {
 		m.logger.Printf("render sing-box config failed: %v", err)
@@ -375,7 +378,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	recordStage("config-check", "ok", "", configPath, false)
 
 	// 2. Spawn sing-box.
-	binPath := filepath.Join(m.dataDir, "bin", "sing-box")
+	binPath := filepath.Join(paths.BinDir(), "sing-box")
 	cmd := exec.Command(binPath, "run", "-c", configPath)
 	logFile, logPath, err := m.openSingBoxLog()
 	if err != nil {
@@ -404,7 +407,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	recordStage("spawn-core", "ok", "", fmt.Sprintf("pid=%d", m.pid), false)
 
 	// Write PID file.
-	pidPath := filepath.Join(m.dataDir, "run", "singbox.pid")
+	pidPath := paths.SingBoxPIDFile()
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
 	rollbackStarted := func(signal syscall.Signal, stopDNS bool, stopRules bool) {
 		if stopDNS || stopRules {
@@ -475,7 +478,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	m.startedAt = time.Now()
 	m.state = StateRunning
 	m.markActive()
-	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
+	_ = os.Remove(modulecontract.NewPaths(m.dataDir).ManualFlag())
 	m.logger.Printf("core is running (pid=%d)", m.pid)
 	recordStage("commit-state", "ok", "", m.activeProfile, false)
 	m.finishStartReport(stageReport)
@@ -515,7 +518,8 @@ func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 	}
 	m.state = StateStopping
 	m.logger.Println("stopping core")
-	_ = os.Remove(filepath.Join(m.dataDir, "run", "active"))
+	paths := modulecontract.NewPaths(m.dataDir)
+	_ = os.Remove(paths.ActiveFile())
 
 	var firstErr error
 
@@ -536,7 +540,7 @@ func (m *CoreManager) stopWithMode(forceCleanup bool) error {
 	}
 
 	// 4. Clean PID file.
-	pidPath := filepath.Join(m.dataDir, "run", "singbox.pid")
+	pidPath := paths.SingBoxPIDFile()
 	_ = os.Remove(pidPath)
 
 	m.process = nil
@@ -583,7 +587,8 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.logger.Printf("hot-swap to profile %q", profile.Protocol)
 
 	// 1. Render new config.
-	configPath := filepath.Join(m.dataDir, "config", "rendered", "singbox.json")
+	paths := modulecontract.NewPaths(m.dataDir)
+	configPath := filepath.Join(paths.RenderedConfigDir(), "singbox.json")
 	if err := renderConfig(m.config, profile, configPath); err != nil {
 		return failStage("render-config", "hot-swap render", "CONFIG_RENDER_FAILED", err, false)
 	}
@@ -605,7 +610,7 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.state = StateStarting
 
 	// 3. Spawn new sing-box with the fresh config.
-	binPath := filepath.Join(m.dataDir, "bin", "sing-box")
+	binPath := filepath.Join(paths.BinDir(), "sing-box")
 	cmd := exec.Command(binPath, "run", "-c", configPath)
 	logFile, logPath, err := m.openSingBoxLog()
 	if err != nil {
@@ -633,7 +638,7 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.exitCh = exitCh
 	recordStage("spawn-core", "ok", "", fmt.Sprintf("pid=%d", m.pid), false)
 
-	pidPath := filepath.Join(m.dataDir, "run", "singbox.pid")
+	pidPath := paths.SingBoxPIDFile()
 	_ = os.WriteFile(pidPath, []byte(strconv.Itoa(m.pid)), 0640)
 
 	// 4. Wait for runtime listeners.
@@ -658,7 +663,7 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.startedAt = time.Now()
 	m.state = StateRunning
 	m.markActive()
-	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
+	_ = os.Remove(modulecontract.NewPaths(m.dataDir).ManualFlag())
 	m.logger.Printf("hot-swap complete (pid=%d)", m.pid)
 	recordStage("commit-state", "ok", "", m.activeProfile, false)
 	stageReport.FinishOK()
@@ -667,12 +672,13 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 }
 
 func (m *CoreManager) markActive() {
-	runDir := filepath.Join(m.dataDir, "run")
+	paths := modulecontract.NewPaths(m.dataDir)
+	runDir := paths.RunDir()
 	if err := os.MkdirAll(runDir, 0750); err != nil {
 		m.logger.Printf("mark active: mkdir %s: %v", runDir, err)
 		return
 	}
-	activePath := filepath.Join(runDir, "active")
+	activePath := paths.ActiveFile()
 	content := []byte(time.Now().Format(time.RFC3339) + "\n")
 	if err := os.WriteFile(activePath, content, 0640); err != nil {
 		m.logger.Printf("mark active: write %s: %v", activePath, err)
@@ -680,7 +686,7 @@ func (m *CoreManager) markActive() {
 }
 
 func (m *CoreManager) openSingBoxLog() (*os.File, string, error) {
-	logDir := filepath.Join(m.dataDir, "logs")
+	logDir := modulecontract.NewPaths(m.dataDir).LogDir()
 	if err := os.MkdirAll(logDir, 0750); err != nil {
 		return nil, "", err
 	}
@@ -694,7 +700,7 @@ func (m *CoreManager) openSingBoxLog() (*os.File, string, error) {
 }
 
 func (m *CoreManager) checkSingBoxConfig(configPath string) error {
-	binPath := filepath.Join(m.dataDir, "bin", "sing-box")
+	binPath := filepath.Join(modulecontract.NewPaths(m.dataDir).BinDir(), "sing-box")
 	return runSingBoxConfigCheck(binPath, configPath, singBoxCheckTimeout)
 }
 
@@ -947,7 +953,7 @@ func (m *CoreManager) killTrackedSingBox() error {
 	if m.pid > 0 {
 		pids[m.pid] = true
 	}
-	if raw, err := os.ReadFile(filepath.Join(m.dataDir, "run", "singbox.pid")); err == nil {
+	if raw, err := os.ReadFile(modulecontract.NewPaths(m.dataDir).SingBoxPIDFile()); err == nil {
 		if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw))); parseErr == nil && pid > 0 {
 			pids[pid] = true
 		}

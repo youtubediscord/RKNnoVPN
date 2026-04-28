@@ -38,6 +38,8 @@ func (d *daemon) refreshRuntimeV2Compatibility() {
 		methods = append(methods, runtimev2.MethodCapability{
 			Method:     contract.Method,
 			Capability: contract.Capability,
+			Mutating:   contract.Mutating,
+			Async:      contract.Async,
 		})
 	}
 	d.runtimeV2.SetCompatibility(runtimev2.CompatibilityStatus{

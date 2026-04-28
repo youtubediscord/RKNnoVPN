@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -29,7 +30,7 @@ func TestDesiredStateFromConfigUsesRootRuntimeDefaults(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			desired := desiredStateFromConfig(tt.cfg)
+			desired := rootruntime.DesiredStateFromConfig(tt.cfg)
 
 			if desired.BackendKind != runtimev2.BackendRootTProxy {
 				t.Fatalf("default backend = %q, want %q", desired.BackendKind, runtimev2.BackendRootTProxy)
@@ -45,7 +46,7 @@ func TestDesiredStateFromConfigMapsActiveProfileID(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Profile.ActiveNodeID = "node-active"
 
-	desired := desiredStateFromConfig(cfg)
+	desired := rootruntime.DesiredStateFromConfig(cfg)
 
 	if desired.ActiveProfileID != "node-active" {
 		t.Fatalf("active profile ID = %q", desired.ActiveProfileID)
@@ -76,7 +77,7 @@ func TestDesiredStateFromConfigMapsRoutingMode(t *testing.T) {
 			cfg.Routing.Mode = tt.routingMode
 			cfg.Apps.Mode = tt.appMode
 
-			desired := desiredStateFromConfig(cfg)
+			desired := rootruntime.DesiredStateFromConfig(cfg)
 
 			if desired.RoutingMode != tt.want {
 				t.Fatalf("routing mode = %q, want %q", desired.RoutingMode, tt.want)
@@ -125,7 +126,7 @@ func TestDesiredStateFromConfigMapsAppSelection(t *testing.T) {
 			cfg.Apps.Packages = append([]string(nil), tt.apps...)
 			cfg.Routing.AlwaysDirectApps = append([]string(nil), tt.always...)
 
-			desired := desiredStateFromConfig(cfg)
+			desired := rootruntime.DesiredStateFromConfig(cfg)
 
 			if !reflect.DeepEqual(desired.AppSelection.ProxyPackages, tt.wantProxy) {
 				t.Fatalf("proxy packages = %#v, want %#v", desired.AppSelection.ProxyPackages, tt.wantProxy)
@@ -180,7 +181,7 @@ func TestDesiredStateFromConfigMapsDNSPolicy(t *testing.T) {
 			cfg.DNS.FakeIP = tt.fakeDNS
 			cfg.IPv6.Mode = tt.ipv6Mode
 
-			desired := desiredStateFromConfig(cfg)
+			desired := rootruntime.DesiredStateFromConfig(cfg)
 
 			if desired.DNSPolicy != tt.want {
 				t.Fatalf("DNS policy = %#v, want %#v", desired.DNSPolicy, tt.want)
@@ -203,7 +204,7 @@ func TestDesiredStateFromConfigMapsRuntimeIntentFieldsTogether(t *testing.T) {
 	cfg.DNS.FakeIP = true
 	cfg.IPv6.Mode = "disable"
 
-	desired := desiredStateFromConfig(cfg)
+	desired := rootruntime.DesiredStateFromConfig(cfg)
 
 	if desired.BackendKind != runtimev2.BackendRootTProxy {
 		t.Fatalf("backend = %q", desired.BackendKind)
@@ -239,7 +240,7 @@ func TestDesiredStateFromConfigDoesNotAliasPackageSlices(t *testing.T) {
 	cfg.Apps.Packages = []string{"com.example.proxy"}
 	cfg.Routing.AlwaysDirectApps = []string{"com.example.direct"}
 
-	desired := desiredStateFromConfig(cfg)
+	desired := rootruntime.DesiredStateFromConfig(cfg)
 	cfg.Apps.Packages[0] = "mutated.proxy"
 	cfg.Routing.AlwaysDirectApps[0] = "mutated.direct"
 

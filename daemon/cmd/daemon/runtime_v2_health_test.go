@@ -10,6 +10,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -116,7 +117,7 @@ func TestClassifyRuntimeV2HealthUsesPureGateClassification(t *testing.T) {
 		},
 	}
 
-	snapshot := classifyRuntimeV2Health(runtimeV2HealthInput{
+	snapshot := rootruntime.ClassifyHealth(rootruntime.HealthInput{
 		State:        core.StateRunning,
 		Result:       result,
 		RecentEgress: true,
@@ -154,7 +155,7 @@ func TestClassifyRuntimeV2HealthReadinessPriorityBeatsOperationalPriority(t *tes
 		},
 	}
 
-	snapshot := classifyRuntimeV2Health(runtimeV2HealthInput{
+	snapshot := rootruntime.ClassifyHealth(rootruntime.HealthInput{
 		State:     core.StateRunning,
 		Result:    result,
 		CheckedAt: time.Now(),
@@ -182,7 +183,7 @@ func TestClassifyRuntimeV2HealthUsesRecentEgressWhenURLProbeMissing(t *testing.T
 		},
 	}
 
-	snapshot := classifyRuntimeV2Health(runtimeV2HealthInput{
+	snapshot := rootruntime.ClassifyHealth(rootruntime.HealthInput{
 		State:        core.StateRunning,
 		Result:       result,
 		RecentEgress: true,
@@ -210,7 +211,7 @@ func TestFirstFailedGateUsesDeterministicReadinessPriority(t *testing.T) {
 		},
 	}
 
-	got := firstFailedGateDiagnostic(result, runtimev2.HealthSnapshot{}).Detail
+	got := rootruntime.FirstFailedGateDiagnostic(result, runtimev2.HealthSnapshot{}).Detail
 	if !strings.HasPrefix(got, "singbox_alive:") {
 		t.Fatalf("expected singbox_alive first, got %q", got)
 	}
@@ -229,7 +230,7 @@ func TestFirstFailedGateCodeUsesDeterministicReadinessPriority(t *testing.T) {
 		},
 	}
 
-	got := firstFailedGateDiagnostic(result, runtimev2.HealthSnapshot{})
+	got := rootruntime.FirstFailedGateDiagnostic(result, runtimev2.HealthSnapshot{})
 	if got.Code != "CORE_PID_MISSING" {
 		t.Fatalf("expected CORE_PID_MISSING first, got %#v", got)
 	}
@@ -265,15 +266,15 @@ func TestClassifyRuntimeURLTestFailureUsesLastHealthCode(t *testing.T) {
 		CheckedAt:    time.Now(),
 	}
 	base.LastCode = "OUTBOUND_URL_FAILED"
-	if got := classifyRuntimeURLTestFailure(errors.New("timeout"), base); got != "outbound_url_failed" {
+	if got := rootruntime.ClassifyURLTestFailure(errors.New("timeout"), base); got != "outbound_url_failed" {
 		t.Fatalf("expected outbound_url_failed, got %q", got)
 	}
 	base.LastCode = "DNS_LOOKUP_TIMEOUT"
-	if got := classifyRuntimeURLTestFailure(errors.New("timeout"), base); got != "proxy_dns_unavailable" {
+	if got := rootruntime.ClassifyURLTestFailure(errors.New("timeout"), base); got != "proxy_dns_unavailable" {
 		t.Fatalf("expected proxy_dns_unavailable, got %q", got)
 	}
 	base.LastCode = "RULES_NOT_APPLIED"
-	if got := classifyRuntimeURLTestFailure(errors.New("timeout"), base); got != "runtime_not_ready" {
+	if got := rootruntime.ClassifyURLTestFailure(errors.New("timeout"), base); got != "runtime_not_ready" {
 		t.Fatalf("expected runtime_not_ready, got %q", got)
 	}
 }
@@ -297,7 +298,7 @@ func TestClassifyURLTestFailureUsesConcreteURLCause(t *testing.T) {
 		{errors.New("lookup example.com: no such host"), "proxy_dns_unavailable"},
 	}
 	for _, tc := range cases {
-		if got := classifyRuntimeURLTestFailure(tc.err, base); got != tc.want {
+		if got := rootruntime.ClassifyURLTestFailure(tc.err, base); got != tc.want {
 			t.Fatalf("expected %q for %v, got %q", tc.want, tc.err, got)
 		}
 	}

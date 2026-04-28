@@ -2,13 +2,17 @@ package diagnostics
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
 func ReadModuleVersion(paths ...string) map[string]string {
 	if len(paths) == 0 {
+		defaultPaths := modulecontract.NewPaths("")
 		paths = []string{
-			"/data/adb/modules/rknnovpn/module.prop",
+			filepath.Join(defaultPaths.Dir(), "module.prop"),
 			"/data/adb/modules_update/rknnovpn/module.prop",
 		}
 	}

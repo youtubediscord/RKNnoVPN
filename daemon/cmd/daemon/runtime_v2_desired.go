@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 
-	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
-	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
@@ -38,10 +36,6 @@ func (d *daemon) desiredStateV2() runtimev2.DesiredState {
 	cfg := d.cfg
 	d.mu.Unlock()
 
-	return desiredStateFromConfig(cfg)
-}
-
-func desiredStateFromConfig(cfg *config.Config) runtimev2.DesiredState {
 	return rootruntime.DesiredStateFromConfig(cfg)
 }
 
@@ -53,16 +47,7 @@ func (d *daemon) syncRuntimeV2DesiredState() error {
 }
 
 func (d *daemon) applyDesiredStateV2(desired runtimev2.DesiredState) (runtimev2.Status, error) {
-	defaults := d.desiredStateV2()
-	if desired.BackendKind == "" {
-		desired.BackendKind = defaults.BackendKind
-	}
-	if desired.FallbackPolicy == "" {
-		desired.FallbackPolicy = defaults.FallbackPolicy
-	}
-	if desired.ActiveProfileID == "" {
-		desired.ActiveProfileID = defaults.ActiveProfileID
-	}
+	desired = rootruntime.CompleteDesiredState(desired, d.desiredStateV2())
 	if err := d.runtimeV2.ApplyDesiredState(desired); err != nil {
 		return runtimev2.Status{}, desiredStateApplyError{stage: desiredStateApplyStageRuntime, err: err}
 	}
@@ -80,17 +65,7 @@ func (d *daemon) persistDesiredStateV2(desired runtimev2.DesiredState) error {
 	currentCfg := d.cfg
 	d.mu.Unlock()
 
-	doc := profiledoc.FromConfig(currentCfg)
-	if desired.BackendKind != "" {
-		doc.Runtime.BackendKind = string(desired.BackendKind)
-	}
-	if desired.FallbackPolicy != "" {
-		doc.Runtime.FallbackPolicy = string(desired.FallbackPolicy)
-	}
-	if desired.ActiveProfileID != "" {
-		doc.ActiveNodeID = desired.ActiveProfileID
-	}
-	nextCfg, _, err := profiledoc.ApplyToConfig(currentCfg, doc)
+	nextCfg, err := rootruntime.ApplyDesiredStateToConfig(currentCfg, desired)
 	if err != nil {
 		return err
 	}

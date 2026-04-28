@@ -9,6 +9,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -96,7 +97,7 @@ func (d *daemon) configMutationSuccess(action string, status string, reload bool
 
 func (d *daemon) configMutationErrorData(action string, err error, saved bool) map[string]interface{} {
 	code := runtimeErrorCode(err, "CONFIG_APPLY_FAILED")
-	resetReport := resetReportFromRuntimeError(err)
+	resetReport := rootruntime.ResetReportFromError(err)
 	data := applytx.MutationErrorData(action, saved, code, err.Error(), resetReport)
 	if d.runtimeV2 != nil {
 		status := d.runtimeV2.Status()

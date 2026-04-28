@@ -5,13 +5,14 @@ import (
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
 func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allowEgressProbe bool) runtimev2.HealthSnapshot {
 	state := d.coreMgr.GetState()
 	stageReport := d.latestRuntimeStageReport()
-	input := runtimeV2HealthInput{
+	input := rootruntime.HealthInput{
 		State:        state,
 		Result:       result,
 		StageReport:  stageReport,
@@ -19,7 +20,7 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 		CheckedAt:    time.Now(),
 	}
 
-	snapshot := classifyRuntimeV2Health(input)
+	snapshot := rootruntime.ClassifyHealth(input)
 	if result != nil && allowEgressProbe && snapshot.Healthy() {
 		d.mu.Lock()
 		cfg := d.cfg
@@ -31,7 +32,7 @@ func (d *daemon) buildRuntimeV2HealthSnapshot(result *health.HealthResult, allow
 		}
 		result.Checks["outbound_url"] = outboundURLCheck
 		input.Result = result
-		snapshot = classifyRuntimeV2Health(input)
+		snapshot = rootruntime.ClassifyHealth(input)
 	}
 	return snapshot
 }
@@ -67,5 +68,5 @@ func (d *daemon) latestRuntimeStageReport() core.RuntimeStageReport {
 func (d *daemon) hasRecentEgress() bool {
 	d.metricsMu.Lock()
 	defer d.metricsMu.Unlock()
-	return d.latency.Valid && time.Since(d.latency.CheckedAt) < 30*time.Second
+	return rootruntime.HasRecentEgress(d.latency, time.Now())
 }

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
 // SelfExitDelay is how long the old daemon waits after forking the new
@@ -23,8 +25,8 @@ const SelfExitDelay = 3 * time.Second
 
 // Default filesystem paths used by the Magisk module layout.
 const (
-	DefaultDataDir   = "/data/adb/modules/rknnovpn"
-	DefaultModuleDir = "/data/adb/modules/rknnovpn"
+	DefaultDataDir   = modulecontract.DefaultModuleDir
+	DefaultModuleDir = modulecontract.DefaultModuleDir
 )
 
 type ModulePreflight struct {
@@ -137,12 +139,14 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	}
 
 	// --- 4. Back up current binaries ---
-	binDir := filepath.Join(dataDir, "bin")
+	modulePaths := modulecontract.NewPaths(dataDir)
+	moduleInstallPaths := modulecontract.NewPaths(moduleDir)
+	binDir := modulePaths.BinDir()
 	if err := os.MkdirAll(binDir, 0750); err != nil {
 		return fmt.Errorf("mkdir bin: %w", err)
 	}
 
-	backupDir := filepath.Join(dataDir, "backup", "bin-pre-update")
+	backupDir := filepath.Join(modulePaths.BackupDir(), "bin-pre-update")
 	os.RemoveAll(backupDir) // clean stale backup
 	if err := os.MkdirAll(backupDir, 0750); err != nil {
 		return fmt.Errorf("mkdir backup: %w", err)
@@ -190,7 +194,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	}
 
 	// --- 6. Copy scripts ---
-	scriptsDir := filepath.Join(dataDir, "scripts")
+	scriptsDir := modulePaths.ScriptsDir()
 	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
 		rollbackBinaries()
 		return fmt.Errorf("mkdir scripts: %w", err)
@@ -208,7 +212,7 @@ func InstallModuleUpdate(zipPath string, dataDir string, moduleDir string) error
 	// --- 7. Update module directory ---
 	logger.Println("updating module files")
 	if info, err := os.Stat(stagedScriptsDir); err == nil && info.IsDir() {
-		moduleScriptsDir := filepath.Join(moduleDir, "scripts")
+		moduleScriptsDir := moduleInstallPaths.ScriptsDir()
 		if err := replaceDirFromSource(stagedScriptsDir, moduleScriptsDir, 0755); err != nil {
 			logger.Printf("warning: copy module scripts: %v", err)
 		}
@@ -343,34 +347,39 @@ func stopCurrentProxy(dataDir string) error {
 	// Build a minimal environment so scripts work even if the old daemon
 	// did not set RKNNOVPN_DIR. Old scripts might not need it, but new
 	// scripts definitely do.
+	paths := modulecontract.NewPaths(dataDir)
 	scriptEnv := []string{
-		"RKNNOVPN_DIR=" + dataDir,
+		modulecontract.EnvModuleDir + "=" + paths.Dir(),
+		modulecontract.EnvRunDir + "=" + paths.RunDir(),
+		modulecontract.EnvConfigDir + "=" + paths.ConfigDir(),
+		modulecontract.EnvScriptsDir + "=" + paths.ScriptsDir(),
 		"PATH=" + os.Getenv("PATH"),
 	}
-	return execScriptWithEnv(filepath.Join(dataDir, "scripts", "rescue_reset.sh"), "update-clean", scriptEnv)
+	return execScriptWithEnv(paths.RescueResetScript(), "update-clean", scriptEnv)
 }
 
 // relaunchDaemon starts the new daemon binary and waits for it to become
 // responsive on the IPC socket. It does NOT kill the old daemon -- the
 // caller is responsible for scheduling self-exit after IPC response.
 func relaunchDaemon(dataDir string) error {
-	daemonBin := filepath.Join(dataDir, "bin", "daemon")
+	paths := modulecontract.NewPaths(dataDir)
+	daemonBin := filepath.Join(paths.BinDir(), "daemon")
 
-	configPath := filepath.Join(dataDir, "config", "config.json")
+	configPath := filepath.Join(paths.ConfigDir(), "config.json")
 
-	logDir := filepath.Join(dataDir, "logs")
+	logDir := paths.LogDir()
 	os.MkdirAll(logDir, 0700)
 	logFile := filepath.Join(logDir, "daemon.log")
 	if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err == nil {
 		_ = f.Close()
 	}
 
-	runDir := filepath.Join(dataDir, "run")
+	runDir := paths.RunDir()
 	os.MkdirAll(runDir, 0750)
-	pidFile := filepath.Join(runDir, "daemon.pid")
+	pidFile := paths.DaemonPIDFile()
 
 	// Remove old socket so the new daemon can bind.
-	sockPath := filepath.Join(runDir, "daemon.sock")
+	sockPath := paths.DaemonSocket()
 	os.Remove(sockPath)
 
 	// Fork a new daemon process. The old daemon stays alive until
@@ -757,18 +766,19 @@ func updateCurrentReleaseSymlink(dataDir string, releaseDir string) error {
 }
 
 func markManualStartRequired(dataDir string) error {
-	configDir := filepath.Join(dataDir, "config")
-	runDir := filepath.Join(dataDir, "run")
+	paths := modulecontract.NewPaths(dataDir)
+	configDir := paths.ConfigDir()
+	runDir := paths.RunDir()
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return fmt.Errorf("mkdir config: %w", err)
 	}
 	if err := os.MkdirAll(runDir, 0o750); err != nil {
 		return fmt.Errorf("mkdir run: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, "manual"), []byte("module update\n"), 0o600); err != nil {
+	if err := os.WriteFile(paths.ManualFlag(), []byte("module update\n"), 0o600); err != nil {
 		return fmt.Errorf("write manual flag: %w", err)
 	}
-	if err := os.Remove(filepath.Join(runDir, "active")); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(paths.ActiveFile()); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove active marker: %w", err)
 	}
 	return nil

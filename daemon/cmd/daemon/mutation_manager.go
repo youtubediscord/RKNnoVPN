@@ -11,8 +11,8 @@ import (
 // persistProfileConfigMutationForAction is the daemon-owned transaction gate
 // for every mutation that changes user intent and its runtime projection.
 func (d *daemon) persistProfileConfigMutationForAction(nextCfg *config.Config, reload bool, action string) (applytx.ConfigTransactionResult, error) {
-	operation := runtimeOperationForConfigMutation(action)
 	return applytx.ConfigTransaction{
+		Action:     action,
 		EnsureIdle: d.failIfRuntimeOperationActive,
 		SaveProfile: func(nextCfg *config.Config) error {
 			return profiledoc.Save(d.profilePath, profiledoc.FromConfig(nextCfg))
@@ -21,19 +21,8 @@ func (d *daemon) persistProfileConfigMutationForAction(nextCfg *config.Config, r
 			state := d.coreMgr.GetState()
 			return state == core.StateRunning || state == core.StateDegraded
 		},
-		ApplyConfig: func(nextCfg *config.Config, reload bool) error {
+		ApplyConfig: func(nextCfg *config.Config, reload bool, operation runtimev2.OperationKind) error {
 			return d.applyConfigWithOperation(nextCfg, reload, operation)
 		},
 	}.Run(nextCfg, reload)
-}
-
-func runtimeOperationForConfigMutation(action string) runtimev2.OperationKind {
-	switch action {
-	case "config-import":
-		return runtimev2.OperationConfigMutation
-	case "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.refresh", "backend.applyDesiredState":
-		return runtimev2.OperationProfileApply
-	default:
-		return runtimev2.OperationProfileApply
-	}
 }

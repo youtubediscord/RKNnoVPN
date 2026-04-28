@@ -294,6 +294,8 @@
     <string name="subscription_no_supported_links">В подписке нет поддерживаемых proxy-ссылок</string>
     <string name="subscription_empty">Подписка оказалась пустой</string>
     <string name="subscription_preview_summary">Предпросмотр: новых %1$d, обновлённых %2$d, удалённых %3$d, ошибок разбора %4$d</string>
+    <string name="subscription_rejected_summary">Отклонено: %1$d. Первый небезопасный адрес: %2$s</string>
+    <string name="subscription_rejected_only">Подписка содержит только локальные, приватные или зарезервированные адреса: отклонено %1$d. Первый адрес: %2$s</string>
     <string name="subscription_refresh_summary">Подписка обновлена: узлов %1$d</string>
     <string name="subscription_refresh_summary_with_errors">Подписка обновлена: узлов %1$d, ошибок разбора %2$d</string>
     <string name="subscription_provider_fallback">Подписка</string>

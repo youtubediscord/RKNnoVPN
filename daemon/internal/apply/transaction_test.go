@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
 func TestConfigTransactionRunsInOrderAndReportsRuntimeState(t *testing.T) {
@@ -13,6 +14,7 @@ func TestConfigTransactionRunsInOrderAndReportsRuntimeState(t *testing.T) {
 	var calls []string
 
 	result, err := ConfigTransaction{
+		Action: "config-import",
 		EnsureIdle: func() error {
 			calls = append(calls, "ensure-idle")
 			return nil
@@ -28,9 +30,12 @@ func TestConfigTransactionRunsInOrderAndReportsRuntimeState(t *testing.T) {
 			calls = append(calls, "runtime-running")
 			return true
 		},
-		ApplyConfig: func(next *config.Config, reload bool) error {
+		ApplyConfig: func(next *config.Config, reload bool, operation runtimev2.OperationKind) error {
 			if next != cfg || !reload {
 				t.Fatalf("unexpected apply args")
+			}
+			if operation != runtimev2.OperationConfigMutation {
+				t.Fatalf("unexpected runtime operation: %s", operation)
 			}
 			calls = append(calls, "apply-config")
 			return nil
@@ -54,6 +59,7 @@ func TestConfigTransactionStopsBeforeSaveWhenRuntimeBusy(t *testing.T) {
 	saved := false
 
 	result, err := ConfigTransaction{
+		Action: "profile.apply",
 		EnsureIdle: func() error {
 			return busyErr
 		},
@@ -61,7 +67,7 @@ func TestConfigTransactionStopsBeforeSaveWhenRuntimeBusy(t *testing.T) {
 			saved = true
 			return nil
 		},
-		ApplyConfig: func(*config.Config, bool) error {
+		ApplyConfig: func(*config.Config, bool, runtimev2.OperationKind) error {
 			t.Fatal("apply must not run")
 			return nil
 		},
@@ -79,13 +85,14 @@ func TestConfigTransactionReportsSavedApplyFailure(t *testing.T) {
 	applyErr := errors.New("apply failed")
 
 	result, err := ConfigTransaction{
+		Action: "profile.apply",
 		SaveProfile: func(*config.Config) error {
 			return nil
 		},
 		RuntimeRunning: func() bool {
 			return true
 		},
-		ApplyConfig: func(*config.Config, bool) error {
+		ApplyConfig: func(*config.Config, bool, runtimev2.OperationKind) error {
 			return applyErr
 		},
 	}.Run(cfg, true)
@@ -103,12 +110,35 @@ func TestConfigTransactionRejectsIncompleteWiring(t *testing.T) {
 		t.Fatal("nil config must fail")
 	}
 	if result, err := (ConfigTransaction{}).Run(cfg, false); err == nil || result.ConfigSaved {
+		t.Fatalf("missing action must fail before save, result=%#v err=%v", result, err)
+	}
+	if result, err := (ConfigTransaction{
+		Action: "profile.apply",
+	}).Run(cfg, false); err == nil || result.ConfigSaved {
 		t.Fatalf("missing save callback must fail before save, result=%#v err=%v", result, err)
 	}
 	if result, err := (ConfigTransaction{
+		Action:      "profile.apply",
 		SaveProfile: func(*config.Config) error { return nil },
 	}).Run(cfg, false); err == nil || !result.ConfigSaved {
 		t.Fatalf("missing apply callback must fail after save, result=%#v err=%v", result, err)
+	}
+}
+
+func TestRuntimeOperationForAction(t *testing.T) {
+	cases := map[string]runtimev2.OperationKind{
+		"config-import":               runtimev2.OperationConfigMutation,
+		"profile.apply":               runtimev2.OperationProfileApply,
+		"profile.importNodes":         runtimev2.OperationProfileApply,
+		"profile.setActiveNode":       runtimev2.OperationProfileApply,
+		"subscription.refresh":        runtimev2.OperationProfileApply,
+		"backend.applyDesiredState":   runtimev2.OperationProfileApply,
+		"unknown-profile-like-action": runtimev2.OperationProfileApply,
+	}
+	for action, want := range cases {
+		if got := RuntimeOperationForAction(action); got != want {
+			t.Fatalf("action %s mapped to %s, want %s", action, got, want)
+		}
 	}
 }
 

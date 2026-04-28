@@ -1,9 +1,8 @@
 package main
 
 import (
-	"time"
-
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -12,24 +11,20 @@ func (d *daemon) testNodeProbesV2(url string, timeoutMS int, nodeIDs []string) [
 	cfg := d.cfg
 	d.mu.Unlock()
 
-	profiles := probeNodeProfiles(cfg)
+	state := d.coreMgr.GetState()
 	var runtimeHealth runtimev2.HealthSnapshot
-	runtimeRunning := d.coreMgr.GetState() == core.StateRunning || d.coreMgr.GetState() == core.StateDegraded
-	if runtimeRunning {
+	if state == core.StateRunning || state == core.StateDegraded {
 		runtimeHealth = d.buildRuntimeV2HealthSnapshot(d.healthMon.RunOnce(), false)
 	}
 
-	runner := nodeProbeRunner{
-		daemon:         d,
-		cfg:            cfg,
-		timeoutMS:      timeoutMS,
-		timeout:        time.Duration(timeoutMS) * time.Millisecond,
-		requested:      requestedNodeIDs(nodeIDs),
-		testURL:        resolveNodeProbeURL(url, cfg),
-		runtimeRunning: runtimeRunning,
-		runtimeHealth:  runtimeHealth,
-		apiPort:        cfg.Proxy.APIPort,
-		profileCount:   len(profiles),
-	}
-	return runner.run(profiles)
+	return rootruntime.RunNodeProbes(rootruntime.NodeProbeInput{
+		Config:        cfg,
+		State:         state,
+		RuntimeHealth: runtimeHealth,
+		URL:           url,
+		TimeoutMS:     timeoutMS,
+		NodeIDs:       nodeIDs,
+		APIPort:       cfg.Proxy.APIPort,
+		IO:            rootProbeIO{d: d},
+	})
 }

@@ -42,7 +42,7 @@ type ResetController interface {
 	ShouldSkipRootReconcile() (bool, string)
 }
 
-type NodeProbeRunner interface {
+type NodeProber interface {
 	TestNodeProbes(url string, timeoutMS int, nodeIDs []string) []runtimev2.NodeProbeResult
 }
 
@@ -53,7 +53,7 @@ type Dependencies struct {
 	Health    HealthAdapter
 	Netstack  NetstackVerifier
 	Reset     ResetController
-	Probes    NodeProbeRunner
+	Probes    NodeProber
 }
 
 type Backend struct {

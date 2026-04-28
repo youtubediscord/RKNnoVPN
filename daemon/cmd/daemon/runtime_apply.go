@@ -10,6 +10,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -27,7 +28,10 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 	d.mu.Lock()
 	oldCfg := d.cfg
 	d.mu.Unlock()
-	needsFullRestart := runtimeReloadNeedsFullRestart(oldCfg, newCfg, d.dataDir)
+	needsFullRestart := rootruntime.ReloadNeedsFullRestart(
+		runtimeReloadScriptEnv(oldCfg, d.dataDir),
+		runtimeReloadScriptEnv(newCfg, d.dataDir),
+	)
 
 	if err := newCfg.Save(d.cfgPath); err != nil {
 		return fmt.Errorf("persist config: %w", err)
@@ -86,100 +90,50 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 	if err := d.failIfResetInProgress(); err != nil {
 		return err
 	}
-
-	report := core.NewRuntimeStageReport(context)
-	d.setLastReloadReport(report)
-	recordStage := func(name string, status string, code string, detail string, rollbackApplied bool) {
-		report.AddStage(name, status, code, detail, rollbackApplied)
-		d.setLastReloadReport(report)
-	}
-	failStage := func(name string, code string, err error, rollbackApplied bool) error {
-		recordStage(name, "failed", code, err.Error(), rollbackApplied)
-		return err
-	}
-
-	d.stopSubsystems()
-	recordStage("stop-subsystems", "ok", "", "", false)
-	if fullRestart {
-		if err := d.restartRootBackendV2(generation); err != nil {
-			if resetReport := resetReportFromRuntimeError(err); resetReport != nil {
-				recordStage("reset-after-full-restart-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
-			}
-			err = failStage("full-restart", runtimeErrorCode(err, "RUNTIME_RESTART_FAILED"), err, resetReportFromRuntimeError(err) != nil)
-			return fmt.Errorf("%s full restart failed; %s: %w", context, savedLabel, err)
-		}
-		recordStage("full-restart", "ok", "", d.coreMgr.LastRuntimeReport().Status, false)
-		report.FinishOK()
-		d.setLastReloadReport(report)
-		return nil
-	}
-	profile := cfg.ResolveProfile()
-	if err := d.coreMgr.HotSwap(profile); err != nil {
-		resetReport := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
-		recordStage("reset-after-hot-swap-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
-		err = failStage("hot-swap", runtimeErrorCode(err, "CORE_SPAWN_FAILED"), err, resetReport.Status != "ok")
-		return runtimeErrorWithResetReport(
-			fmt.Errorf("%s hot-swap failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
-			resetReport,
-		)
-	}
-	recordStage("hot-swap", "ok", "", d.coreMgr.LastRuntimeReport().Status, false)
-	netReport, err := d.reapplyRuntimeRulesReport(cfg)
-	if err != nil {
-		resetReport := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
-		recordStage("reset-after-netstack-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
-		err = failStage("netstack-reapply", runtimeErrorCode(err, "RULES_NOT_APPLIED"), err, resetReport.Status != "ok")
-		return runtimeErrorWithResetReport(
-			fmt.Errorf("%s rules failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
-			resetReport,
-		)
-	}
-	recordStage("netstack-reapply", "ok", "", fmt.Sprintf("steps=%d", len(netReport.Steps)), false)
-	d.rescueMgr.Reset()
-	recordStage("rescue-reset", "ok", "", "", false)
-	d.startSubsystems()
-	recordStage("start-subsystems", "ok", "", "", false)
-	snapshot := d.runtimeV2.RefreshHealth()
-	if !snapshot.Healthy() {
-		resetReport := d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
-		recordStage("reset-after-health-failure", resetReport.Status, "", fmt.Sprintf("errors=%d leftovers=%d", len(resetReport.Errors), len(resetReport.Leftovers)), resetReport.Status != "ok")
-		err := fmt.Errorf("%s", firstNonEmpty(snapshot.LastError, "readiness gates failed"))
-		err = failStage("health-refresh", firstNonEmpty(snapshot.LastCode, "READINESS_GATE_FAILED"), err, resetReport.Status != "ok")
-		return runtimeErrorWithResetReport(
-			fmt.Errorf("%s readiness gates failed; %s, runtime stopped for safety: %w", context, savedLabel, err),
-			resetReport,
-		)
-	}
-	recordStage("health-refresh", "ok", "", firstNonEmpty(snapshot.LastCode, "healthy"), false)
-	report.FinishOK()
-	d.setLastReloadReport(report)
-	return nil
-}
-
-func (d *daemon) reapplyRuntimeRulesReport(cfg *config.Config) (netstack.Report, error) {
-	if err := core.VerifyChainedProxyOwnerPackages(cfg); err != nil {
-		report := netstack.Report{
-			Operation: "apply",
-			Status:    "failed",
-			Steps: []netstack.Step{{
-				Name:   "verify-chain-proxy-owners",
-				Status: "failed",
-				Detail: err.Error(),
-			}},
-			Errors: []string{err.Error()},
-		}
-		return report, &netstack.Error{Operation: "apply", Code: "LOCAL_PROXY_OWNER_MISMATCH", Report: report}
-	}
-	manager := netstack.New(d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript)
-	report := manager.Apply()
-	if err := report.Err(); err != nil {
-		return report, err
-	}
-	report = manager.Verify()
-	if err := report.Err(); err != nil {
-		return report, err
-	}
-	return report, nil
+	return rootruntime.ReloadAfterConfigChange(
+		rootruntime.ConfigReloadInput{
+			Config:      cfg,
+			Context:     context,
+			SavedLabel:  savedLabel,
+			Generation:  generation,
+			FullRestart: fullRestart,
+		},
+		rootruntime.ConfigReloadDeps{
+			StopSubsystems: func() {
+				d.stopSubsystems()
+			},
+			FullRestart: func(generation int64) error {
+				return newRootRuntimeBackend(d).RestartAfterConfigChange(generation)
+			},
+			LastRuntimeReport: func() core.RuntimeStageReport {
+				return d.coreMgr.LastRuntimeReport()
+			},
+			HotSwap: func(profile *config.NodeProfile) error {
+				return d.coreMgr.HotSwap(profile)
+			},
+			ReapplyRuntimeRules: func(cfg *config.Config) (netstack.Report, error) {
+				return rootruntime.ReapplyRuntimeRules(cfg, d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript)
+			},
+			ResetNetworkState: func(generation int64) runtimev2.ResetReport {
+				return d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
+			},
+			ResetRescueState: func() {
+				d.rescueMgr.Reset()
+			},
+			StartSubsystems: func() {
+				d.startSubsystems()
+			},
+			RefreshHealth: func() runtimev2.HealthSnapshot {
+				return d.runtimeV2.RefreshHealth()
+			},
+			RuntimeErrorCode: func(err error, fallback string) string {
+				return runtimeErrorCode(err, fallback)
+			},
+			ObserveReloadReport: func(report core.RuntimeStageReport) {
+				d.setLastReloadReport(report)
+			},
+		},
+	)
 }
 
 func (d *daemon) setLastReloadReport(report core.RuntimeStageReport) {
@@ -269,38 +223,9 @@ func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
 	}
 }
 
-func runtimeReloadNeedsFullRestart(oldCfg *config.Config, newCfg *config.Config, dataDir string) bool {
-	if oldCfg == nil || newCfg == nil {
-		return true
+func runtimeReloadScriptEnv(cfg *config.Config, dataDir string) map[string]string {
+	if cfg == nil {
+		return nil
 	}
-	oldEnv := buildScriptEnv(oldCfg, dataDir)
-	newEnv := buildScriptEnv(newCfg, dataDir)
-	for _, key := range []string{
-		"CORE_GID",
-		"TPROXY_PORT",
-		"DNS_PORT",
-		"API_PORT",
-		"SOCKS_PORT",
-		"HTTP_PORT",
-		"CHAIN_PROXY_PORTS",
-		"CHAIN_PROXY_UIDS",
-		"CHAIN_PROXY_RULES",
-		"FWMARK",
-		"ROUTE_TABLE",
-		"ROUTE_TABLE_V6",
-		"APP_MODE",
-		"PROXY_UIDS",
-		"DIRECT_UIDS",
-		"BYPASS_UIDS",
-		"DNS_SCOPE",
-		"DNS_MODE",
-		"PROXY_MODE",
-		"SHARING_MODE",
-		"SHARING_IFACES",
-	} {
-		if oldEnv[key] != newEnv[key] {
-			return true
-		}
-	}
-	return false
+	return buildScriptEnv(cfg, dataDir)
 }

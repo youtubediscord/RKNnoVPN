@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/resetcontroller"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -65,7 +66,7 @@ func TestRuntimeStartFailsWhileResetLockPresent(t *testing.T) {
 
 func TestRecoverStaleResetLockRunsStructuredCleanup(t *testing.T) {
 	d := newTestResetDaemon(t, nil, true)
-	old := time.Now().Add(-resetLockStaleAfter - time.Minute).Format(time.RFC3339)
+	old := time.Now().Add(-resetcontroller.StaleAfter - time.Minute).Format(time.RFC3339)
 	if err := os.WriteFile(d.resetLockPath(), []byte(old+"\n"), 0640); err != nil {
 		t.Fatal(err)
 	}

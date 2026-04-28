@@ -4,6 +4,7 @@ import (
 	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -32,7 +33,7 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 			resultStatus = "saved_not_applied"
 			runtimeApply = "failed"
 		}
-		rpcErr.Data = profileOperation(action, resultStatus, mutation.ConfigSaved, false, runtimeApply, desiredGeneration(status, before), status.AppliedState.Generation, runtimeErrorCode(err, "PROFILE_APPLY_FAILED"), err.Error(), resetReportFromRuntimeError(err), warnings, updated)
+		rpcErr.Data = profileOperation(action, resultStatus, mutation.ConfigSaved, false, runtimeApply, desiredGeneration(status, before), status.AppliedState.Generation, runtimeErrorCode(err, "PROFILE_APPLY_FAILED"), err.Error(), rootruntime.ResetReportFromError(err), warnings, updated)
 		return nil, rpcErr
 	}
 

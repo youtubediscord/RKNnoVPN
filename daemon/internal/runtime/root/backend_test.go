@@ -174,3 +174,32 @@ func TestBackendNetworkChangeWrapsReapplyFailureWithResetReport(t *testing.T) {
 		t.Fatalf("expected wrapped reset report, got %#v", fromErr)
 	}
 }
+
+func TestReloadNeedsFullRestartComparesRuntimeEnvPolicy(t *testing.T) {
+	base := map[string]string{
+		"TPROXY_PORT": "10853",
+		"DNS_PORT":    "10856",
+		"PROXY_UIDS":  "10001",
+	}
+	same := map[string]string{
+		"TPROXY_PORT": "10853",
+		"DNS_PORT":    "10856",
+		"PROXY_UIDS":  "10001",
+		"IGNORED":     "changed",
+	}
+	changed := map[string]string{
+		"TPROXY_PORT": "10854",
+		"DNS_PORT":    "10856",
+		"PROXY_UIDS":  "10001",
+	}
+
+	if ReloadNeedsFullRestart(base, same) {
+		t.Fatalf("non-policy env changes must not force full restart")
+	}
+	if !ReloadNeedsFullRestart(base, changed) {
+		t.Fatalf("runtime env policy change must force full restart")
+	}
+	if !ReloadNeedsFullRestart(nil, same) {
+		t.Fatalf("missing old env must force full restart")
+	}
+}

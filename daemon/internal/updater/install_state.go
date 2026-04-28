@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
-const installStateFileName = "update-install-state.json"
+const installStateFileName = "install_state.json"
 
 type InstallState struct {
 	Status          string `json:"status"`
@@ -33,7 +35,7 @@ type InstallTracker struct {
 func NewInstallTracker(dataDir string, generation int64, modulePath string, apkPath string) *InstallTracker {
 	now := time.Now().Format(time.RFC3339)
 	return &InstallTracker{
-		path: filepath.Join(dataDir, "run", installStateFileName),
+		path: filepath.Join(modulecontract.NewPaths(dataDir).RunDir(), installStateFileName),
 		state: InstallState{
 			Status:     "running",
 			Generation: generation,
@@ -46,7 +48,7 @@ func NewInstallTracker(dataDir string, generation int64, modulePath string, apkP
 }
 
 func ReadInstallState(dataDir string) (*InstallState, error) {
-	data, err := os.ReadFile(filepath.Join(dataDir, "run", installStateFileName))
+	data, err := os.ReadFile(filepath.Join(modulecontract.NewPaths(dataDir).RunDir(), installStateFileName))
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +104,7 @@ func (t *InstallTracker) write() error {
 		return fmt.Errorf("marshal install state: %w", err)
 	}
 	data = append(data, '\n')
-	tmp, err := os.CreateTemp(filepath.Dir(t.path), ".update-install-state-*")
+	tmp, err := os.CreateTemp(filepath.Dir(t.path), ".install_state-*")
 	if err != nil {
 		return fmt.Errorf("create install state temp: %w", err)
 	}

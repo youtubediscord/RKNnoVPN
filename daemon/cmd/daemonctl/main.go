@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
-const defaultSocket = "/data/adb/modules/rknnovpn/run/daemon.sock"
 const maxFrameBytes = 16 * 1024 * 1024
 
 var Version = "v1.8.0"
@@ -88,7 +88,7 @@ func main() {
 	// Determine socket path.
 	socketPath := os.Getenv("RKNNOVPN_SOCKET")
 	if socketPath == "" {
-		socketPath = defaultSocket
+		socketPath = modulecontract.NewPaths("").DaemonSocket()
 	}
 
 	// Connect to daemon.
@@ -195,7 +195,7 @@ func printUsage() {
 
 	fmt.Println()
 	fmt.Println("Environment:")
-	fmt.Printf("  RKNNOVPN_SOCKET  daemon socket path (default: %s)\n", defaultSocket)
+	fmt.Printf("  RKNNOVPN_SOCKET  daemon socket path (default: %s)\n", modulecontract.NewPaths("").DaemonSocket())
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  daemonctl backend.status")

@@ -294,6 +294,8 @@
     <string name="subscription_no_supported_links">Subscription did not contain any supported proxy links</string>
     <string name="subscription_empty">Subscription was empty</string>
     <string name="subscription_preview_summary">Preview: %1$d new, %2$d updated, %3$d removed, %4$d parse errors</string>
+    <string name="subscription_rejected_summary">Rejected: %1$d. First unsafe endpoint: %2$s</string>
+    <string name="subscription_rejected_only">Subscription contains only local/private/reserved endpoints: rejected %1$d. First endpoint: %2$s</string>
     <string name="subscription_refresh_summary">Subscription refreshed: %1$d nodes</string>
     <string name="subscription_refresh_summary_with_errors">Subscription refreshed: %1$d nodes, %2$d parse errors</string>
     <string name="subscription_provider_fallback">Subscription</string>

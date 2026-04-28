@@ -5,17 +5,21 @@ import (
 	"reflect"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
 type ConfigTransactionResult struct {
+	Action            string
 	ConfigSaved       bool
 	RuntimeWasRunning bool
+	RuntimeOperation  runtimev2.OperationKind
 }
 
 type ConfigTransaction struct {
+	Action         string
 	EnsureIdle     func() error
 	SaveProfile    func(*config.Config) error
-	ApplyConfig    func(*config.Config, bool) error
+	ApplyConfig    func(*config.Config, bool, runtimev2.OperationKind) error
 	RuntimeRunning func() bool
 }
 
@@ -24,6 +28,11 @@ func (tx ConfigTransaction) Run(nextCfg *config.Config, reload bool) (ConfigTran
 	if nextCfg == nil {
 		return result, fmt.Errorf("config is nil")
 	}
+	if tx.Action == "" {
+		return result, fmt.Errorf("mutation action is not configured")
+	}
+	result.Action = tx.Action
+	result.RuntimeOperation = RuntimeOperationForAction(tx.Action)
 	if tx.EnsureIdle != nil {
 		if err := tx.EnsureIdle(); err != nil {
 			return result, err
@@ -42,10 +51,21 @@ func (tx ConfigTransaction) Run(nextCfg *config.Config, reload bool) (ConfigTran
 	if tx.ApplyConfig == nil {
 		return result, fmt.Errorf("config apply is not configured")
 	}
-	if err := tx.ApplyConfig(nextCfg, reload); err != nil {
+	if err := tx.ApplyConfig(nextCfg, reload, result.RuntimeOperation); err != nil {
 		return result, err
 	}
 	return result, nil
+}
+
+func RuntimeOperationForAction(action string) runtimev2.OperationKind {
+	switch action {
+	case "config-import":
+		return runtimev2.OperationConfigMutation
+	case "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.refresh", "backend.applyDesiredState":
+		return runtimev2.OperationProfileApply
+	default:
+		return runtimev2.OperationProfileApply
+	}
 }
 
 type Warning struct {

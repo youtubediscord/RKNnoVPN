@@ -10,6 +10,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	profiledoc "github.com/youtubediscord/RKNnoVPN/daemon/internal/profile"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
@@ -35,8 +36,9 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 		profilePath = profiledoc.Path(cfgPath)
 	}
 
-	renderedConfigPath := filepath.Join(dataDir, "config", "rendered", "singbox.json")
-	singBoxPath := filepath.Join(dataDir, "bin", "sing-box")
+	modulePaths := modulecontract.NewPaths(dataDir)
+	renderedConfigPath := filepath.Join(modulePaths.RenderedConfigDir(), "singbox.json")
+	singBoxPath := filepath.Join(modulePaths.BinDir(), "sing-box")
 
 	healthResult := d.healthMon.RunOnce()
 	healthSnapshot := d.buildRuntimeV2HealthSnapshot(healthResult, true)
@@ -62,6 +64,7 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 	routingSummary := diagnostics.RoutingSummaryFromConfig(cfg)
 	profileSummary := diagnostics.ProfileSummaryFromConfig(cfg, runtimeStatus)
 	packageResolution := diagnostics.PackageResolutionFromConfig(cfg)
+	summary := diagnostics.BuildSummaryWithCanonical(Version, controlProtocolVersion, runtimeStatus.Canonical, healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, profileSummary, routingSummary, packageResolution)
 	versions := map[string]interface{}{
 		"daemon":                   Version,
 		"core":                     Version,
@@ -76,10 +79,11 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 	}
 
 	report := map[string]interface{}{
-		"generated_at": time.Now().Format(time.RFC3339),
-		"summary":      diagnostics.BuildSummary(Version, controlProtocolVersion, healthSnapshot, leftovers, netstackRuntimeReport, nodeResults, ports, privacy, moduleVersion, singBoxCheck, releaseIntegrity, profileSummary, routingSummary, packageResolution),
-		"versions":     versions,
-		"device":       diagnostics.DeviceCommands(lines, core.ExecCommand),
+		"generated_at":      time.Now().Format(time.RFC3339),
+		"summary":           summary,
+		"diagnostics_graph": summary.Graph,
+		"versions":          versions,
+		"device":            diagnostics.DeviceCommands(lines, core.ExecCommand),
 		"paths": map[string]diagnostics.FileStatus{
 			"data_dir":          diagnostics.StatFile(dataDir, false),
 			"current_release":   diagnostics.StatFile(filepath.Join(dataDir, "current"), false),
@@ -88,15 +92,16 @@ func (d *daemon) handleDiagnosticsReport(params *json.RawMessage) (interface{}, 
 			"profile":           diagnostics.StatFile(profilePath, false),
 			"rendered_singbox":  diagnostics.StatFile(renderedConfigPath, false),
 			"sing_box_binary":   diagnostics.StatFile(singBoxPath, true),
-			"daemon_log":        diagnostics.StatFile(filepath.Join(dataDir, "logs", "daemon.log"), false),
-			"sing_box_log":      diagnostics.StatFile(filepath.Join(dataDir, "logs", "sing-box.log"), false),
-			"daemon_socket":     diagnostics.StatFile(filepath.Join(dataDir, "run", "daemon.sock"), false),
-			"sing_box_pid_file": diagnostics.StatFile(filepath.Join(dataDir, "run", "singbox.pid"), false),
+			"daemon_log":        diagnostics.StatFile(filepath.Join(modulePaths.LogDir(), "daemon.log"), false),
+			"sing_box_log":      diagnostics.StatFile(filepath.Join(modulePaths.LogDir(), "sing-box.log"), false),
+			"daemon_socket":     diagnostics.StatFile(modulePaths.DaemonSocket(), false),
+			"sing_box_pid_file": diagnostics.StatFile(modulePaths.SingBoxPIDFile(), false),
 		},
 		"health": map[string]interface{}{
 			"snapshot": healthSnapshot,
 			"raw":      healthResult,
 		},
+		"canonical_status":    runtimeStatus.Canonical,
 		"backend_status":      backendStatus,
 		"core_start_report":   d.coreMgr.LastStartReport(),
 		"core_runtime_report": d.coreMgr.LastRuntimeReport(),
@@ -144,8 +149,9 @@ func (d *daemon) buildSelfCheckSummary(lines int) (diagnostics.Summary, error) {
 	if lines <= 0 {
 		lines = 80
 	}
-	renderedConfigPath := filepath.Join(dataDir, "config", "rendered", "singbox.json")
-	singBoxPath := filepath.Join(dataDir, "bin", "sing-box")
+	modulePaths := modulecontract.NewPaths(dataDir)
+	renderedConfigPath := filepath.Join(modulePaths.RenderedConfigDir(), "singbox.json")
+	singBoxPath := filepath.Join(modulePaths.BinDir(), "sing-box")
 	healthResult := d.healthMon.RunOnce()
 	healthSnapshot := d.buildRuntimeV2HealthSnapshot(healthResult, true)
 	netstackReport := d.diagnosticNetstackReport(cfg)
@@ -158,9 +164,10 @@ func (d *daemon) buildSelfCheckSummary(lines int) (diagnostics.Summary, error) {
 	if d.runtimeV2 != nil {
 		runtimeStatus = d.runtimeV2.Status()
 	}
-	return diagnostics.BuildSummary(
+	return diagnostics.BuildSummaryWithCanonical(
 		Version,
 		controlProtocolVersion,
+		runtimeStatus.Canonical,
 		healthSnapshot,
 		netstackReport.Leftovers,
 		netstackRuntimeReport,

@@ -11,6 +11,7 @@ import (
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/diagnostics"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/health"
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
 )
 
 type Finding struct {
@@ -239,11 +240,12 @@ func BuildReport(cfg *config.Config, cfgPath string, dataDir string, healthResul
 		)
 	}
 
+	modulePaths := modulecontract.NewPaths(dataDir)
 	for _, path := range []string{
 		cfgPath,
-		filepath.Join(dataDir, "config", "rendered", "singbox.json"),
-		filepath.Join(dataDir, "logs", "daemon.log"),
-		filepath.Join(dataDir, "logs", "sing-box.log"),
+		filepath.Join(modulePaths.RenderedConfigDir(), "singbox.json"),
+		filepath.Join(modulePaths.LogDir(), "daemon.log"),
+		filepath.Join(modulePaths.LogDir(), "sing-box.log"),
 	} {
 		if pathHasGroupOrWorldBits(path) {
 			appendFinding(

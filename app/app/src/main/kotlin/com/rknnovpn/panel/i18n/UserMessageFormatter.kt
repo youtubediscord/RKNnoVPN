@@ -5,6 +5,7 @@ import androidx.annotation.StringRes
 import com.rknnovpn.panel.R
 import com.rknnovpn.panel.ipc.ConfigMutationInfo
 import com.rknnovpn.panel.ipc.DaemonClientResult
+import com.rknnovpn.panel.ipc.RejectedSubscriptionNode
 import com.rknnovpn.panel.model.RuntimeStageReport
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.json.booleanOrNull
@@ -108,12 +109,53 @@ class UserMessageFormatter @Inject constructor(
         return listOf(base, suffix).filter { it.isNotBlank() }.joinToString(" ")
     }
 
-    fun formatSubscriptionRefresh(importedNodes: Int, parseFailures: Int): String =
-        if (parseFailures > 0) {
+    fun formatSubscriptionPreview(
+        added: Int,
+        updated: Int,
+        removed: Int,
+        parseFailures: Int,
+        rejectedNodes: List<RejectedSubscriptionNode>,
+    ): String {
+        val base = get(R.string.subscription_preview_summary, added, updated, removed, parseFailures)
+        val rejected = formatRejectedSubscriptionNodes(rejectedNodes)
+        return listOf(base, rejected).filter { it.isNotBlank() }.joinToString("\n")
+    }
+
+    fun formatSubscriptionRefresh(
+        importedNodes: Int,
+        parseFailures: Int,
+        rejectedNodes: List<RejectedSubscriptionNode> = emptyList(),
+    ): String {
+        val base = if (parseFailures > 0) {
             get(R.string.subscription_refresh_summary_with_errors, importedNodes, parseFailures)
         } else {
             get(R.string.subscription_refresh_summary, importedNodes)
         }
+        val rejected = formatRejectedSubscriptionNodes(rejectedNodes)
+        return listOf(base, rejected).filter { it.isNotBlank() }.joinToString("\n")
+    }
+
+    fun formatRejectedSubscriptionOnly(rejectedNodes: List<RejectedSubscriptionNode>, rejectedCount: Int): String =
+        if (rejectedNodes.isEmpty()) {
+            get(R.string.subscription_rejected_only, rejectedCount, get(R.string.daemon_status_unknown_text))
+        } else {
+            get(R.string.subscription_rejected_only, rejectedNodes.size, rejectedEndpointLabel(rejectedNodes.first()))
+        }
+
+    private fun formatRejectedSubscriptionNodes(rejectedNodes: List<RejectedSubscriptionNode>): String {
+        if (rejectedNodes.isEmpty()) return ""
+        return get(R.string.subscription_rejected_summary, rejectedNodes.size, rejectedEndpointLabel(rejectedNodes.first()))
+    }
+
+    private fun rejectedEndpointLabel(node: RejectedSubscriptionNode): String {
+        val endpoint = when {
+            node.server.isNotBlank() && node.port > 0 -> "${node.server}:${node.port}"
+            node.server.isNotBlank() -> node.server
+            node.name.isNotBlank() -> node.name
+            else -> get(R.string.daemon_status_unknown_text)
+        }
+        return endpoint
+    }
 
     private fun formatRuntimeBusy(result: DaemonClientResult.DaemonError): String {
         val active = runCatching {

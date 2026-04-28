@@ -151,6 +151,29 @@ type HealthCheckSnapshot struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+type ReadinessStatus struct {
+	Ready              bool `json:"ready"`
+	OperationalHealthy bool `json:"operationalHealthy"`
+	CoreReady          bool `json:"coreReady"`
+	RoutingReady       bool `json:"routingReady"`
+	DNSReady           bool `json:"dnsReady"`
+	EgressReady        bool `json:"egressReady"`
+}
+
+type CanonicalStatus struct {
+	BackendKind     BackendKind     `json:"backendKind"`
+	Phase           Phase           `json:"phase"`
+	ActiveProfileID string          `json:"activeProfileId,omitempty"`
+	Generation      int64           `json:"generation"`
+	Readiness       ReadinessStatus `json:"readiness"`
+	LastCode        string          `json:"lastCode,omitempty"`
+	LastError       string          `json:"lastError,omitempty"`
+	LastUserMessage string          `json:"lastUserMessage,omitempty"`
+	LastDebug       string          `json:"lastDebug,omitempty"`
+	RollbackApplied bool            `json:"rollbackApplied,omitempty"`
+	CheckedAt       time.Time       `json:"checkedAt,omitempty"`
+}
+
 type ResetStep struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
@@ -215,11 +238,14 @@ type CompatibilityStatus struct {
 type MethodCapability struct {
 	Method     string `json:"method"`
 	Capability string `json:"capability,omitempty"`
+	Mutating   bool   `json:"mutating"`
+	Async      bool   `json:"async"`
 }
 
 type Status struct {
 	DesiredState    DesiredState        `json:"desiredState"`
 	AppliedState    AppliedState        `json:"appliedState"`
+	Canonical       CanonicalStatus     `json:"canonical"`
 	Health          HealthSnapshot      `json:"health"`
 	Capabilities    []BackendCapability `json:"capabilities"`
 	Compatibility   CompatibilityStatus `json:"compatibility"`

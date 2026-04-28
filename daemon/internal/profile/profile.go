@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -140,6 +141,18 @@ type Subscription struct {
 type Warning struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+type MergeStats = map[string]int
+
+type RejectedSubscriptionNode struct {
+	Link     string `json:"link,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	Server   string `json:"server,omitempty"`
+	Port     int    `json:"port,omitempty"`
+	Code     string `json:"code"`
+	Reason   string `json:"reason"`
 }
 
 func FromConfig(cfg *config.Config) Document {
@@ -316,6 +329,9 @@ func Normalize(doc Document) (Document, []Warning, error) {
 			if node.Source.ProviderKey == "" {
 				return doc, warnings, fmt.Errorf("profile.nodes[%d].source.providerKey is required for subscription nodes", i)
 			}
+			if IsDisallowedSubscriptionEndpoint(node.Server) {
+				return doc, warnings, fmt.Errorf("profile.nodes[%d].server must not be local, private, or reserved for subscription nodes", i)
+			}
 		default:
 			return doc, warnings, fmt.Errorf("profile.nodes[%d].source.type must be MANUAL or SUBSCRIPTION", i)
 		}
@@ -479,9 +495,10 @@ func ProviderKeyFor(rawURL string) string {
 	return strings.ToLower(strings.TrimSpace(rawURL))
 }
 
-func ParseSubscription(body string, headers map[string]string, rawURL string, nowMillis int64) ([]Node, Subscription, int) {
+func ParseSubscription(body string, headers map[string]string, rawURL string, nowMillis int64) ([]Node, Subscription, int, []RejectedSubscriptionNode) {
 	text := decodeSubscriptionBody(body)
 	nodes := make([]Node, 0)
+	rejected := make([]RejectedSubscriptionNode, 0)
 	failures := 0
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
@@ -491,6 +508,18 @@ func ParseSubscription(body string, headers map[string]string, rawURL string, no
 		node, err := ParseLink(line, nowMillis)
 		if err != nil {
 			failures++
+			continue
+		}
+		if IsDisallowedSubscriptionEndpoint(node.Server) {
+			rejected = append(rejected, RejectedSubscriptionNode{
+				Link:     line,
+				Name:     node.Name,
+				Protocol: node.Protocol,
+				Server:   node.Server,
+				Port:     node.Port,
+				Code:     "subscription_local_endpoint",
+				Reason:   fmt.Sprintf("subscription node %s:%d points to a local, private, or reserved endpoint", node.Server, node.Port),
+			})
 			continue
 		}
 		node.Source = NodeSource{
@@ -513,7 +542,7 @@ func ParseSubscription(body string, headers map[string]string, rawURL string, no
 		ExpireTimestamp:   info.ExpireTimestamp,
 		ParseFailures:     failures,
 	}
-	return nodes, sub, failures
+	return nodes, sub, failures, rejected
 }
 
 type subscriptionInfo struct {
@@ -976,4 +1005,72 @@ func HostIsLocal(host string) bool {
 		return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified()
 	}
 	return strings.EqualFold(host, "localhost")
+}
+
+func IsDisallowedSubscriptionEndpoint(host string) bool {
+	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
+	if host == "" || host == "localhost" || host == "ip6-localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsUnspecified() ||
+		ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() ||
+		ip.IsMulticast() {
+		return true
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	addr = addr.Unmap()
+	return isReservedSubscriptionAddr(addr)
+}
+
+func isReservedSubscriptionAddr(addr netip.Addr) bool {
+	for _, prefix := range reservedSubscriptionPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+var reservedSubscriptionPrefixes = mustParsePrefixes([]string{
+	"0.0.0.0/8",
+	"100.64.0.0/10",
+	"192.0.0.0/24",
+	"192.0.2.0/24",
+	"192.88.99.0/24",
+	"198.18.0.0/15",
+	"198.51.100.0/24",
+	"203.0.113.0/24",
+	"224.0.0.0/4",
+	"240.0.0.0/4",
+	"::/128",
+	"::1/128",
+	"64:ff9b::/96",
+	"100::/64",
+	"2001:db8::/32",
+	"fc00::/7",
+	"fe80::/10",
+	"ff00::/8",
+})
+
+func mustParsePrefixes(values []string) []netip.Prefix {
+	result := make([]netip.Prefix, 0, len(values))
+	for _, value := range values {
+		prefix, err := netip.ParsePrefix(value)
+		if err != nil {
+			panic(err)
+		}
+		result = append(result, prefix)
+	}
+	return result
 }
