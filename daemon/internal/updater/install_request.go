@@ -15,12 +15,8 @@ type InstallArtifacts struct {
 	ApkExists    bool
 }
 
-func CanonicalUpdateDir(dataDir string) string {
-	return filepath.Join(dataDir, "update")
-}
-
 func ResolveInstallArtifacts(dataDir string, params *json.RawMessage) (InstallArtifacts, error) {
-	updateDir := CanonicalUpdateDir(dataDir)
+	updateDir := filepath.Join(dataDir, "update")
 	expectedModulePath := filepath.Join(updateDir, "module.zip")
 	expectedApkPath := filepath.Join(updateDir, "panel.apk")
 

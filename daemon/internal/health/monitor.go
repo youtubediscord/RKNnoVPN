@@ -8,6 +8,7 @@ import (
 	"log"
 	neturl "net/url"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -358,9 +359,16 @@ func (h *HealthMonitor) checkPortListening(port int) CheckResult {
 // checkIptablesIntact verifies the RKNNOVPN_PRE chain is still hooked in
 // the mangle PREROUTING chain.
 func (h *HealthMonitor) checkIptablesIntact() CheckResult {
-	err := core.ExecIptables("-t", "mangle", "-C", "PREROUTING", "-j", "RKNNOVPN_PRE")
+	cmd := exec.Command("iptables", "-w", "100", "-t", "mangle", "-C", "PREROUTING", "-j", "RKNNOVPN_PRE")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return CheckResult{Pass: false, Detail: "цепочка RKNNOVPN_PRE не подключена к PREROUTING", Code: "RULES_NOT_APPLIED"}
+		detail := "цепочка RKNNOVPN_PRE не подключена к PREROUTING"
+		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
+			detail = fmt.Sprintf("%s: %s", detail, trimmed)
+		} else {
+			detail = fmt.Sprintf("%s: %v", detail, err)
+		}
+		return CheckResult{Pass: false, Detail: detail, Code: "RULES_NOT_APPLIED"}
 	}
 	return CheckResult{Pass: true, Detail: "цепочка iptables на месте"}
 }

@@ -107,7 +107,7 @@ func ReleaseIntegrityReport(dataDir string) ReleaseIntegrity {
 			continue
 		}
 		fullPath := filepath.Join(releasePath, filepath.FromSlash(rel))
-		actual, err := SHA256File(fullPath)
+		actual, err := sha256File(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				report.MissingFiles = append(report.MissingFiles, rel)
@@ -125,7 +125,7 @@ func ReleaseIntegrityReport(dataDir string) ReleaseIntegrity {
 	return report
 }
 
-func SHA256File(path string) (string, error) {
+func sha256File(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err

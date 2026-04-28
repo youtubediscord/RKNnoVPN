@@ -23,7 +23,7 @@ func RunCommand(maxLines int, exec ExecCommandFunc, name string, args ...string)
 		return result
 	}
 	out, err := exec(name, args...)
-	result.Lines = LimitLines(SplitLines(RedactText(out)), maxLines)
+	result.Lines = limitLines(splitLines(RedactText(out)), maxLines)
 	if err != nil {
 		result.Error = err.Error()
 	}

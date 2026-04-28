@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	applytx "github.com/youtubediscord/RKNnoVPN/daemon/internal/apply"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/control"
-	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
@@ -38,7 +36,12 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 	d.mu.Unlock()
 	newCfg, err := control.DecodeConfigImportParams(params, currentProfile)
 	if err != nil {
-		return nil, configImportRPCError(err)
+		code := ipc.CodeInvalidParams
+		var requestErr control.ConfigImportError
+		if errors.As(err, &requestErr) && requestErr.Kind == control.ConfigImportInvalidConfig {
+			code = ipc.CodeConfigError
+		}
+		return nil, &ipc.RPCError{Code: code, Message: err.Error()}
 	}
 
 	if err := newCfg.Validate(); err != nil {
@@ -64,15 +67,6 @@ func (d *daemon) handleConfigImport(params *json.RawMessage) (interface{}, *ipc.
 	return d.configMutationSuccess("config-import", "imported", true, mutation.RuntimeWasRunning, -1), nil
 }
 
-func configImportRPCError(err error) *ipc.RPCError {
-	code := ipc.CodeInvalidParams
-	var requestErr control.ConfigImportError
-	if errors.As(err, &requestErr) && requestErr.Kind == control.ConfigImportInvalidConfig {
-		code = ipc.CodeConfigError
-	}
-	return &ipc.RPCError{Code: code, Message: err.Error()}
-}
-
 func (d *daemon) configApplyRPCErrorSaved(action string, err error, saved bool) *ipc.RPCError {
 	var busy *runtimev2.OperationBusyError
 	if errors.As(err, &busy) {
@@ -87,11 +81,6 @@ func (d *daemon) configApplyRPCErrorSaved(action string, err error, saved bool) 
 	}
 	rpcErr.Data = d.configMutationErrorData(action, err, saved)
 	return rpcErr
-}
-
-func (d *daemon) runtimeIsRunning() bool {
-	state := d.coreMgr.GetState()
-	return state == core.StateRunning || state == core.StateDegraded
 }
 
 func (d *daemon) configMutationSuccess(action string, status string, reload bool, runtimeWasRunning bool, updated int) map[string]interface{} {
@@ -132,14 +121,6 @@ func attachMutationGenerations(result map[string]interface{}, operation map[stri
 		operation["desiredGeneration"] = desiredGeneration
 		operation["appliedGeneration"] = appliedGeneration
 	}
-}
-
-func configMutationWasSaved(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "config saved")
 }
 
 func (d *daemon) failIfRuntimeOperationActive() error {

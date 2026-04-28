@@ -14,10 +14,10 @@ func Privacy(cfg *config.Config, maxLines int, exec ExecCommandFunc) map[string]
 	settingsProxyPort := RunCommand(maxLines, exec, "settings", "get", "global", "global_http_proxy_port")
 	checks := map[string]interface{}{
 		"no_vpn_like_interfaces":      FirstVPNLikeInterfaceLine(ipLinks.Lines) == "",
-		"no_transport_vpn_hint":       !LinesContainAny(connectivity.Lines, "TRANSPORT_VPN", "VpnTransportInfo"),
-		"no_loopback_dns":             !LinesContainLoopbackDNS(connectivity.Lines),
-		"system_proxy_unset":          CommandLooksEmptySetting(settingsProxyHost) && CommandLooksEmptySetting(settingsProxyPort),
-		"localhost_proxy_ports_clear": LocalhostProxyPortsClear(cfg),
+		"no_transport_vpn_hint":       !linesContainAny(connectivity.Lines, "TRANSPORT_VPN", "VpnTransportInfo"),
+		"no_loopback_dns":             FirstLoopbackDNSLine(connectivity.Lines) == "",
+		"system_proxy_unset":          commandLooksEmptySetting(settingsProxyHost) && commandLooksEmptySetting(settingsProxyPort),
+		"localhost_proxy_ports_clear": localhostProxyPortsClear(cfg),
 	}
 	if cfg != nil {
 		profileInbounds := cfg.ResolveProfileInbounds()
@@ -26,7 +26,7 @@ func Privacy(cfg *config.Config, maxLines int, exec ExecCommandFunc) map[string]
 		checks["helper_inbounds_local_only"] = !profileInbounds.AllowLAN
 		checks["per_app_whitelist_default"] = cfg.Apps.Mode == "whitelist" || cfg.Apps.Mode == "off"
 		checks["dns_hijack_per_uid"] = cfg.DNS.HijackPerUID
-		checks["self_test_apps_direct"] = SelfTestProtectedAppsDirect()
+		checks["self_test_apps_direct"] = selfTestProtectedAppsDirect()
 	}
 	return map[string]interface{}{
 		"checks": checks,
@@ -42,7 +42,7 @@ func Privacy(cfg *config.Config, maxLines int, exec ExecCommandFunc) map[string]
 	}
 }
 
-func SelfTestProtectedAppsDirect() bool {
+func selfTestProtectedAppsDirect() bool {
 	for _, pkgName := range core.SelfTestProtectedPackages {
 		if !core.IsBuiltInAlwaysDirectPackage(pkgName) {
 			return false

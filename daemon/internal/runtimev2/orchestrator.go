@@ -768,7 +768,7 @@ func (o *Orchestrator) finishOperationLocked(op OperationStatus, completion oper
 	if completion.err != nil {
 		result = "failed"
 	}
-	step := operationStepFromHealth(o.health)
+	step := operationStepFromReport(o.health.StageReport)
 	if step.Name == "" && active != nil && active.OperationID == op.OperationID {
 		step = operationStep{
 			Name:   active.Step,
@@ -888,7 +888,7 @@ func (o *Orchestrator) cloneActiveOperationLocked(now time.Time) *OperationStatu
 		copy.WatchdogAfterMS = durationMillisCeil(o.watchdogAfter)
 		copy.Stuck = now.Sub(copy.StartedAt) > o.watchdogAfter
 	}
-	if step := operationStepFromHealth(o.health); step.Name != "" {
+	if step := operationStepFromReport(o.health.StageReport); step.Name != "" {
 		copy.Step = step.Name
 		copy.StepStatus = step.Status
 		copy.StepCode = step.Code
@@ -1079,10 +1079,6 @@ func mergeOperationProgress(current HealthSnapshot, progress HealthSnapshot) Hea
 		current.Checks = progress.Checks
 	}
 	return current
-}
-
-func operationStepFromHealth(health HealthSnapshot) operationStep {
-	return operationStepFromReport(health.StageReport)
 }
 
 func operationStepFromReport(report interface{}) operationStep {

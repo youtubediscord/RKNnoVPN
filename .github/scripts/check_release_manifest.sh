@@ -25,8 +25,8 @@ extract_go_version() {
   sed -n 's/^[[:space:]]*\(var[[:space:]]\+\)\{0,1\}Version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\2/p' "$file" | head -n 1
 }
 
-daemon_version="$(extract_go_version daemon/cmd/privd/main.go)"
-ctl_version="$(extract_go_version daemon/cmd/privctl/main.go)"
+daemon_version="$(extract_go_version daemon/cmd/daemon/main.go)"
+ctl_version="$(extract_go_version daemon/cmd/daemonctl/main.go)"
 apk_version="$(sed -n 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' app/app/build.gradle.kts | head -n 1)"
 apk_code="$(sed -n 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' app/app/build.gradle.kts | head -n 1)"
 module_version="$(sed -n 's/^version=//p' module/module.prop | head -n 1)"
@@ -35,7 +35,7 @@ update_version="$(sed -n 's/[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"
 update_code="$(sed -n 's/[[:space:]]*"versionCode"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' update.json | head -n 1)"
 
 [ -n "$daemon_version" ] || fail "daemon Version not found"
-[ "$ctl_version" = "$daemon_version" ] || fail "privctl version $ctl_version does not match privd $daemon_version"
+[ "$ctl_version" = "$daemon_version" ] || fail "daemonctl version $ctl_version does not match daemon $daemon_version"
 [ "$apk_version" = "$daemon_version" ] || fail "APK version $apk_version does not match $daemon_version"
 [ "$module_version" = "$daemon_version" ] || fail "module version $module_version does not match $daemon_version"
 [ "$update_version" = "$daemon_version" ] || fail "update.json version $update_version does not match $daemon_version"
@@ -46,13 +46,13 @@ expected_code="$(version_code "$daemon_version")"
 [ "$update_code" = "$expected_code" ] || fail "update.json versionCode $update_code does not match expected $expected_code"
 
 for required in \
-  module/scripts/lib/privstack_env.sh \
-  module/scripts/lib/privstack_install.sh \
-  module/scripts/lib/privstack_installer_flow.sh \
-  module/scripts/lib/privstack_netstack.sh \
-  module/scripts/lib/privstack_iptables_rules.sh \
+  module/scripts/lib/rknnovpn_env.sh \
+  module/scripts/lib/rknnovpn_install.sh \
+  module/scripts/lib/rknnovpn_installer_flow.sh \
+  module/scripts/lib/rknnovpn_netstack.sh \
+  module/scripts/lib/rknnovpn_iptables_rules.sh \
   module/scripts/rescue_reset.sh \
-  module/scripts/net_handler.sh \
+  module/scripts/routing.sh \
   module/scripts/iptables.sh \
   module/scripts/dns.sh \
   module/OWNERSHIP.md \
@@ -63,7 +63,7 @@ for required in \
   [ -f "$required" ] || fail "required module file missing: $required"
 done
 
-expected_zip="https://github.com/youtubediscord/RKNnoVPN/releases/download/${daemon_version}/privstack-${daemon_version}-module.zip"
+expected_zip="https://github.com/youtubediscord/RKNnoVPN/releases/download/${daemon_version}/rknnovpn-${daemon_version}-module.zip"
 expected_changelog="https://github.com/youtubediscord/RKNnoVPN/releases/tag/${daemon_version}"
 rg -q "\"zipUrl\"[[:space:]]*:[[:space:]]*\"${expected_zip}\"" update.json || fail "update.json zipUrl is not $expected_zip"
 rg -q "\"changelog\"[[:space:]]*:[[:space:]]*\"${expected_changelog}\"" update.json || fail "update.json changelog is not $expected_changelog"

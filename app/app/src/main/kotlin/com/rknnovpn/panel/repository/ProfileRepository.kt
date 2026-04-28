@@ -276,7 +276,7 @@ class ProfileRepository @Inject constructor(
         }
     }
 
-    /** Update routing, DNS, TUN or inbound settings. */
+    /** Update routing, DNS, reserved profile network fields, or inbound settings. */
     suspend fun updateConfig(transform: (ProfileConfig) -> ProfileConfig): Boolean =
         mutate("updateConfig", transform)
 

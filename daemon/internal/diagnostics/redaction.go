@@ -29,7 +29,7 @@ func RedactNodeProbeResults(results interface{}) interface{} {
 	if err := json.Unmarshal(data, &value); err != nil {
 		return results
 	}
-	return RedactValue("", value)
+	return redactValue("", value)
 }
 
 func ReadRedactedJSONFile(path string) JSONSection {
@@ -46,28 +46,28 @@ func ReadRedactedJSONFile(path string) JSONSection {
 	var value interface{}
 	if err := json.Unmarshal(data, &value); err != nil {
 		section.Error = err.Error()
-		section.Value = LimitLines(SplitLines(RedactText(string(data))), 80)
+		section.Value = limitLines(splitLines(RedactText(string(data))), 80)
 		return section
 	}
-	section.Value = RedactValue("", value)
+	section.Value = redactValue("", value)
 	return section
 }
 
-func RedactValue(key string, value interface{}) interface{} {
-	if IsSensitiveKey(key) {
+func redactValue(key string, value interface{}) interface{} {
+	if isSensitiveKey(key) {
 		return "[redacted]"
 	}
 	switch typed := value.(type) {
 	case map[string]interface{}:
 		redacted := make(map[string]interface{}, len(typed))
 		for k, v := range typed {
-			redacted[k] = RedactValue(k, v)
+			redacted[k] = redactValue(k, v)
 		}
 		return redacted
 	case []interface{}:
 		redacted := make([]interface{}, len(typed))
 		for i, v := range typed {
-			redacted[i] = RedactValue("", v)
+			redacted[i] = redactValue("", v)
 		}
 		return redacted
 	case string:
@@ -77,7 +77,7 @@ func RedactValue(key string, value interface{}) interface{} {
 	}
 }
 
-func IsSensitiveKey(key string) bool {
+func isSensitiveKey(key string) bool {
 	lower := strings.ToLower(strings.TrimSpace(key))
 	switch lower {
 	case "uuid", "password", "private_key", "pre_shared_key", "preshared_key", "psk", "short_id", "public_key", "reality_public_key":
@@ -102,7 +102,7 @@ func RedactText(text string) string {
 	return text
 }
 
-func LinesContainAny(lines []string, needles ...string) bool {
+func linesContainAny(lines []string, needles ...string) bool {
 	for _, line := range lines {
 		lower := strings.ToLower(line)
 		for _, needle := range needles {
@@ -112,10 +112,6 @@ func LinesContainAny(lines []string, needles ...string) bool {
 		}
 	}
 	return false
-}
-
-func LinesContainLoopbackDNS(lines []string) bool {
-	return FirstLoopbackDNSLine(lines) != ""
 }
 
 func FirstLoopbackDNSLine(lines []string) string {
@@ -134,7 +130,7 @@ func FirstLoopbackDNSLine(lines []string) string {
 	return ""
 }
 
-func CommandLooksEmptySetting(result CommandResult) bool {
+func commandLooksEmptySetting(result CommandResult) bool {
 	if result.Error != "" {
 		return true
 	}
@@ -147,24 +143,9 @@ func CommandLooksEmptySetting(result CommandResult) bool {
 	return true
 }
 
-func LimitLines(lines []string, max int) []string {
+func limitLines(lines []string, max int) []string {
 	if max <= 0 || len(lines) <= max {
 		return lines
 	}
 	return lines[len(lines)-max:]
-}
-
-func SplitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
 }

@@ -28,7 +28,7 @@ Android app
 
 - Не использовать Android VPN API.
 - Не создавать `tun0`.
-- Не давать APK `INTERNET` без отдельного архитектурного решения; updater/subscription/control-plane HTTP сейчас принадлежат daemon.
+- Не давать APK `INTERNET`: updater/subscription/control-plane HTTP принадлежат daemon. Любое изменение этого правила должно начинаться с отдельного privacy-дизайна и обновления guardrail-проверок.
 - Не полагаться на Xposed/хуки как основную защиту.
 - Всё сетевое состояние держать в root-слое.
 - Любая ошибка запуска core должна быть диагностируема через `sing-box.log`.

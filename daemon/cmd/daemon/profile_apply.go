@@ -24,7 +24,7 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 
 	mutation, err := d.persistProfileConfigMutationForAction(nextCfg, reload, action)
 	if err != nil {
-		rpcErr := d.configApplyRPCErrorSaved(action, err, configMutationWasSaved(err))
+		rpcErr := d.configApplyRPCErrorSaved(action, err, mutation.ConfigSaved)
 		status := d.runtimeV2.Status()
 		resultStatus := "failed"
 		runtimeApply := "not_started"

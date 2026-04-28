@@ -146,11 +146,11 @@ data class SharingConfig(
 @Serializable
 data class TunConfig(
     val enabled: Boolean = false,
-    /** Legacy/inactive compatibility field; root TPROXY runtime does not create a TUN interface. */
+    /** Reserved profile field; root TPROXY runtime does not create a TUN interface. */
     val mtu: Int = 9000,
-    /** Legacy/inactive compatibility field; root TPROXY runtime does not assign this address. */
+    /** Reserved profile field; root TPROXY runtime does not assign this address. */
     val ipv4Address: String = "172.19.0.1/30",
-    /** Legacy/inactive compatibility field; IPv6 is controlled by the root routing layer. */
+    /** Reserved profile field; IPv6 is controlled by the root routing layer. */
     val ipv6: Boolean = false,
     /** Auto-route: let the daemon manage system routing table. */
     val autoRoute: Boolean = true,

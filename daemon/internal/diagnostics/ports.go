@@ -22,7 +22,7 @@ type PortConflict struct {
 	Roles []string `json:"roles"`
 }
 
-func LocalhostProxyPortsClear(cfg *config.Config) bool {
+func localhostProxyPortsClear(cfg *config.Config) bool {
 	ports := []int{10808, 10809, 9090}
 	if cfg != nil {
 		profileInbounds := cfg.ResolveProfileInbounds()
@@ -42,8 +42,8 @@ func LocalhostProxyPortsClear(cfg *config.Config) bool {
 }
 
 func PortStatuses(cfg *config.Config) []PortStatus {
-	ports := EffectiveLocalPorts(cfg)
-	roles := LocalPortRoles(cfg)
+	ports := effectiveLocalPorts(cfg)
+	roles := localPortRoles(cfg)
 	result := make([]PortStatus, 0, len(ports))
 	for _, port := range ports {
 		role := strings.Join(roles[port], ",")
@@ -58,7 +58,7 @@ func PortStatuses(cfg *config.Config) []PortStatus {
 }
 
 func LocalPortConflicts(cfg *config.Config) []PortConflict {
-	roles := LocalPortRoles(cfg)
+	roles := localPortRoles(cfg)
 	conflicts := make([]PortConflict, 0)
 	ports := make([]int, 0, len(roles))
 	for port := range roles {
@@ -77,7 +77,7 @@ func LocalPortConflicts(cfg *config.Config) []PortConflict {
 	return conflicts
 }
 
-func LocalPortRoles(cfg *config.Config) map[int][]string {
+func localPortRoles(cfg *config.Config) map[int][]string {
 	if cfg == nil {
 		return nil
 	}
@@ -86,8 +86,8 @@ func LocalPortRoles(cfg *config.Config) map[int][]string {
 		role string
 		port int
 	}{
-		{"tproxy", ValueOrDefaultInt(cfg.Proxy.TProxyPort, 10853)},
-		{"dns", ValueOrDefaultInt(cfg.Proxy.DNSPort, 10856)},
+		{"tproxy", valueOrDefaultInt(cfg.Proxy.TProxyPort, 10853)},
+		{"dns", valueOrDefaultInt(cfg.Proxy.DNSPort, 10856)},
 		{"clash_api", cfg.Proxy.APIPort},
 		{"socks_helper", profileInbounds.SocksPort},
 		{"http_helper", profileInbounds.HTTPPort},
@@ -105,14 +105,14 @@ func LocalPortRoles(cfg *config.Config) map[int][]string {
 	return roles
 }
 
-func EffectiveLocalPorts(cfg *config.Config) []int {
+func effectiveLocalPorts(cfg *config.Config) []int {
 	if cfg == nil {
 		return nil
 	}
 	profileInbounds := cfg.ResolveProfileInbounds()
 	ports := []int{
-		ValueOrDefaultInt(cfg.Proxy.TProxyPort, 10853),
-		ValueOrDefaultInt(cfg.Proxy.DNSPort, 10856),
+		valueOrDefaultInt(cfg.Proxy.TProxyPort, 10853),
+		valueOrDefaultInt(cfg.Proxy.DNSPort, 10856),
 		cfg.Proxy.APIPort,
 		profileInbounds.SocksPort,
 		profileInbounds.HTTPPort,
@@ -129,7 +129,7 @@ func EffectiveLocalPorts(cfg *config.Config) []int {
 	return result
 }
 
-func ValueOrDefaultInt(value int, fallback int) int {
+func valueOrDefaultInt(value int, fallback int) int {
 	if value == 0 {
 		return fallback
 	}

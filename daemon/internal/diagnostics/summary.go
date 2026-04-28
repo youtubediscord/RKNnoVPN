@@ -130,10 +130,10 @@ func BuildSummary(
 			CurrentReleaseOK:       releaseIntegrity.OK,
 			SingBoxCheckOK:         singBoxCheck.Error == "",
 		},
-		Runtime:           RuntimeSummaryFromHealth(healthSnapshot),
+		Runtime:           runtimeSummaryFromHealth(healthSnapshot),
 		Profile:           profileSummary,
 		Routing:           routingSummary,
-		NodeTests:         NodeTestSummaryFromResults(nodeResults),
+		NodeTests:         nodeTestSummaryFromResults(nodeResults),
 		PackageResolution: packageResolution,
 	}
 	addIssue := func(issue string) {
@@ -169,7 +169,7 @@ func BuildSummary(
 		summary.Status = "partial_reset"
 		addIssue("network cleanup leftovers remain")
 	}
-	for _, issue := range NetstackRuntimeIssues(netstackRuntimeReport) {
+	for _, issue := range netstackRuntimeIssues(netstackRuntimeReport) {
 		addIssue(issue)
 		if summary.Status == "ok" || summary.Status == "degraded" {
 			summary.Status = "failed"
@@ -195,7 +195,7 @@ func BuildSummary(
 			addIssue(fmt.Sprintf("local port %d has conflicting roles: %s", port.Port, port.Role))
 		}
 	}
-	for _, issue := range PrivacyIssues(privacy) {
+	for _, issue := range privacyIssues(privacy) {
 		addPrivacy(issue)
 	}
 	for _, warning := range packageResolution.Warnings {
@@ -212,7 +212,7 @@ func BuildSummary(
 	return summary
 }
 
-func RuntimeSummaryFromHealth(healthSnapshot runtimev2.HealthSnapshot) RuntimeSummary {
+func runtimeSummaryFromHealth(healthSnapshot runtimev2.HealthSnapshot) RuntimeSummary {
 	report, ok := healthSnapshot.StageReport.(core.RuntimeStageReport)
 	if !ok || report.Empty() {
 		return RuntimeSummary{LastCode: healthSnapshot.LastCode}
@@ -234,7 +234,7 @@ func RuntimeSummaryFromHealth(healthSnapshot runtimev2.HealthSnapshot) RuntimeSu
 	return summary
 }
 
-func NetstackRuntimeIssues(report netstack.Report) []string {
+func netstackRuntimeIssues(report netstack.Report) []string {
 	switch report.Status {
 	case "failed", "partial":
 	default:
@@ -255,7 +255,7 @@ func NetstackRuntimeIssues(report netstack.Report) []string {
 	return []string{"runtime netstack verification failed: " + detail}
 }
 
-func NodeTestSummaryFromResults(results []runtimev2.NodeProbeResult) NodeTestSummary {
+func nodeTestSummaryFromResults(results []runtimev2.NodeProbeResult) NodeTestSummary {
 	summary := NodeTestSummary{Total: len(results)}
 	for _, result := range results {
 		if result.Verdict == "usable" {
@@ -405,7 +405,7 @@ func PackageResolutionFromConfig(cfg *config.Config) PackageResolution {
 	return report
 }
 
-func PrivacyIssues(privacy map[string]interface{}) []string {
+func privacyIssues(privacy map[string]interface{}) []string {
 	rawChecks, _ := privacy["checks"].(map[string]interface{})
 	if len(rawChecks) == 0 {
 		return nil

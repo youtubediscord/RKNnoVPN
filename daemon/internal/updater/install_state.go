@@ -33,7 +33,7 @@ type InstallTracker struct {
 func NewInstallTracker(dataDir string, generation int64, modulePath string, apkPath string) *InstallTracker {
 	now := time.Now().Format(time.RFC3339)
 	return &InstallTracker{
-		path: InstallStatePath(dataDir),
+		path: filepath.Join(dataDir, "run", installStateFileName),
 		state: InstallState{
 			Status:     "running",
 			Generation: generation,
@@ -45,12 +45,8 @@ func NewInstallTracker(dataDir string, generation int64, modulePath string, apkP
 	}
 }
 
-func InstallStatePath(dataDir string) string {
-	return filepath.Join(dataDir, "run", installStateFileName)
-}
-
 func ReadInstallState(dataDir string) (*InstallState, error) {
-	data, err := os.ReadFile(InstallStatePath(dataDir))
+	data, err := os.ReadFile(filepath.Join(dataDir, "run", installStateFileName))
 	if err != nil {
 		return nil, err
 	}

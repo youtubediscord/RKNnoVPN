@@ -61,7 +61,7 @@ func TestReadRedactedJSONFileLimitsInvalidJSONText(t *testing.T) {
 }
 
 func TestLoopbackDNSAndVPNInterfaceDetection(t *testing.T) {
-	if !LinesContainLoopbackDNS([]string{"LinkProperties: dnses: [ /127.0.0.1 ]"}) {
+	if FirstLoopbackDNSLine([]string{"LinkProperties: dnses: [ /127.0.0.1 ]"}) == "" {
 		t.Fatal("loopback DNS line was not detected")
 	}
 	if line := FirstVPNLikeInterfaceLine([]string{"7: tun0: <POINTOPOINT> mtu 1500"}); line == "" {
@@ -73,13 +73,13 @@ func TestLoopbackDNSAndVPNInterfaceDetection(t *testing.T) {
 }
 
 func TestCommandLooksEmptySetting(t *testing.T) {
-	if !CommandLooksEmptySetting(CommandResult{Lines: []string{"null"}}) {
+	if !commandLooksEmptySetting(CommandResult{Lines: []string{"null"}}) {
 		t.Fatal("null setting should be empty")
 	}
-	if CommandLooksEmptySetting(CommandResult{Lines: []string{"127.0.0.1:8080"}}) {
+	if commandLooksEmptySetting(CommandResult{Lines: []string{"127.0.0.1:8080"}}) {
 		t.Fatal("non-empty setting should not be empty")
 	}
-	if !CommandLooksEmptySetting(CommandResult{Error: "settings unavailable"}) {
+	if !commandLooksEmptySetting(CommandResult{Error: "settings unavailable"}) {
 		t.Fatal("unavailable setting command should be treated as empty for privacy checks")
 	}
 }

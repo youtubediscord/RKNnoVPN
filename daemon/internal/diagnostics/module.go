@@ -18,7 +18,7 @@ func ReadModuleVersion(paths ...string) map[string]string {
 			continue
 		}
 		result := map[string]string{"path": path}
-		for _, line := range SplitLines(string(data)) {
+		for _, line := range splitLines(string(data)) {
 			key, value, ok := strings.Cut(line, "=")
 			if ok && (key == "version" || key == "versionCode") {
 				result[key] = value

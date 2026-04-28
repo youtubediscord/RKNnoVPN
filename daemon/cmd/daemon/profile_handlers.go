@@ -68,9 +68,9 @@ func (d *daemon) handleProfileSetActiveNode(params *json.RawMessage) (interface{
 }
 
 func (d *daemon) handleSubscriptionPreview(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	request, rpcErr := subscriptionURLFromParams(params)
-	if rpcErr != nil {
-		return nil, rpcErr
+	request, err := control.DecodeSubscriptionURLParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
 	}
 	d.mu.Lock()
 	current := profiledoc.FromConfig(d.cfg)
@@ -83,9 +83,9 @@ func (d *daemon) handleSubscriptionPreview(params *json.RawMessage) (interface{}
 }
 
 func (d *daemon) handleSubscriptionRefresh(params *json.RawMessage) (interface{}, *ipc.RPCError) {
-	request, rpcErr := subscriptionURLFromParams(params)
-	if rpcErr != nil {
-		return nil, rpcErr
+	request, err := control.DecodeSubscriptionURLParams(params)
+	if err != nil {
+		return nil, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
 	}
 	d.mu.Lock()
 	current := profiledoc.FromConfig(d.cfg)
@@ -107,14 +107,6 @@ func (d *daemon) handleSubscriptionRefresh(params *json.RawMessage) (interface{}
 		obj["merge"] = response.Merge
 	}
 	return result, nil
-}
-
-func subscriptionURLFromParams(params *json.RawMessage) (control.SubscriptionURLRequest, *ipc.RPCError) {
-	request, err := control.DecodeSubscriptionURLParams(params)
-	if err != nil {
-		return request, &ipc.RPCError{Code: ipc.CodeInvalidParams, Message: err.Error()}
-	}
-	return request, nil
 }
 
 func subscriptionRPCError(rawURL string, status int, headers map[string]string, err error) *ipc.RPCError {

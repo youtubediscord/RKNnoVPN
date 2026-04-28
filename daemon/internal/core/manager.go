@@ -98,14 +98,6 @@ func (e *RuntimeError) RuntimeStageReport() interface{} {
 	return e.StageReport
 }
 
-func runtimeError(layer string, code string, err error) error {
-	return runtimeErrorWithRollback(layer, code, err, false)
-}
-
-func runtimeErrorWithRollback(layer string, code string, err error, rollbackApplied bool) error {
-	return runtimeErrorWithReport(layer, code, err, rollbackApplied, RuntimeStageReport{})
-}
-
 func runtimeErrorWithReport(layer string, code string, err error, rollbackApplied bool, report RuntimeStageReport) error {
 	if err == nil {
 		return nil
@@ -155,10 +147,6 @@ func runtimeUserMessage(code string) string {
 	}
 }
 
-func newRuntimeStageReport(operation string) RuntimeStageReport {
-	return NewRuntimeStageReport(operation)
-}
-
 func NewRuntimeStageReport(operation string) RuntimeStageReport {
 	now := time.Now()
 	return RuntimeStageReport{
@@ -166,10 +154,6 @@ func NewRuntimeStageReport(operation string) RuntimeStageReport {
 		Status:    "running",
 		StartedAt: now,
 	}
-}
-
-func (r *RuntimeStageReport) addStage(name string, status string, code string, detail string, rollbackApplied bool) {
-	r.AddStage(name, status, code, detail, rollbackApplied)
 }
 
 func (r *RuntimeStageReport) AddStage(name string, status string, code string, detail string, rollbackApplied bool) {
@@ -197,20 +181,12 @@ func (r *RuntimeStageReport) AddStage(name string, status string, code string, d
 	}
 }
 
-func (r *RuntimeStageReport) finishOK() {
-	r.FinishOK()
-}
-
 func (r *RuntimeStageReport) FinishOK() {
 	if r == nil {
 		return
 	}
 	r.Status = "ok"
 	r.FinishedAt = time.Now()
-}
-
-func (r RuntimeStageReport) empty() bool {
-	return r.Empty()
 }
 
 func (r RuntimeStageReport) Empty() bool {
@@ -365,10 +341,10 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 	if m.state == StateRunning || m.state == StateStarting {
 		return fmt.Errorf("core: already %s", m.state)
 	}
-	stageReport := newRuntimeStageReport("start")
+	stageReport := NewRuntimeStageReport("start")
 	m.lastStartReport = stageReport
 	recordStage := func(name string, status string, code string, detail string, rollbackApplied bool) {
-		stageReport.addStage(name, status, code, detail, rollbackApplied)
+		stageReport.AddStage(name, status, code, detail, rollbackApplied)
 		m.lastStartReport = stageReport
 		m.lastRuntimeReport = stageReport
 	}
@@ -507,7 +483,7 @@ func (m *CoreManager) Start(profile *config.NodeProfile) error {
 }
 
 func (m *CoreManager) finishStartReport(report RuntimeStageReport) {
-	report.finishOK()
+	report.FinishOK()
 	m.lastStartReport = report
 	m.lastRuntimeReport = report
 }
@@ -593,10 +569,10 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	stageReport := newRuntimeStageReport("hot-swap")
+	stageReport := NewRuntimeStageReport("hot-swap")
 	m.lastRuntimeReport = stageReport
 	recordStage := func(name string, status string, code string, detail string, rollbackApplied bool) {
-		stageReport.addStage(name, status, code, detail, rollbackApplied)
+		stageReport.AddStage(name, status, code, detail, rollbackApplied)
 		m.lastRuntimeReport = stageReport
 	}
 	failStage := func(name string, layer string, code string, err error, rollbackApplied bool) error {
@@ -685,7 +661,7 @@ func (m *CoreManager) HotSwap(profile *config.NodeProfile) error {
 	_ = os.Remove(filepath.Join(m.dataDir, "config", "manual"))
 	m.logger.Printf("hot-swap complete (pid=%d)", m.pid)
 	recordStage("commit-state", "ok", "", m.activeProfile, false)
-	stageReport.finishOK()
+	stageReport.FinishOK()
 	m.lastRuntimeReport = stageReport
 	return nil
 }

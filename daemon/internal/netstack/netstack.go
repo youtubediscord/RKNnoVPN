@@ -65,7 +65,7 @@ func (m Manager) WithExecCommand(execCommand ExecCommandFunc) Manager {
 }
 
 func (m Manager) Apply() Report {
-	report := newReport("apply")
+	report := Report{Operation: "apply", Status: "ok"}
 	m.cleanupInto(&report, true)
 	if report.Status == "failed" {
 		return report
@@ -90,13 +90,13 @@ func (m Manager) Apply() Report {
 }
 
 func (m Manager) Cleanup() Report {
-	report := newReport("cleanup")
+	report := Report{Operation: "cleanup", Status: "ok"}
 	m.cleanupInto(&report, true)
 	return report
 }
 
 func (m Manager) Verify() Report {
-	report := newReport("verify")
+	report := Report{Operation: "verify", Status: "ok"}
 
 	if err := m.run("iptables", "status"); err != nil {
 		report.addFailure("iptables-status", err)
@@ -113,7 +113,7 @@ func (m Manager) Verify() Report {
 }
 
 func (m Manager) VerifyCleanup() Report {
-	report := newReport("verify-cleanup")
+	report := Report{Operation: "verify-cleanup", Status: "ok"}
 	leftovers := m.CollectLeftovers()
 	report.Leftovers = leftovers
 	if len(leftovers) == 0 {
@@ -281,10 +281,6 @@ func (r Report) Err() error {
 		break
 	}
 	return &Error{Operation: r.Operation, Code: code, Report: r}
-}
-
-func newReport(operation string) Report {
-	return Report{Operation: operation, Status: "ok"}
 }
 
 func (r *Report) addOK(name string, detail string) {

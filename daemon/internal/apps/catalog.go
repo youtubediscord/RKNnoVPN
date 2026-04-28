@@ -59,10 +59,10 @@ func LoadInstalled(path string) ([]Info, error) {
 
 		apps = append(apps, Info{
 			PackageName: fields[0],
-			AppName:     PrettyPackageLabel(fields[0]),
+			AppName:     prettyPackageLabel(fields[0]),
 			UID:         uid,
 			IsSystemApp: isSystem,
-			Category:    Classify(fields[0], isSystem),
+			Category:    classify(fields[0], isSystem),
 			Enabled:     true,
 		})
 	}
@@ -87,7 +87,7 @@ func ResolveUID(apps []Info, uid int) (Info, bool) {
 	return Info{}, false
 }
 
-func PrettyPackageLabel(packageName string) string {
+func prettyPackageLabel(packageName string) string {
 	last := packageName
 	if idx := strings.LastIndex(packageName, "."); idx != -1 && idx+1 < len(packageName) {
 		last = packageName[idx+1:]
@@ -100,7 +100,7 @@ func PrettyPackageLabel(packageName string) string {
 	return strings.ToUpper(last[:1]) + last[1:]
 }
 
-func Classify(packageName string, isSystem bool) string {
+func classify(packageName string, isSystem bool) string {
 	if isSystem {
 		return "SYSTEM"
 	}

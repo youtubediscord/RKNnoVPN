@@ -172,7 +172,7 @@ func BuildReport(cfg *config.Config, cfgPath string, dataDir string, healthResul
 		)
 	}
 
-	if port := FirstVisibleLocalProxyPort(cfg); port > 0 {
+	if port := firstVisibleLocalProxyPort(cfg); port > 0 {
 		appendFinding(
 			"LOCALHOST_PROXY_PORT_VISIBLE",
 			"Локальный proxy/API port слушает на localhost",
@@ -245,7 +245,7 @@ func BuildReport(cfg *config.Config, cfgPath string, dataDir string, healthResul
 		filepath.Join(dataDir, "logs", "daemon.log"),
 		filepath.Join(dataDir, "logs", "sing-box.log"),
 	} {
-		if PathHasGroupOrWorldBits(path) {
+		if pathHasGroupOrWorldBits(path) {
 			appendFinding(
 				"SENSITIVE_FILE_PERMISSIONS",
 				"Чувствительный файл читается вне root",
@@ -260,7 +260,7 @@ func BuildReport(cfg *config.Config, cfgPath string, dataDir string, healthResul
 	}
 
 	if coreState == core.StateRunning.String() || coreState == core.StateDegraded.String() {
-		if !LocalPortProtectionPresent(cfg) {
+		if !localPortProtectionPresent(cfg) {
 			appendFinding(
 				"LOCAL_PORT_PROTECTION_MISSING",
 				"Локальные порты RKNnoVPN защищены не полностью",
@@ -356,7 +356,7 @@ func buildReport(findings []Finding, now time.Time) Report {
 	}
 }
 
-func FirstVisibleLocalProxyPort(cfg *config.Config) int {
+func firstVisibleLocalProxyPort(cfg *config.Config) int {
 	ports := []int{10808, 10809, 9090}
 	if cfg != nil {
 		profileInbounds := cfg.ResolveProfileInbounds()
@@ -375,7 +375,7 @@ func FirstVisibleLocalProxyPort(cfg *config.Config) int {
 	return 0
 }
 
-func PathHasGroupOrWorldBits(path string) bool {
+func pathHasGroupOrWorldBits(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil {
 		return false
@@ -383,7 +383,7 @@ func PathHasGroupOrWorldBits(path string) bool {
 	return info.Mode().Perm()&0077 != 0
 }
 
-func LocalPortProtectionPresent(cfg *config.Config) bool {
+func localPortProtectionPresent(cfg *config.Config) bool {
 	profileInbounds := cfg.ResolveProfileInbounds()
 	tproxyPort := cfg.Proxy.TProxyPort
 	if tproxyPort == 0 {
@@ -407,7 +407,7 @@ func LocalPortProtectionPresent(cfg *config.Config) bool {
 	if err4 != nil {
 		return false
 	}
-	if !PortProtectionOutputContainsAll(v4, specs) {
+	if !portProtectionOutputContainsAll(v4, specs) {
 		return false
 	}
 
@@ -418,7 +418,7 @@ func LocalPortProtectionPresent(cfg *config.Config) bool {
 	if err6 != nil {
 		return false
 	}
-	return PortProtectionOutputContainsAll(v6, specs)
+	return portProtectionOutputContainsAll(v6, specs)
 }
 
 type portProtectionSpec struct {
@@ -426,7 +426,7 @@ type portProtectionSpec struct {
 	protocol string
 }
 
-func PortProtectionOutputContainsAll(output string, specs []portProtectionSpec) bool {
+func portProtectionOutputContainsAll(output string, specs []portProtectionSpec) bool {
 	for _, spec := range specs {
 		if spec.port <= 0 {
 			continue

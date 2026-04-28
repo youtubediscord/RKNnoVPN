@@ -49,29 +49,15 @@ type daemon struct {
 	reportMu              sync.Mutex
 	runtimeDesiredRunning bool
 	runtimeOpEpoch        uint64
-	traffic               trafficSnapshot
 	latency               latencySnapshot
-	egress                egressSnapshot
 	healthKick            time.Time
 	lastReloadReport      core.RuntimeStageReport
 
 	collectLeftoversOverride func(*config.Config) []string
 }
 
-type trafficSnapshot struct {
-	TxBytes   int64
-	RxBytes   int64
-	CheckedAt time.Time
-}
-
 type latencySnapshot struct {
 	Ms        int64
-	Valid     bool
-	CheckedAt time.Time
-}
-
-type egressSnapshot struct {
-	IP        string
 	Valid     bool
 	CheckedAt time.Time
 }

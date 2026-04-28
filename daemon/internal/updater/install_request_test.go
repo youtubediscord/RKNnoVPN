@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-func TestResolveInstallArtifactsDefaultsToCanonicalUpdateDir(t *testing.T) {
+func TestResolveInstallArtifactsDefaultsToUpdateDirectory(t *testing.T) {
 	dataDir := t.TempDir()
-	updateDir := CanonicalUpdateDir(dataDir)
+	updateDir := filepath.Join(dataDir, "update")
 	modulePath := filepath.Join(updateDir, "module.zip")
 	apkPath := filepath.Join(updateDir, "panel.apk")
 	writeTestFile(t, modulePath, 0o644, "module")
@@ -39,7 +39,7 @@ func TestResolveInstallArtifactsRejectsNonCanonicalPaths(t *testing.T) {
 
 func TestResolveInstallArtifactsRequiresBothArtifacts(t *testing.T) {
 	dataDir := t.TempDir()
-	updateDir := CanonicalUpdateDir(dataDir)
+	updateDir := filepath.Join(dataDir, "update")
 	writeTestFile(t, filepath.Join(updateDir, "module.zip"), 0o644, "module")
 
 	_, err := ResolveInstallArtifacts(dataDir, nil)

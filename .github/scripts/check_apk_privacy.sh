@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 manifest="${repo_root}/app/app/src/main/AndroidManifest.xml"
 kotlin_src="${repo_root}/app/app/src/main/kotlin"
-profile_config="${repo_root}/app/app/src/main/kotlin/com/privstack/panel/model/ProfileConfig.kt"
+profile_config="${repo_root}/app/app/src/main/kotlin/com/rknnovpn/panel/model/ProfileConfig.kt"
 daemon_config="${repo_root}/daemon/internal/config/config.go"
 module_default_config="${repo_root}/module/defaults/config.json"
 

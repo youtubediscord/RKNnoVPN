@@ -79,6 +79,8 @@ type SharingConfig struct {
 	Interfaces []string `json:"interfaces,omitempty"`
 }
 
+// TunConfig is a reserved profile-schema field. The current root TPROXY
+// runtime must not create or manage a TUN interface from these values.
 type TunConfig struct {
 	Enabled     bool   `json:"enabled"`
 	MTU         int    `json:"mtu"`

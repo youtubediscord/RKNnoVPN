@@ -90,24 +90,22 @@ func TestDaemonctlCommandsMatchIPCContract(t *testing.T) {
 	}
 }
 
-func TestKotlinRequiredMethodsStayWithinIPCContract(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "app", "app", "src", "main", "kotlin", "com", "rknnovpn", "panel", "ipc", "DaemonClient.kt"))
+func TestGeneratedKotlinRequiredMethodsMatchIPCContract(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "app", "app", "src", "main", "kotlin", "com", "rknnovpn", "panel", "ipc", "GeneratedDaemonContract.kt"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	required := quotedSetValuesInKotlinVar(string(data), "REQUIRED_METHODS")
+	required := quotedSetValuesInKotlinVar(string(data), "APK_REQUIRED_METHODS")
 	if len(required) == 0 {
-		t.Fatalf("Kotlin REQUIRED_METHODS was not found")
+		t.Fatalf("generated APK_REQUIRED_METHODS was not found")
 	}
-	contract := ipc.SupportedMethods()
-	for _, method := range required {
-		if !slices.Contains(contract, method) {
-			t.Fatalf("Kotlin REQUIRED_METHODS contains method outside IPC contract: %s", method)
-		}
+	contract := ipc.APKRequiredMethods()
+	if !slices.Equal(required, contract) {
+		t.Fatalf("generated Kotlin APK_REQUIRED_METHODS drifted from IPC contract:\nkotlin=%#v\ncontract=%#v", required, contract)
 	}
 	for _, method := range []string{"backend.status", "profile.get", "profile.apply", "profile.importNodes", "profile.setActiveNode", "subscription.preview", "subscription.refresh", "ipc.contract", "version"} {
 		if !slices.Contains(required, method) {
-			t.Fatalf("Kotlin REQUIRED_METHODS missing APK-used contract method %s: %#v", method, required)
+			t.Fatalf("generated APK_REQUIRED_METHODS missing APK-used contract method %s: %#v", method, required)
 		}
 	}
 }
@@ -264,9 +262,9 @@ func TestDiagnosticSummaryFlagsPrivacyFailures(t *testing.T) {
 }
 
 func TestDiagnosticLoopbackDNSDetection(t *testing.T) {
-	if !diagnostics.LinesContainLoopbackDNS([]string{
+	if diagnostics.FirstLoopbackDNSLine([]string{
 		"LinkProperties{DnsAddresses: [/127.0.0.1,/8.8.8.8]}",
-	}) {
+	}) == "" {
 		t.Fatalf("expected IPv4 loopback DNS to be detected")
 	}
 	if got := diagnostics.FirstLoopbackDNSLine([]string{
@@ -274,15 +272,15 @@ func TestDiagnosticLoopbackDNSDetection(t *testing.T) {
 	}); !strings.Contains(got, "127.0.0.1") {
 		t.Fatalf("expected first loopback DNS line, got %q", got)
 	}
-	if !diagnostics.LinesContainLoopbackDNS([]string{
+	if diagnostics.FirstLoopbackDNSLine([]string{
 		"mDnses: [ /::1 ]",
-	}) {
+	}) == "" {
 		t.Fatalf("expected IPv6 loopback DNS to be detected")
 	}
-	if diagnostics.LinesContainLoopbackDNS([]string{
+	if diagnostics.FirstLoopbackDNSLine([]string{
 		"LinkProperties{DnsAddresses: [/1.1.1.1,/8.8.8.8]}",
 		"localhost proxy port is not a DNS line",
-	}) {
+	}) != "" {
 		t.Fatalf("non-loopback DNS should stay clean")
 	}
 }
@@ -310,8 +308,12 @@ func TestDiagnosticLocalhostProxyPortsUseConfiguredPorts(t *testing.T) {
 	cfg.Proxy.APIPort = 19090
 	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":19080,"httpPort":19081}`)
 
-	if !diagnostics.LocalhostProxyPortsClear(cfg) {
-		t.Fatalf("unused configured ports should be clear")
+	privacy := diagnostics.Privacy(cfg, 1, func(string, ...string) (string, error) {
+		return "", nil
+	})
+	checks, _ := privacy["checks"].(map[string]interface{})
+	if checks["localhost_proxy_ports_clear"] != true {
+		t.Fatalf("unused configured ports should be clear, got %#v", checks)
 	}
 }
 
@@ -406,8 +408,7 @@ func TestDiagnosticPortStatusesIncludeRoles(t *testing.T) {
 	cfg.Proxy.APIPort = 9090
 	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":10808,"httpPort":10809}`)
 
-	roles := diagnostics.LocalPortRoles(cfg)
-
+	statuses := diagnostics.PortStatuses(cfg)
 	for port, role := range map[int]string{
 		10853: "tproxy",
 		10856: "dns",
@@ -415,8 +416,15 @@ func TestDiagnosticPortStatusesIncludeRoles(t *testing.T) {
 		10808: "socks_helper",
 		10809: "http_helper",
 	} {
-		if !slices.Contains(roles[port], role) {
-			t.Fatalf("expected %s role for port %d, got %#v", role, port, roles)
+		found := false
+		for _, status := range statuses {
+			if status.Port == port && slices.Contains(strings.Split(status.Role, ","), role) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected %s role for port %d, got %#v", role, port, statuses)
 		}
 	}
 }
@@ -481,10 +489,12 @@ func TestDiagnosticSummaryFlagsPackageResolutionAndPortWarnings(t *testing.T) {
 func TestDiagnosticPortRolesDoNotExpectDisabledLocalHelpers(t *testing.T) {
 	cfg := config.DefaultConfig()
 
-	roles := diagnostics.LocalPortRoles(cfg)
+	statuses := diagnostics.PortStatuses(cfg)
 	for _, port := range []int{10808, 10809, 9090} {
-		if len(roles[port]) != 0 {
-			t.Fatalf("disabled localhost helper/API port %d must not have diagnostics report roles: %#v", port, roles)
+		for _, status := range statuses {
+			if status.Port == port {
+				t.Fatalf("disabled localhost helper/API port %d must not have diagnostics report roles: %#v", port, statuses)
+			}
 		}
 	}
 }

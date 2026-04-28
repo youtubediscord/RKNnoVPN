@@ -38,7 +38,7 @@ func DecodeProfileApplyParams(params *json.RawMessage) (ProfileApplyRequest, err
 		Profile *profiledoc.Document `json:"profile"`
 		Reload  *bool                `json:"reload"`
 	}
-	if HasJSONField(*params, "profile") {
+	if hasJSONField(*params, "profile") {
 		decoder := json.NewDecoder(bytes.NewReader(*params))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&p); err != nil {
@@ -133,7 +133,7 @@ func DecodeSubscriptionURLParams(params *json.RawMessage) (SubscriptionURLReques
 	return result, nil
 }
 
-func HasJSONField(data []byte, field string) bool {
+func hasJSONField(data []byte, field string) bool {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return false

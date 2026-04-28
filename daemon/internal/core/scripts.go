@@ -138,8 +138,8 @@ type PackageUIDSourceStatus struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// PackageUIDResolution is the structured form behind the legacy
-// space-separated UID resolver contract.
+// PackageUIDResolution is the structured package -> UID resolver result used
+// by runtime env rendering and diagnostics.
 type PackageUIDResolution struct {
 	Source             string                   `json:"source,omitempty"`
 	UIDs               []string                 `json:"uids,omitempty"`
@@ -191,37 +191,6 @@ func ExecScript(scriptPath string, command string, env map[string]string) error 
 	return nil
 }
 
-// ExecIptables is a convenience wrapper that runs a single iptables command
-// with the -w (wait-for-lock) flag so concurrent callers do not race.
-//
-//	ExecIptables("-t", "mangle", "-C", "PREROUTING", "-j", "RKNNOVPN_PRE")
-//
-// is equivalent to:
-//
-//	iptables -w 100 -t mangle -C PREROUTING -j RKNNOVPN_PRE
-func ExecIptables(args ...string) error {
-	fullArgs := append([]string{"-w", "100"}, args...)
-	cmd := exec.Command("iptables", fullArgs...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("iptables %s: %w\noutput: %s",
-			strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-// ExecIp6tables is the IPv6 counterpart of ExecIptables.
-func ExecIp6tables(args ...string) error {
-	fullArgs := append([]string{"-w", "100"}, args...)
-	cmd := exec.Command("ip6tables", fullArgs...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("ip6tables %s: %w\noutput: %s",
-			strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
 // WaitForPort blocks until a TCP connection to host:port succeeds or the
 // timeout elapses. It polls every 250 ms.
 func WaitForPort(host string, port int, timeout time.Duration) error {
@@ -246,27 +215,6 @@ func ExecCommand(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
-}
-
-// ResolvePackageUIDs reads /data/system/packages.list and resolves
-// package names to Android UIDs. Returns space-separated UID string.
-//
-// packages.list format: package_name uid flags data_dir seinfo gids
-// For multi-user devices, UIDs for additional profiles are computed as
-// user_id * 100000 + app_id (where app_id = uid % 100000).
-func ResolvePackageUIDs(packages []string) string {
-	return ResolvePackageUIDsDetailed(packages).UIDString
-}
-
-// ResolveAlwaysDirectUIDs resolves user-configured and built-in packages that
-// must bypass RKNnoVPN before TPROXY/DNS interception.
-func ResolveAlwaysDirectUIDs(packages []string) string {
-	return ResolveAlwaysDirectUIDsDetailed(packages).UIDString
-}
-
-// BuildBypassUIDs returns the complete UID bypass list used by iptables/DNS.
-func BuildBypassUIDs(alwaysDirectPackages []string) string {
-	return joinUniqueFields(networkStackUID, ResolveAlwaysDirectUIDs(alwaysDirectPackages))
 }
 
 // ResolvePackageUIDsDetailed resolves explicitly selected packages and keeps
@@ -322,12 +270,13 @@ type AppRoutingEnv struct {
 // proxy, direct and hard-bypass traffic.
 func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []string) AppRoutingEnv {
 	appMode := MapAppMode(mode)
+	alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailed(alwaysDirectPackages).UIDString
 	env := AppRoutingEnv{
 		AppMode:    appMode,
-		BypassUIDs: BuildBypassUIDs(alwaysDirectPackages),
+		BypassUIDs: joinUniqueFields(networkStackUID, alwaysDirectUIDs),
 	}
 
-	selectedUIDs := ResolvePackageUIDs(packages)
+	selectedUIDs := ResolvePackageUIDsDetailed(packages).UIDString
 	switch appMode {
 	case "whitelist":
 		env.ProxyUIDs = selectedUIDs
@@ -354,9 +303,10 @@ func BuildAppRoutingEnv(mode string, packages []string, alwaysDirectPackages []s
 // should be intercepted even if the persisted split-tunnel app mode is stale.
 func BuildRuntimeAppRoutingEnv(appMode string, packages []string, alwaysDirectPackages []string, routingMode string) AppRoutingEnv {
 	if strings.EqualFold(strings.TrimSpace(routingMode), "direct") {
+		alwaysDirectUIDs := ResolveAlwaysDirectUIDsDetailed(alwaysDirectPackages).UIDString
 		return AppRoutingEnv{
 			AppMode:    "off",
-			BypassUIDs: BuildBypassUIDs(alwaysDirectPackages),
+			BypassUIDs: joinUniqueFields(networkStackUID, alwaysDirectUIDs),
 			DNSScope:   "off",
 			DNSMode:    "off",
 		}

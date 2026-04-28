@@ -169,8 +169,7 @@ func (r *RescueManager) Rollback() error {
 		r.logger.Printf("rollback: rescue cleanup script failed: %v", err)
 	}
 
-	// 3. Explicitly flush RKNNOVPN chains as a final safety net.
-	r.flushPrivstackChains()
+	// 3. End the daemon-owned reset window after the canonical cleanup script.
 	_ = os.Remove(filepath.Join(r.dataDir, "run", "reset.lock"))
 
 	r.core.SetState(core.StateStopped)
@@ -342,41 +341,4 @@ func (r *RescueManager) scriptEnv() map[string]string {
 		"SHARING_MODE":      r.cfg.SharingModeEnv(),
 		"SHARING_IFACES":    r.cfg.SharingInterfacesEnv(),
 	}
-}
-
-// flushPrivstackChains removes all RKNNOVPN-prefixed chains from
-// iptables as a safety net during rollback.
-func (r *RescueManager) flushPrivstackChains() {
-	mangleChains := []string{
-		"RKNNOVPN_PRE",
-		"RKNNOVPN_OUT",
-		"RKNNOVPN_APP",
-		"RKNNOVPN_BYPASS",
-		"RKNNOVPN_DIVERT",
-	}
-	natChains4 := []string{"RKNNOVPN_DNS", "RKNNOVPN_DNS_NAT"}
-	natChains6 := []string{"RKNNOVPN_DNS", "RKNNOVPN_DNS_NAT6"}
-
-	for _, chain := range mangleChains {
-		flushChain(core.ExecIptables, "mangle", chain)
-		flushChain(core.ExecIp6tables, "mangle", chain)
-	}
-	for _, chain := range natChains4 {
-		flushChain(core.ExecIptables, "nat", chain)
-	}
-	for _, chain := range natChains6 {
-		flushChain(core.ExecIp6tables, "nat", chain)
-	}
-}
-
-func flushChain(execFn func(...string) error, table string, chain string) {
-	for _, parent := range []string{"PREROUTING", "OUTPUT", "INPUT", "FORWARD", "POSTROUTING"} {
-		for {
-			if err := execFn("-t", table, "-D", parent, "-j", chain); err != nil {
-				break
-			}
-		}
-	}
-	_ = execFn("-t", table, "-F", chain)
-	_ = execFn("-t", table, "-X", chain)
 }

@@ -16,7 +16,7 @@ if rg -n 'rm -f .*reset\.lock|reset\.lock.*rm -f|RESET_LOCK.*rm -f' module/post-
 fi
 rm -f /tmp/reset-lock-forbidden.$$
 
-if rg -n 'rm -f .*run/(active|privd\.pid|singbox\.pid|daemon\.sock)|run/(active|privd\.pid|singbox\.pid|daemon\.sock).*rm -f' module/post-fs-data.sh >/tmp/runtime-marker-forbidden.$$ 2>/dev/null; then
+if rg -n 'rm -f .*run/(active|daemon\.pid|singbox\.pid|daemon\.sock)|run/(active|daemon\.pid|singbox\.pid|daemon\.sock).*rm -f' module/post-fs-data.sh >/tmp/runtime-marker-forbidden.$$ 2>/dev/null; then
   cat /tmp/runtime-marker-forbidden.$$ >&2
   rm -f /tmp/runtime-marker-forbidden.$$
   fail "post-fs-data.sh must leave runtime markers for service.sh boot cleanup"
@@ -67,7 +67,7 @@ run_rescue() {
   local mode="$1"
   local data="$tmp/data-$mode"
   mkdir -p "$data/bin" "$data/run" "$data/config" "$data/logs"
-  PATH="$fakebin:$PATH" PRIVSTACK_DIR="$data" sh module/scripts/rescue_reset.sh "$mode" >/dev/null
+  PATH="$fakebin:$PATH" RKNNOVPN_DIR="$data" sh module/scripts/rescue_reset.sh "$mode" >/dev/null
   printf '%s\n' "$data"
 }
 

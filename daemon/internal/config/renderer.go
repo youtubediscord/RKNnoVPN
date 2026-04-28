@@ -320,7 +320,7 @@ func buildOutbounds(cfg *Config, profile *NodeProfile) ([]map[string]interface{}
 		})
 		selectorOutbounds := append([]string{"auto"}, nodeTags...)
 		for _, groupPlan := range groupPlans {
-			selectorOutbounds = append(selectorOutbounds, groupPlan.selectorTag())
+			selectorOutbounds = append(selectorOutbounds, "group-"+groupPlan.base)
 		}
 		selectorDefault := "auto"
 		if activeTag := activeProfileNodeTag(cfg, nodeProfiles); activeTag != "" {
@@ -349,14 +349,6 @@ type groupOutboundPlan struct {
 	name string
 	base string
 	tags []string
-}
-
-func (plan groupOutboundPlan) selectorTag() string {
-	return "group-" + plan.base
-}
-
-func (plan groupOutboundPlan) autoTag() string {
-	return "group-" + plan.base + "-auto"
 }
 
 func buildGroupOutboundPlans(profiles []*NodeProfile) []groupOutboundPlan {
@@ -403,24 +395,26 @@ func buildGroupOutbounds(cfg *Config, plans []groupOutboundPlan) []map[string]in
 		if len(plan.tags) == 0 {
 			continue
 		}
+		selectorTag := "group-" + plan.base
+		autoTag := selectorTag + "-auto"
 		selectorOutbounds := append([]string{}, plan.tags...)
 		selectorDefault := plan.tags[0]
 		if len(plan.tags) > 1 {
 			outbounds = append(outbounds, map[string]interface{}{
 				"type":                        "urltest",
-				"tag":                         plan.autoTag(),
+				"tag":                         autoTag,
 				"outbounds":                   plan.tags,
 				"url":                         testURL,
 				"interval":                    "3m",
 				"tolerance":                   50,
 				"interrupt_exist_connections": true,
 			})
-			selectorOutbounds = append([]string{plan.autoTag()}, plan.tags...)
-			selectorDefault = plan.autoTag()
+			selectorOutbounds = append([]string{autoTag}, plan.tags...)
+			selectorDefault = autoTag
 		}
 		outbounds = append(outbounds, map[string]interface{}{
 			"type":                        "selector",
-			"tag":                         plan.selectorTag(),
+			"tag":                         selectorTag,
 			"outbounds":                   selectorOutbounds,
 			"default":                     selectorDefault,
 			"interrupt_exist_connections": true,
@@ -797,7 +791,7 @@ func renderableProfileNodes(cfg *Config, profiles []*NodeProfile) ([]*NodeProfil
 	for _, profile := range profiles {
 		if _, err := buildProxyOutbound(profile); err != nil {
 			if activeID != "" && profile.ID == activeID {
-				return nil, fmt.Errorf("renderer: active node %q is invalid: %w", nodeDisplayName(profile), err)
+				return nil, fmt.Errorf("renderer: active node %q is invalid: %w", firstNonEmpty(profile.Name, profile.ID, profile.Address, profile.Tag), err)
 			}
 			skipped++
 			continue
@@ -808,10 +802,6 @@ func renderableProfileNodes(cfg *Config, profiles []*NodeProfile) ([]*NodeProfil
 		return nil, fmt.Errorf("renderer: no usable profile nodes; skipped %d invalid node(s)", skipped)
 	}
 	return renderable, nil
-}
-
-func nodeDisplayName(profile *NodeProfile) string {
-	return firstNonEmpty(profile.Name, profile.ID, profile.Address, profile.Tag)
 }
 
 func applyProfileLinkFallback(profile *NodeProfile, link string) {
@@ -1501,7 +1491,7 @@ func buildAppGroupRouteRules(cfg *Config) []map[string]interface{} {
 
 	groupOutbounds := make(map[string]string, len(plans))
 	for _, plan := range plans {
-		groupOutbounds[plan.name] = plan.selectorTag()
+		groupOutbounds[plan.name] = "group-" + plan.base
 	}
 
 	packagesByOutbound := map[string][]string{}

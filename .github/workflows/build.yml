@@ -31,6 +31,9 @@ jobs:
       - name: Check APK privacy surface
         run: bash .github/scripts/check_apk_privacy.sh
 
+      - name: Check IPC contract generated sources
+        run: python3 .github/scripts/check_ipc_contract_codegen.py
+
       - name: Check reset.lock script contract
         run: bash .github/scripts/check_reset_lock_contract.sh
 
@@ -90,7 +93,7 @@ jobs:
           echo "Resolved sing-box $VERSION"
 
   # ============================================================
-  # Job 2: Build Go daemon (privd + privctl) for Android ABIs
+  # Job 2: Build Go daemon (daemon + daemonctl) for Android ABIs
   # ============================================================
   build-daemon:
     name: Build Daemon (${{ matrix.arch }})
@@ -114,7 +117,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Build privd
+      - name: Build daemon
         working-directory: daemon
         run: |
           if [[ "${GITHUB_REF_NAME}" == v* ]]; then
@@ -125,9 +128,9 @@ jobs:
           mkdir -p "../out/${{ matrix.arch }}"
           CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
             -ldflags="-s -w -X main.Version=${VERSION}" \
-            -o "../out/${{ matrix.arch }}/privd" ./cmd/privd
+            -o "../out/${{ matrix.arch }}/daemon" ./cmd/daemon
 
-      - name: Build privctl
+      - name: Build daemonctl
         working-directory: daemon
         run: |
           if [[ "${GITHUB_REF_NAME}" == v* ]]; then
@@ -138,7 +141,7 @@ jobs:
           mkdir -p "../out/${{ matrix.arch }}"
           CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} go build \
             -ldflags="-s -w -X main.Version=${VERSION}" \
-            -o "../out/${{ matrix.arch }}/privctl" ./cmd/privctl
+            -o "../out/${{ matrix.arch }}/daemonctl" ./cmd/daemonctl
 
       - name: Upload daemon artifacts
         uses: actions/upload-artifact@v4
@@ -294,16 +297,16 @@ jobs:
       - name: Build ZIP
         run: |
           cd module
-          zip -r ../privstack-module.zip . \
+          zip -r ../rknnovpn-module.zip . \
             -x "*.git*" "*.DS_Store"
           cd ..
-          sha256sum privstack-module.zip
+          sha256sum rknnovpn-module.zip
 
       - name: Upload module ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: privstack-module
-          path: privstack-module.zip
+          name: rknnovpn-module
+          path: rknnovpn-module.zip
           retention-days: 5
 
   # ============================================================
@@ -361,14 +364,14 @@ jobs:
             exit 1
           fi
           echo "APK found: $APK"
-          cp "$APK" ../privstack-panel.apk
-          sha256sum ../privstack-panel.apk
+          cp "$APK" ../rknnovpn-panel.apk
+          sha256sum ../rknnovpn-panel.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: privstack-apk
-          path: privstack-panel.apk
+          name: rknnovpn-apk
+          path: rknnovpn-panel.apk
           retention-days: 5
 
   # ============================================================
@@ -398,20 +401,20 @@ jobs:
       - name: Download Magisk module
         uses: actions/download-artifact@v4
         with:
-          name: privstack-module
+          name: rknnovpn-module
           path: release/
 
       - name: Download APK
         uses: actions/download-artifact@v4
         with:
-          name: privstack-apk
+          name: rknnovpn-apk
           path: release/
 
       - name: Rename with version
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          mv release/privstack-module.zip "release/privstack-${VERSION}-module.zip"
-          mv release/privstack-panel.apk "release/privstack-${VERSION}-panel.apk"
+          mv release/rknnovpn-module.zip "release/rknnovpn-${VERSION}-module.zip"
+          mv release/rknnovpn-panel.apk "release/rknnovpn-${VERSION}-panel.apk"
           # Generate checksums
           cd release && sha256sum * > SHA256SUMS.txt && cd ..
 
@@ -433,7 +436,7 @@ jobs:
           {
             "version": "${VERSION}",
             "versionCode": ${VERSION_CODE},
-            "zipUrl": "https://github.com/youtubediscord/RKNnoVPN/releases/download/${VERSION}/privstack-${VERSION}-module.zip",
+            "zipUrl": "https://github.com/youtubediscord/RKNnoVPN/releases/download/${VERSION}/rknnovpn-${VERSION}-module.zip",
             "changelog": "https://github.com/youtubediscord/RKNnoVPN/releases/tag/${VERSION}"
           }
           ENDJSON
@@ -450,37 +453,37 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: "PrivStack ${{ steps.version.outputs.version }}"
+          name: "RKNnoVPN ${{ steps.version.outputs.version }}"
           draft: false
           prerelease: ${{ steps.version.outputs.stable != 'true' }}
           generate_release_notes: true
           body: |
-            ## PrivStack ${{ steps.version.outputs.version }}
+            ## RKNnoVPN ${{ steps.version.outputs.version }}
 
             ### Downloads
 
             | File | Description |
             |------|-------------|
-            | `privstack-${{ steps.version.outputs.version }}-module.zip` | Magisk/KernelSU/APatch module — flash via manager |
-            | `privstack-${{ steps.version.outputs.version }}-panel.apk` | Controller APK — install on same device |
+            | `rknnovpn-${{ steps.version.outputs.version }}-module.zip` | Magisk/KernelSU/APatch module - flash via manager |
+            | `rknnovpn-${{ steps.version.outputs.version }}-panel.apk` | Controller APK - install on same device |
 
             ### Quick Start
 
             1. Flash the module ZIP via Magisk Manager / KSU Manager / APatch
             2. Reboot
             3. Install the APK
-            4. Open PrivStack Panel → add a server (paste VLESS/Trojan/SS link)
+            4. Open RKNnoVPN Panel and add a server (paste VLESS/Trojan/SS link)
             5. Select apps to proxy in the Apps tab
             6. Tap Connect
 
             ### What's inside
 
-            - **No VPN, no TUN, no icon** — uses tproxy+iptables at kernel level
-            - **Whitelist mode** — only selected apps go through proxy
-            - **Full IPv4+IPv6** — mirrored iptables/ip6tables rules
-            - **sing-box v${{ needs.build-module.outputs.singbox_version }}** — VLESS, Trojan, VMess, SS, SOCKS, Hysteria2, TUIC
-            - **Auto-recovery** — health monitor + rescue on failure
+            - **No VPN, no TUN, no icon** - uses tproxy+iptables at kernel level
+            - **Whitelist mode** - only selected apps go through proxy
+            - **Full IPv4+IPv6** - mirrored iptables/ip6tables rules
+            - **sing-box v${{ needs.build-module.outputs.singbox_version }}** - VLESS, Trojan, VMess, SS, SOCKS, Hysteria2, TUIC
+            - **Auto-recovery** - health monitor + rescue on failure
           files: |
-            release/privstack-${{ steps.version.outputs.version }}-module.zip
-            release/privstack-${{ steps.version.outputs.version }}-panel.apk
+            release/rknnovpn-${{ steps.version.outputs.version }}-module.zip
+            release/rknnovpn-${{ steps.version.outputs.version }}-panel.apk
             release/SHA256SUMS.txt

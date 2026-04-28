@@ -33,6 +33,24 @@ func TestMutatingContractsExposeOperationSurface(t *testing.T) {
 	}
 }
 
+func TestAPKRequiredMethodsAreDeclaredContractMethods(t *testing.T) {
+	methods := SupportedMethods()
+	required := APKRequiredMethods()
+	if len(required) == 0 {
+		t.Fatal("apk required methods must be declared in the contract manifest")
+	}
+	for _, method := range required {
+		if !slices.Contains(methods, method) {
+			t.Fatalf("apk required method %s is not declared in contract methods: %#v", method, methods)
+		}
+	}
+	for _, legacy := range []string{"config.import", "network.reset", "subscription-fetch", "status", "start", "stop"} {
+		if slices.Contains(required, legacy) {
+			t.Fatalf("apk required methods must not include legacy alias %s: %#v", legacy, required)
+		}
+	}
+}
+
 func TestNewContractSortsCapabilities(t *testing.T) {
 	contract := NewContract(5, 5, []string{"z.cap", "a.cap"})
 	if contract.Version != 1 || contract.ControlProtocolVersion != 5 || contract.SchemaVersion != 5 {
@@ -40,5 +58,8 @@ func TestNewContractSortsCapabilities(t *testing.T) {
 	}
 	if got := contract.Capabilities; len(got) != 2 || got[0] != "a.cap" || got[1] != "z.cap" {
 		t.Fatalf("capabilities must be sorted in contract output: %#v", got)
+	}
+	if got := contract.APKRequiredMethods; !slices.Contains(got, "backend.status") || !slices.Contains(got, "profile.get") {
+		t.Fatalf("contract output must expose apk required methods: %#v", got)
 	}
 }

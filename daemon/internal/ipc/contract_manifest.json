@@ -31,6 +31,30 @@
     "runtime.v2",
     "update.install.v1"
   ],
+  "apkRequiredMethods": [
+    "backend.applyDesiredState",
+    "backend.reset",
+    "backend.restart",
+    "backend.start",
+    "backend.status",
+    "backend.stop",
+    "diagnostics.health",
+    "diagnostics.report",
+    "diagnostics.testNodes",
+    "ipc.contract",
+    "logs",
+    "profile.apply",
+    "profile.get",
+    "profile.importNodes",
+    "profile.setActiveNode",
+    "self-check",
+    "subscription.preview",
+    "subscription.refresh",
+    "update-check",
+    "update-download",
+    "update-install",
+    "version"
+  ],
   "methods": [
     {
       "method": "app.list",

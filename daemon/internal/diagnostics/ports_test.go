@@ -15,7 +15,7 @@ func TestEffectiveLocalPortsDeduplicatesConfiguredPorts(t *testing.T) {
 	cfg.Proxy.APIPort = 11001
 	cfg.Profile.Inbounds = json.RawMessage(`{"socksPort":11002,"httpPort":11002}`)
 
-	got := EffectiveLocalPorts(cfg)
+	got := effectiveLocalPorts(cfg)
 	want := []int{11000, 11001, 11002}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected port count: got %#v want %#v", got, want)
@@ -52,7 +52,7 @@ func TestLocalhostProxyPortsClearChecksConfiguredPorts(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Proxy.APIPort = port
 
-	if LocalhostProxyPortsClear(cfg) {
+	if localhostProxyPortsClear(cfg) {
 		t.Fatalf("configured listening localhost port %d should not be clear", port)
 	}
 }

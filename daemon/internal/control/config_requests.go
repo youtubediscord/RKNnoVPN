@@ -39,7 +39,7 @@ func DecodeConfigImportParams(params *json.RawMessage, currentProfile config.Pro
 		return nil, ConfigImportError{Kind: ConfigImportInvalidParams, Err: fmt.Errorf("params required: non-empty full config JSON object")}
 	}
 	for key := range raw {
-		if !IsFullConfigImportKey(key) {
+		if !isFullConfigImportKey(key) {
 			return nil, ConfigImportError{
 				Kind: ConfigImportInvalidParams,
 				Err:  fmt.Errorf("unknown config import field %q; config-import expects a full daemon config object", key),
@@ -61,7 +61,7 @@ func DecodeConfigImportParams(params *json.RawMessage, currentProfile config.Pro
 	return newCfg, nil
 }
 
-func IsFullConfigImportKey(key string) bool {
+func isFullConfigImportKey(key string) bool {
 	switch key {
 	case "schema_version",
 		"proxy",

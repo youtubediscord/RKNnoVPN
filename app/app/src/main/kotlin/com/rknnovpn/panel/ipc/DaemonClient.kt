@@ -52,30 +52,7 @@ class DaemonClient @Inject constructor(
     companion object {
         const val MIN_CONTROL_PROTOCOL_VERSION = 5
         const val MIN_SCHEMA_VERSION = 5
-        val REQUIRED_METHODS: Set<String> = setOf(
-            "backend.status",
-            "backend.start",
-            "backend.stop",
-            "backend.restart",
-            "backend.reset",
-            "backend.applyDesiredState",
-            "diagnostics.health",
-            "diagnostics.testNodes",
-            "profile.get",
-            "profile.apply",
-            "profile.importNodes",
-            "profile.setActiveNode",
-            "subscription.preview",
-            "subscription.refresh",
-            "diagnostics.report",
-            "self-check",
-            "logs",
-            "update-check",
-            "update-download",
-            "update-install",
-            "ipc.contract",
-            "version",
-        )
+        val REQUIRED_METHODS: Set<String> = GeneratedDaemonContract.APK_REQUIRED_METHODS
     }
 
     private val json = Json {
@@ -753,6 +730,7 @@ data class IpcContractInfo(
     val controlProtocolVersion: Int = 0,
     val schemaVersion: Int = 0,
     val capabilities: List<String> = emptyList(),
+    val apkRequiredMethods: List<String> = emptyList(),
     val methods: List<IpcMethodContractInfo> = emptyList(),
 ) {
     fun missingRequiredMethods(required: Collection<String>): List<String> {

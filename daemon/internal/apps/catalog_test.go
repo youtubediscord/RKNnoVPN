@@ -52,7 +52,7 @@ func TestResolveUIDUsesExactMatchBeforeAndroidUserFallback(t *testing.T) {
 }
 
 func TestPrettyPackageLabelAndClassification(t *testing.T) {
-	if got := PrettyPackageLabel("com.example.my-app_name"); got != "My app name" {
+	if got := prettyPackageLabel("com.example.my-app_name"); got != "My app name" {
 		t.Fatalf("unexpected label: %q", got)
 	}
 	cases := map[string]string{
@@ -64,8 +64,8 @@ func TestPrettyPackageLabelAndClassification(t *testing.T) {
 		"com.example.unclassified": "OTHER",
 	}
 	for packageName, want := range cases {
-		if got := Classify(packageName, false); got != want {
-			t.Fatalf("Classify(%q) = %q, want %q", packageName, got, want)
+		if got := classify(packageName, false); got != want {
+			t.Fatalf("classification for %q = %q, want %q", packageName, got, want)
 		}
 	}
 }

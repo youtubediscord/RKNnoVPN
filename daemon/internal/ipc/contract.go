@@ -39,6 +39,7 @@ type Contract struct {
 	ControlProtocolVersion int              `json:"controlProtocolVersion"`
 	SchemaVersion          int              `json:"schemaVersion"`
 	Capabilities           []string         `json:"capabilities"`
+	APKRequiredMethods     []string         `json:"apkRequiredMethods,omitempty"`
 	Methods                []MethodContract `json:"methods"`
 }
 
@@ -58,6 +59,12 @@ func SupportedCapabilities() []string {
 	return capabilities
 }
 
+func APKRequiredMethods() []string {
+	methods := append([]string(nil), contractManifest().APKRequiredMethods...)
+	sort.Strings(methods)
+	return methods
+}
+
 func MethodContracts() []MethodContract {
 	return cloneMethodContracts(contractManifest().Methods)
 }
@@ -74,6 +81,7 @@ func NewContract(controlProtocolVersion int, schemaVersion int, capabilities []s
 		ControlProtocolVersion: controlProtocolVersion,
 		SchemaVersion:          schemaVersion,
 		Capabilities:           copiedCapabilities,
+		APKRequiredMethods:     APKRequiredMethods(),
 		Methods:                MethodContracts(),
 	}
 }

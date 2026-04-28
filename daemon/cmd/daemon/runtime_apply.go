@@ -156,24 +156,6 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 	return nil
 }
 
-func (d *daemon) resetNetworkState(cfg *config.Config) []string {
-	report := netstack.New(d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript).Cleanup()
-	errors := append([]string(nil), report.Errors...)
-
-	_, _ = core.ExecCommand("killall", "-TERM", "sing-box")
-	_, _ = core.ExecCommand("killall", "-KILL", "sing-box")
-	d.rescueMgr.Reset()
-	d.coreMgr.ResetState()
-	d.healthMon.Clear()
-	d.resetRuntimeMetrics()
-	return errors
-}
-
-func (d *daemon) reapplyRuntimeRules(cfg *config.Config) error {
-	_, err := d.reapplyRuntimeRulesReport(cfg)
-	return err
-}
-
 func (d *daemon) reapplyRuntimeRulesReport(cfg *config.Config) (netstack.Report, error) {
 	if err := core.VerifyChainedProxyOwnerPackages(cfg); err != nil {
 		report := netstack.Report{

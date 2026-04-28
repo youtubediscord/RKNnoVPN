@@ -31,8 +31,8 @@ func TestSelfTestAppsAreBuiltInAlwaysDirect(t *testing.T) {
 }
 
 func TestRuntimeErrorCarriesTypedStageDetails(t *testing.T) {
-	report := newRuntimeStageReport("start")
-	report.addStage("netstack-apply", "failed", "RULES_NOT_APPLIED", "iptables denied", true)
+	report := NewRuntimeStageReport("start")
+	report.AddStage("netstack-apply", "failed", "RULES_NOT_APPLIED", "iptables denied", true)
 	err := runtimeErrorWithReport("iptables start", "RULES_NOT_APPLIED", errors.New("iptables denied"), true, report)
 	runtimeErr, ok := err.(*RuntimeError)
 	if !ok {
@@ -60,9 +60,9 @@ func TestRuntimeErrorCarriesTypedStageDetails(t *testing.T) {
 }
 
 func TestRuntimeStageReportRecordsFailureAndFinish(t *testing.T) {
-	report := newRuntimeStageReport("hot-swap")
-	report.addStage("render-config", "ok", "", "/tmp/singbox.json", false)
-	report.addStage("wait-tproxy", "failed", "TPROXY_PORT_DOWN", "timeout", true)
+	report := NewRuntimeStageReport("hot-swap")
+	report.AddStage("render-config", "ok", "", "/tmp/singbox.json", false)
+	report.AddStage("wait-tproxy", "failed", "TPROXY_PORT_DOWN", "timeout", true)
 
 	if report.Status != "failed" {
 		t.Fatalf("expected failed report, got %#v", report)
@@ -77,9 +77,9 @@ func TestRuntimeStageReportRecordsFailureAndFinish(t *testing.T) {
 		t.Fatalf("failed report should have finished timestamp: %#v", report)
 	}
 
-	report = newRuntimeStageReport("hot-swap")
-	report.addStage("render-config", "ok", "", "", false)
-	report.finishOK()
+	report = NewRuntimeStageReport("hot-swap")
+	report.AddStage("render-config", "ok", "", "", false)
+	report.FinishOK()
 	if report.Status != "ok" || report.FinishedAt.IsZero() {
 		t.Fatalf("expected ok finished report, got %#v", report)
 	}
@@ -87,8 +87,8 @@ func TestRuntimeStageReportRecordsFailureAndFinish(t *testing.T) {
 
 func TestSuccessfulStartReportUpdatesRuntimeReport(t *testing.T) {
 	manager := NewCoreManager(config.DefaultConfig(), t.TempDir(), nil)
-	report := newRuntimeStageReport("start")
-	report.addStage("commit-state", "ok", "", "vless://example.com", false)
+	report := NewRuntimeStageReport("start")
+	report.AddStage("commit-state", "ok", "", "vless://example.com", false)
 
 	manager.finishStartReport(report)
 
