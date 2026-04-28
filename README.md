@@ -4,6 +4,8 @@
 
 Проект состоит из Magisk/KernelSU/APatch-модуля и Android-приложения-контроллера. Трафик выбранных приложений перехватывается на уровне ядра через `iptables TPROXY` и отправляется в `sing-box`.
 
+Устойчивый к методам обнаружения типа [YourVPNDead](https://github.com/loop-uh/yourvpndead).
+
 ## Что это даёт
 
 - Нет Android VPN API: приложения не видят `TRANSPORT_VPN`.
