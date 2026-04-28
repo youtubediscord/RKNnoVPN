@@ -51,6 +51,10 @@ func (c *ReportController) AddWarning(warning string) {
 	c.report.Warnings = append(c.report.Warnings, warning)
 }
 
+func (c *ReportController) HasErrors() bool {
+	return len(c.report.Errors) > 0
+}
+
 func (c *ReportController) Finish() runtimev2.ResetReport {
 	if len(c.report.Errors) > 0 {
 		c.report.Status = "partial"

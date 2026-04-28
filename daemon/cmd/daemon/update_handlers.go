@@ -4,12 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/ipc"
-	"github.com/youtubediscord/RKNnoVPN/daemon/internal/modulecontract"
+	rootruntime "github.com/youtubediscord/RKNnoVPN/daemon/internal/runtime/root"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/updater"
 )
@@ -98,77 +97,35 @@ func (d *daemon) handleUpdateInstall(params *json.RawMessage) (interface{}, *ipc
 		d.coreMgr.GetState() == core.StateDegraded
 
 	status, err := d.runtimeV2.RunOperation(runtimev2.OperationUpdateInstall, runtimev2.PhaseStopping, func(generation int64) error {
-		installTracker := updater.NewInstallTracker(d.dataDir, generation, artifacts.ModulePath, artifacts.ApkPath)
-		if err := installTracker.Begin(); err != nil {
-			return fmt.Errorf("record update install state: %w", err)
-		}
-		markStep := func(name, status, code, detail string) {
-			d.runtimeV2.SetActiveOperationStep(generation, name, status, code, detail)
-			if err := installTracker.Step(name, status, code, detail); err != nil {
-				log.Printf("[updater] warning: record install step %s/%s: %v", name, status, err)
-			}
-		}
-		moduleUpdated := false
-		defer func() {
-			if moduleUpdated {
-				markStep("update-schedule-self-exit", "ok", "", "daemon restart scheduled")
-				go updater.ScheduleSelfExit(updater.SelfExitDelay)
-			}
-		}()
-		if artifacts.ApkExists {
-			markStep("update-install-apk", "running", "APK_INSTALLING", filepath.Base(artifacts.ApkPath))
-			if err := updater.InstallApkUpdate(artifacts.ApkPath); err != nil {
-				log.Printf("[updater] APK install failed: %v", err)
-				markStep("update-install-apk", "failed", "APK_INSTALL_FAILED", err.Error())
-				return fmt.Errorf("apk install failed: %w", err)
-			}
-			if err := installTracker.MarkAPKInstalled(); err != nil {
-				log.Printf("[updater] warning: record APK install success: %v", err)
-			}
-			markStep("update-install-apk", "ok", "", "")
-		}
-
-		if artifacts.ModuleExists {
-			markStep("update-stop-runtime", "running", "UPDATE_STOP_RUNTIME", "stopping runtime before module install")
-			if err := d.failIfResetInProgress(); err != nil {
-				markStep("update-stop-runtime", "failed", runtimeErrorCode(err, "RESET_IN_PROGRESS"), err.Error())
-				return err
-			}
-			d.stopSubsystems()
-			if err := d.coreMgr.Stop(); err != nil {
-				log.Printf("[updater] warning: failed to stop core: %v", err)
-			}
-			markStep("update-stop-runtime", "ok", "", "")
-		}
-
-		if artifacts.ModuleExists {
-			markStep("update-install-module", "running", "MODULE_INSTALLING", filepath.Base(artifacts.ModulePath))
-			moduleDir := modulecontract.NewPaths(d.dataDir).Dir()
-			if err := updater.InstallModuleUpdate(artifacts.ModulePath, d.dataDir, moduleDir); err != nil {
-				if wasRunning {
-					d.restoreCurrentRuntimeAfterFailedUpdate()
-				}
-				markStep("update-install-module", "failed", "MODULE_INSTALL_FAILED", err.Error())
-				return fmt.Errorf("module install failed: %w", err)
-			}
-			moduleUpdated = true
-			if err := installTracker.MarkModuleInstalled(); err != nil {
-				log.Printf("[updater] warning: record module install success: %v", err)
-			}
-			markStep("update-install-module", "ok", "", "")
-		}
-
-		markStep("update-cleanup-downloads", "running", "UPDATE_CLEANUP", artifacts.UpdateDir)
-		if err := os.RemoveAll(artifacts.UpdateDir); err != nil {
-			markStep("update-cleanup-downloads", "failed", "UPDATE_CLEANUP_FAILED", err.Error())
-			return fmt.Errorf("update cleanup failed: %w", err)
-		}
-		markStep("update-cleanup-downloads", "ok", "", "")
-		if err := installTracker.Complete(); err != nil {
-			log.Printf("[updater] warning: record completed update install state: %v", err)
-		}
-
-		return nil
+		return updater.RunInstallTransaction(updater.InstallTransaction{
+			DataDir:           d.dataDir,
+			Generation:        generation,
+			Artifacts:         artifacts,
+			WasRuntimeRunning: wasRunning,
+			Hooks: updater.InstallHooks{
+				SetOperationStep: func(name, status, code, detail string) {
+					d.runtimeV2.SetActiveOperationStep(generation, name, status, code, detail)
+				},
+				StopRuntimeForModuleInstall: func() error {
+					if err := d.failIfResetInProgress(); err != nil {
+						return err
+					}
+					d.stopSubsystems()
+					if err := d.coreMgr.Stop(); err != nil {
+						log.Printf("[updater] warning: failed to stop core: %v", err)
+					}
+					return nil
+				},
+				RestoreRuntimeAfterModuleFail: d.restoreCurrentRuntimeAfterFailedUpdate,
+				RuntimeErrorCode:              rootruntime.RuntimeErrorCode,
+				ScheduleSelfExit: func() {
+					go updater.ScheduleSelfExit(updater.SelfExitDelay)
+				},
+				Logf: func(format string, args ...interface{}) {
+					log.Printf("[updater] "+format, args...)
+				},
+			},
+		})
 	})
 	if err != nil {
 		return nil, d.rpcErrorFromRuntimeError(err)

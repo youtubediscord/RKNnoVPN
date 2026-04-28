@@ -95,7 +95,7 @@ func main() {
 
 	// ---- Data directories --------------------------------------------------
 
-	for _, sub := range []string{"run", "data", "log", "logs", "config/rendered", "backup"} {
+	for _, sub := range []string{"run", "data", "logs", "config/rendered", "backup"} {
 		if err := os.MkdirAll(filepath.Join(*dataDir, sub), 0750); err != nil {
 			log.Fatalf("mkdir %s: %v", sub, err)
 		}
@@ -160,7 +160,7 @@ func main() {
 	}
 	healthMon := health.NewHealthMonitor(coreMgr, healthInterval, healthThreshold, tproxyPort, dnsPort, mark, cfg.Health.URL, healthTimeout, healthLogger)
 	healthMon.SetConfig(healthInterval, healthThreshold, tproxyPort, dnsPort, mark, cfg.Health.URL, cfg.Health.DNSProbeDomains, cfg.Health.DNSIsHardReadiness, healthTimeout)
-	scriptEnv := buildScriptEnv(cfg, *dataDir)
+	scriptEnv := rootruntime.BuildScriptEnv(cfg, *dataDir)
 	var d *daemon
 	netWatcher := watcher.NewNetworkWatcher(*dataDir, scriptEnv, func() error {
 		if d == nil {

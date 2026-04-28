@@ -10,6 +10,7 @@ import com.rknnovpn.panel.model.RuntimeStageReport
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
@@ -38,7 +39,7 @@ class UserMessageFormatter @Inject constructor(
         is DaemonClientResult.DaemonError ->
             when (result.code) {
                 COMPATIBILITY_ERROR_CODE -> result.message
-                else -> if (result.configWasSaved()) {
+                else -> formatSubscriptionRejection(result) ?: if (result.configWasSaved()) {
                     get(R.string.error_config_saved_not_applied, result.message)
                 } else if (result.code == RUNTIME_BUSY_CODE) {
                     formatRuntimeBusy(result)
@@ -59,6 +60,27 @@ class UserMessageFormatter @Inject constructor(
             R.string.error_unexpected_with_reason,
         )
         is DaemonClientResult.Ok -> get(R.string.dns_ok)
+    }
+
+    private fun formatSubscriptionRejection(result: DaemonClientResult.DaemonError): String? {
+        val details = result.detailObject() ?: return null
+        val rejected = details["rejected"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+        if (rejected <= 0 && details["rejectedNodes"] == null) return null
+        val firstNode = runCatching {
+            details["rejectedNodes"]
+                ?.jsonArray
+                ?.firstOrNull()
+                ?.jsonObject
+        }.getOrNull()
+        val node = RejectedSubscriptionNode(
+            name = firstNode?.get("name")?.jsonPrimitive?.contentOrNull.orEmpty(),
+            server = firstNode?.get("server")?.jsonPrimitive?.contentOrNull.orEmpty(),
+            port = firstNode?.get("port")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0,
+        )
+        return formatRejectedSubscriptionOnly(
+            rejectedNodes = if (firstNode == null) emptyList() else listOf(node),
+            rejectedCount = rejected,
+        )
     }
 
     fun formatControlPlaneFailure(message: String?, @StringRes fallbackResId: Int): String {
@@ -139,7 +161,11 @@ class UserMessageFormatter @Inject constructor(
         if (rejectedNodes.isEmpty()) {
             get(R.string.subscription_rejected_only, rejectedCount, get(R.string.daemon_status_unknown_text))
         } else {
-            get(R.string.subscription_rejected_only, rejectedNodes.size, rejectedEndpointLabel(rejectedNodes.first()))
+            get(
+                R.string.subscription_rejected_only,
+                maxOf(rejectedCount, rejectedNodes.size),
+                rejectedEndpointLabel(rejectedNodes.first()),
+            )
         }
 
     private fun formatRejectedSubscriptionNodes(rejectedNodes: List<RejectedSubscriptionNode>): String {

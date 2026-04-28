@@ -1009,12 +1009,23 @@ func HostIsLocal(host string) bool {
 
 func IsDisallowedSubscriptionEndpoint(host string) bool {
 	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
-	if host == "" || host == "localhost" || host == "ip6-localhost" || strings.HasSuffix(host, ".localhost") {
+	host = strings.TrimSuffix(host, ".")
+	if host == "" || isLocalSubscriptionHostname(host) {
 		return true
 	}
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return false
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	addr = addr.Unmap()
+	if addr.Is4() {
+		ip = net.IP(addr.AsSlice()).To4()
+	} else {
+		ip = net.IP(addr.AsSlice())
 	}
 	if ip.IsUnspecified() ||
 		ip.IsLoopback() ||
@@ -1025,12 +1036,19 @@ func IsDisallowedSubscriptionEndpoint(host string) bool {
 		ip.IsMulticast() {
 		return true
 	}
-	addr, ok := netip.AddrFromSlice(ip)
-	if !ok {
+	return isReservedSubscriptionAddr(addr)
+}
+
+func isLocalSubscriptionHostname(host string) bool {
+	if host == "localhost" || host == "ip6-localhost" {
 		return true
 	}
-	addr = addr.Unmap()
-	return isReservedSubscriptionAddr(addr)
+	for _, suffix := range localSubscriptionHostSuffixes {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func isReservedSubscriptionAddr(addr netip.Addr) bool {
@@ -1040,6 +1058,14 @@ func isReservedSubscriptionAddr(addr netip.Addr) bool {
 		}
 	}
 	return false
+}
+
+var localSubscriptionHostSuffixes = []string{
+	".localhost",
+	".local",
+	".localdomain",
+	".lan",
+	".home.arpa",
 }
 
 var reservedSubscriptionPrefixes = mustParsePrefixes([]string{

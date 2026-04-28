@@ -72,7 +72,7 @@ func (h daemonResetHooks) ScriptEnv() map[string]string {
 	h.d.mu.Lock()
 	cfg := h.d.cfg
 	h.d.mu.Unlock()
-	return buildScriptEnv(cfg, h.d.dataDir)
+	return rootruntime.BuildScriptEnv(cfg, h.d.dataDir)
 }
 
 func (h daemonResetHooks) ExecRescueReset(scriptPath string, env map[string]string) error {
@@ -132,7 +132,7 @@ func (d *daemon) collectNetworkLeftovers(cfg *config.Config) []string {
 	if cfg == nil {
 		return []string{"config unavailable for cleanup verification"}
 	}
-	env := buildScriptEnv(cfg, d.dataDir)
+	env := rootruntime.BuildScriptEnv(cfg, d.dataDir)
 	report := netstack.New(d.dataDir, env, core.ExecScript).
 		WithExecCommand(core.ExecCommand).
 		VerifyCleanup()

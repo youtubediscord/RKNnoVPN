@@ -47,12 +47,3 @@ func RemoveStaleRuntimeFiles(paths Paths) ([]string, error) {
 	}
 	return removed, nil
 }
-
-func IsIgnorableResetScriptError(err error) bool {
-	if err == nil {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "script not found:") ||
-		strings.Contains(lower, "no such file or directory")
-}

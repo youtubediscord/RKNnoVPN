@@ -96,7 +96,7 @@ func (d *daemon) configMutationSuccess(action string, status string, reload bool
 }
 
 func (d *daemon) configMutationErrorData(action string, err error, saved bool) map[string]interface{} {
-	code := runtimeErrorCode(err, "CONFIG_APPLY_FAILED")
+	code := rootruntime.RuntimeErrorCode(err, "CONFIG_APPLY_FAILED")
 	resetReport := rootruntime.ResetReportFromError(err)
 	data := applytx.MutationErrorData(action, saved, code, err.Error(), resetReport)
 	if d.runtimeV2 != nil {

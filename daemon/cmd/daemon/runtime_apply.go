@@ -1,10 +1,7 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
@@ -29,8 +26,8 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 	oldCfg := d.cfg
 	d.mu.Unlock()
 	needsFullRestart := rootruntime.ReloadNeedsFullRestart(
-		runtimeReloadScriptEnv(oldCfg, d.dataDir),
-		runtimeReloadScriptEnv(newCfg, d.dataDir),
+		rootruntime.BuildScriptEnv(oldCfg, d.dataDir),
+		rootruntime.BuildScriptEnv(newCfg, d.dataDir),
 	)
 
 	if err := newCfg.Save(d.cfgPath); err != nil {
@@ -69,7 +66,7 @@ func (d *daemon) applyConfigWithOperation(newCfg *config.Config, reload bool, op
 	}
 	d.healthMon.SetConfig(healthInterval, healthThreshold, tproxyPort, dnsPort, routeMark, newCfg.Health.URL, newCfg.Health.DNSProbeDomains, newCfg.Health.DNSIsHardReadiness, healthTimeout)
 	if d.netWatcher != nil {
-		d.netWatcher.SetEnv(buildScriptEnv(newCfg, d.dataDir))
+		d.netWatcher.SetEnv(rootruntime.BuildScriptEnv(newCfg, d.dataDir))
 	}
 	if err := d.syncRuntimeV2DesiredState(); err != nil {
 		return fmt.Errorf("config saved: sync runtime desired state: %w", err)
@@ -112,7 +109,7 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 				return d.coreMgr.HotSwap(profile)
 			},
 			ReapplyRuntimeRules: func(cfg *config.Config) (netstack.Report, error) {
-				return rootruntime.ReapplyRuntimeRules(cfg, d.dataDir, buildScriptEnv(cfg, d.dataDir), core.ExecScript)
+				return rootruntime.ReapplyRuntimeRules(cfg, d.dataDir, rootruntime.BuildScriptEnv(cfg, d.dataDir), core.ExecScript)
 			},
 			ResetNetworkState: func(generation int64) runtimev2.ResetReport {
 				return d.resetNetworkStateReport(generation, runtimev2.BackendRootTProxy)
@@ -127,7 +124,7 @@ func (d *daemon) reloadRuntimeAfterConfigChange(cfg *config.Config, context stri
 				return d.runtimeV2.RefreshHealth()
 			},
 			RuntimeErrorCode: func(err error, fallback string) string {
-				return runtimeErrorCode(err, fallback)
+				return rootruntime.RuntimeErrorCode(err, fallback)
 			},
 			ObserveReloadReport: func(report core.RuntimeStageReport) {
 				d.setLastReloadReport(report)
@@ -146,86 +143,4 @@ func (d *daemon) LastReloadReport() core.RuntimeStageReport {
 	d.reportMu.Lock()
 	defer d.reportMu.Unlock()
 	return d.lastReloadReport
-}
-
-type runtimeCodeError interface {
-	RuntimeCode() string
-}
-
-func runtimeErrorCode(err error, fallback string) string {
-	var coded runtimeCodeError
-	if errors.As(err, &coded) {
-		if code := strings.TrimSpace(coded.RuntimeCode()); code != "" {
-			return code
-		}
-	}
-	var busy *runtimev2.OperationBusyError
-	if errors.As(err, &busy) && strings.TrimSpace(busy.Code) != "" {
-		return busy.Code
-	}
-	var netErr *netstack.Error
-	if errors.As(err, &netErr) && strings.TrimSpace(netErr.Code) != "" {
-		return netErr.Code
-	}
-	return fallback
-}
-
-func buildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
-	gid := cfg.Proxy.GID
-	if gid == 0 {
-		gid = 23333
-	}
-	mark := cfg.Proxy.Mark
-	if mark == 0 {
-		mark = 0x2023
-	}
-	tproxyPort := cfg.Proxy.TProxyPort
-	if tproxyPort == 0 {
-		tproxyPort = 10853
-	}
-	dnsPort := cfg.Proxy.DNSPort
-	if dnsPort == 0 {
-		dnsPort = 10856
-	}
-	apiPort := cfg.Proxy.APIPort
-	profileInbounds := cfg.ResolveProfileInbounds()
-	appRouting := core.BuildRuntimeAppRoutingEnv(
-		cfg.Apps.Mode,
-		cfg.Apps.Packages,
-		cfg.Routing.AlwaysDirectApps,
-		cfg.Routing.Mode,
-	)
-	chainProxyPorts, chainProxyUIDs, chainProxyRules := core.BuildChainedProxyProtectionEnv(cfg)
-
-	return map[string]string{
-		"RKNNOVPN_DIR":      dataDir,
-		"CORE_GID":          strconv.Itoa(gid),
-		"TPROXY_PORT":       strconv.Itoa(tproxyPort),
-		"DNS_PORT":          strconv.Itoa(dnsPort),
-		"API_PORT":          strconv.Itoa(apiPort),
-		"SOCKS_PORT":        strconv.Itoa(profileInbounds.SocksPort),
-		"HTTP_PORT":         strconv.Itoa(profileInbounds.HTTPPort),
-		"CHAIN_PROXY_PORTS": chainProxyPorts,
-		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
-		"CHAIN_PROXY_RULES": chainProxyRules,
-		"FWMARK":            fmt.Sprintf("0x%x", mark),
-		"ROUTE_TABLE":       "2023",
-		"ROUTE_TABLE_V6":    "2024",
-		"APP_MODE":          appRouting.AppMode,
-		"PROXY_UIDS":        appRouting.ProxyUIDs,
-		"DIRECT_UIDS":       appRouting.DirectUIDs,
-		"BYPASS_UIDS":       appRouting.BypassUIDs,
-		"DNS_SCOPE":         appRouting.DNSScope,
-		"DNS_MODE":          appRouting.DNSMode,
-		"PROXY_MODE":        "tproxy",
-		"SHARING_MODE":      cfg.SharingModeEnv(),
-		"SHARING_IFACES":    cfg.SharingInterfacesEnv(),
-	}
-}
-
-func runtimeReloadScriptEnv(cfg *config.Config, dataDir string) map[string]string {
-	if cfg == nil {
-		return nil
-	}
-	return buildScriptEnv(cfg, dataDir)
 }

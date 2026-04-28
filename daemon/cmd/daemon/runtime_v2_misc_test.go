@@ -19,7 +19,7 @@ func TestBuildScriptEnvUsesExplicitDNSScopeForBlacklist(t *testing.T) {
 	cfg.Apps.Mode = "blacklist"
 	cfg.Apps.Packages = []string{"com.example.direct"}
 
-	env := buildScriptEnv(cfg, t.TempDir())
+	env := rootruntime.BuildScriptEnv(cfg, t.TempDir())
 	if env["APP_MODE"] != "blacklist" {
 		t.Fatalf("unexpected APP_MODE: %q", env["APP_MODE"])
 	}
@@ -36,7 +36,7 @@ func TestBuildScriptEnvUsesExplicitDNSScopeForWhitelist(t *testing.T) {
 	cfg.Apps.Mode = "whitelist"
 	cfg.Apps.Packages = []string{"com.example.proxy"}
 
-	env := buildScriptEnv(cfg, t.TempDir())
+	env := rootruntime.BuildScriptEnv(cfg, t.TempDir())
 	if env["DNS_SCOPE"] != "uids" {
 		t.Fatalf("whitelist DNS must target proxied UIDs only, got %q", env["DNS_SCOPE"])
 	}
@@ -49,7 +49,7 @@ func TestBuildScriptEnvIncludesLocalHelperPorts(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Profile.Inbounds = []byte(`{"socksPort":10808,"httpPort":10809}`)
 
-	env := buildScriptEnv(cfg, t.TempDir())
+	env := rootruntime.BuildScriptEnv(cfg, t.TempDir())
 	if env["SOCKS_PORT"] != "10808" {
 		t.Fatalf("expected SOCKS_PORT=10808, got %q", env["SOCKS_PORT"])
 	}
@@ -61,7 +61,7 @@ func TestBuildScriptEnvIncludesLocalHelperPorts(t *testing.T) {
 func TestBuildScriptEnvDisablesLocalHelperPortsByDefault(t *testing.T) {
 	cfg := config.DefaultConfig()
 
-	env := buildScriptEnv(cfg, t.TempDir())
+	env := rootruntime.BuildScriptEnv(cfg, t.TempDir())
 	if env["SOCKS_PORT"] != "0" {
 		t.Fatalf("default SOCKS_PORT must stay disabled, got %q", env["SOCKS_PORT"])
 	}
@@ -94,10 +94,10 @@ func TestRuntimeErrorCodePrefersTypedNetstackCode(t *testing.T) {
 		},
 	}
 
-	if got := runtimeErrorCode(err, "fallback"); got != "DNS_APPLY_FAILED" {
+	if got := rootruntime.RuntimeErrorCode(err, "fallback"); got != "DNS_APPLY_FAILED" {
 		t.Fatalf("expected DNS_APPLY_FAILED, got %q", got)
 	}
-	if got := runtimeErrorCode(errors.New("plain"), "fallback"); got != "fallback" {
+	if got := rootruntime.RuntimeErrorCode(errors.New("plain"), "fallback"); got != "fallback" {
 		t.Fatalf("expected fallback, got %q", got)
 	}
 }

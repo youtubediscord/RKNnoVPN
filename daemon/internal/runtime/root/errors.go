@@ -2,7 +2,9 @@ package root
 
 import (
 	"errors"
+	"strings"
 
+	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
 
@@ -42,4 +44,26 @@ func ResetReportFromError(err error) *runtimev2.ResetReport {
 		return &report
 	}
 	return nil
+}
+
+type runtimeCodeError interface {
+	RuntimeCode() string
+}
+
+func RuntimeErrorCode(err error, fallback string) string {
+	var coded runtimeCodeError
+	if errors.As(err, &coded) {
+		if code := strings.TrimSpace(coded.RuntimeCode()); code != "" {
+			return code
+		}
+	}
+	var busy *runtimev2.OperationBusyError
+	if errors.As(err, &busy) && strings.TrimSpace(busy.Code) != "" {
+		return busy.Code
+	}
+	var netErr *netstack.Error
+	if errors.As(err, &netErr) && strings.TrimSpace(netErr.Code) != "" {
+		return netErr.Code
+	}
+	return fallback
 }

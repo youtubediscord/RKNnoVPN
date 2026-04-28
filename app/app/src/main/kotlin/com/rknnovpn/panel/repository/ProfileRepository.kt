@@ -468,14 +468,16 @@ class ProfileRepository @Inject constructor(
                 return null
             }
         }
+        if (preview.nodes.isEmpty() && (preview.rejected > 0 || preview.rejectedNodes.isNotEmpty())) {
+            _error.value = messages.formatRejectedSubscriptionOnly(preview.rejectedNodes, preview.rejected)
+            return null
+        }
+        if (preview.nodes.isEmpty() && preview.parseFailures > 0) {
+            _error.value = messages.get(com.rknnovpn.panel.R.string.subscription_no_supported_links)
+            return null
+        }
         if (preview.nodes.isEmpty() && preview.stale == 0) {
-            _error.value = if (preview.rejected > 0 || preview.rejectedNodes.isNotEmpty()) {
-                messages.formatRejectedSubscriptionOnly(preview.rejectedNodes, preview.rejected)
-            } else if (preview.parseFailures > 0) {
-                messages.get(com.rknnovpn.panel.R.string.subscription_no_supported_links)
-            } else {
-                messages.get(com.rknnovpn.panel.R.string.subscription_empty)
-            }
+            _error.value = messages.get(com.rknnovpn.panel.R.string.subscription_empty)
             return null
         }
 

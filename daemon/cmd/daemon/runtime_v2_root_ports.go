@@ -78,7 +78,7 @@ func (p rootRuntimePorts) ReapplyRuntimeRules() error {
 	p.d.mu.Lock()
 	cfg := p.d.cfg
 	p.d.mu.Unlock()
-	_, err := rootruntime.ReapplyRuntimeRules(cfg, p.d.dataDir, buildScriptEnv(cfg, p.d.dataDir), core.ExecScript)
+	_, err := rootruntime.ReapplyRuntimeRules(cfg, p.d.dataDir, rootruntime.BuildScriptEnv(cfg, p.d.dataDir), core.ExecScript)
 	return err
 }
 

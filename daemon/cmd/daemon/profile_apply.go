@@ -33,7 +33,7 @@ func (d *daemon) applyProfileDocument(doc profiledoc.Document, reload bool, acti
 			resultStatus = "saved_not_applied"
 			runtimeApply = "failed"
 		}
-		rpcErr.Data = profileOperation(action, resultStatus, mutation.ConfigSaved, false, runtimeApply, desiredGeneration(status, before), status.AppliedState.Generation, runtimeErrorCode(err, "PROFILE_APPLY_FAILED"), err.Error(), rootruntime.ResetReportFromError(err), warnings, updated)
+		rpcErr.Data = profileOperation(action, resultStatus, mutation.ConfigSaved, false, runtimeApply, desiredGeneration(status, before), status.AppliedState.Generation, rootruntime.RuntimeErrorCode(err, "PROFILE_APPLY_FAILED"), err.Error(), rootruntime.ResetReportFromError(err), warnings, updated)
 		return nil, rpcErr
 	}
 

@@ -31,6 +31,10 @@ func (c Controller) Run(generation int64) runtimev2.ResetReport {
 	c.runStopSubsystems(report)
 	c.runStopCore(report)
 	c.runRescueCleanupScript(report)
+	if report.HasErrors() {
+		c.runLeaveResetMode(report)
+		return report.Finish()
+	}
 	c.runClearRuntimeState(report)
 	c.runRemoveStaleRuntimeFiles(report)
 	c.runVerifyCleanup(report)
@@ -72,11 +76,7 @@ func (c Controller) runStopCore(report *ReportController) {
 
 func (c Controller) runRescueCleanupScript(report *ReportController) {
 	report.Run("rescue-cleanup-script", func() (string, string, error) {
-		err := c.Hooks.ExecRescueReset(c.Paths.RescueResetScript(), c.Hooks.ScriptEnv())
-		if IsIgnorableResetScriptError(err) {
-			return "already_clean", err.Error(), nil
-		}
-		if err != nil {
+		if err := c.Hooks.ExecRescueReset(c.Paths.RescueResetScript(), c.Hooks.ScriptEnv()); err != nil {
 			return "", "", err
 		}
 		return "ok", "", nil

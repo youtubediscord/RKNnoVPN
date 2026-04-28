@@ -213,14 +213,17 @@ func TestResetNetworkStateReportLeftoversAreWarningsAndRequireReboot(t *testing.
 	}
 }
 
-func TestResetNetworkStateReportMissingRescueScriptIsNoop(t *testing.T) {
+func TestResetNetworkStateReportMissingRescueScriptFailsWithoutGoCleanupFallback(t *testing.T) {
 	d := newTestResetDaemon(t, nil, false)
 
 	report := d.resetNetworkStateReport(10, runtimev2.BackendRootTProxy)
-	if report.Status != "ok" {
-		t.Fatalf("missing rescue script should not fail reset, got %#v", report)
+	if report.Status != "partial" {
+		t.Fatalf("missing rescue script should fail reset, got %#v", report)
 	}
-	if step := resetReportStep(report, "rescue-cleanup-script"); step.Status != "already_clean" {
-		t.Fatalf("missing rescue script should be already_clean, got %#v", step)
+	if step := resetReportStep(report, "rescue-cleanup-script"); step.Status != "failed" {
+		t.Fatalf("missing rescue script should fail rescue step, got %#v", step)
+	}
+	if step := resetReportStep(report, "remove-stale-runtime-files"); step.Name != "" {
+		t.Fatalf("missing rescue script must not fall back to Go stale cleanup, got %#v", report.Steps)
 	}
 }

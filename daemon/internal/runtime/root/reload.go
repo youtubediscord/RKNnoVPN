@@ -2,12 +2,69 @@ package root
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/config"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/core"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/netstack"
 	"github.com/youtubediscord/RKNnoVPN/daemon/internal/runtimev2"
 )
+
+func BuildScriptEnv(cfg *config.Config, dataDir string) map[string]string {
+	if cfg == nil {
+		return nil
+	}
+	gid := cfg.Proxy.GID
+	if gid == 0 {
+		gid = 23333
+	}
+	mark := cfg.Proxy.Mark
+	if mark == 0 {
+		mark = 0x2023
+	}
+	tproxyPort := cfg.Proxy.TProxyPort
+	if tproxyPort == 0 {
+		tproxyPort = 10853
+	}
+	dnsPort := cfg.Proxy.DNSPort
+	if dnsPort == 0 {
+		dnsPort = 10856
+	}
+	apiPort := cfg.Proxy.APIPort
+	profileInbounds := cfg.ResolveProfileInbounds()
+	appRouting := core.BuildRuntimeAppRoutingEnv(
+		cfg.Apps.Mode,
+		cfg.Apps.Packages,
+		cfg.Routing.AlwaysDirectApps,
+		cfg.Routing.Mode,
+	)
+	chainProxyPorts, chainProxyUIDs, chainProxyRules := core.BuildChainedProxyProtectionEnv(cfg)
+
+	return map[string]string{
+		"RKNNOVPN_DIR":      dataDir,
+		"CORE_GID":          strconv.Itoa(gid),
+		"TPROXY_PORT":       strconv.Itoa(tproxyPort),
+		"DNS_PORT":          strconv.Itoa(dnsPort),
+		"API_PORT":          strconv.Itoa(apiPort),
+		"SOCKS_PORT":        strconv.Itoa(profileInbounds.SocksPort),
+		"HTTP_PORT":         strconv.Itoa(profileInbounds.HTTPPort),
+		"CHAIN_PROXY_PORTS": chainProxyPorts,
+		"CHAIN_PROXY_UIDS":  chainProxyUIDs,
+		"CHAIN_PROXY_RULES": chainProxyRules,
+		"FWMARK":            fmt.Sprintf("0x%x", mark),
+		"ROUTE_TABLE":       "2023",
+		"ROUTE_TABLE_V6":    "2024",
+		"APP_MODE":          appRouting.AppMode,
+		"PROXY_UIDS":        appRouting.ProxyUIDs,
+		"DIRECT_UIDS":       appRouting.DirectUIDs,
+		"BYPASS_UIDS":       appRouting.BypassUIDs,
+		"DNS_SCOPE":         appRouting.DNSScope,
+		"DNS_MODE":          appRouting.DNSMode,
+		"PROXY_MODE":        "tproxy",
+		"SHARING_MODE":      cfg.SharingModeEnv(),
+		"SHARING_IFACES":    cfg.SharingInterfacesEnv(),
+	}
+}
 
 type ConfigReloadInput struct {
 	Config      *config.Config
